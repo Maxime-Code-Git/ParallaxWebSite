@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Parallax — accueil mobile</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Cormorant+Garamond:wght@400;500;600&family=Hanken+Grotesk:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0C0F17}
+a{text-decoration:none;color:#F5F6F7}
+a:hover{color:#5FB8FF}
+.hvr{transition: transform 0.18s ease}
+.hvr:hover{transform: scale(1.05)}
+a.sempra:hover{color:#E4C99A}
+</style>
+</head>
+<body>
+<div data-dc-root style="width: 100%; height: 100vh; position: relative; overflow: hidden; box-sizing: border-box; background: #0C0F17; color: #F5F6F7; font-family: 'Space Grotesk', sans-serif;" data-dc-tpl-style="width: 100%; height: 100vh; position: relative; overflow: hidden; box-sizing: border-box; background: {{ink}}; color: #F5F6F7; font-family: 'Space Grotesk', sans-serif;">
+<div id="scroll" data-dc-ref="setScrollEl" style="width: 100%; height: 100%; overflow-y: auto; box-sizing: border-box;">
+
+<header style="height: 58px; box-sizing: border-box; padding: 0 20px; display: flex; align-items: center; justify-content: space-between; border-bottom: 0.5px solid #1b2230; position: sticky; top: 0; z-index: 20; background: rgba(12,15,23,0.9); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);">
+<a href="#" style="display: inline-flex; align-items: center; gap: 8px;"><img src="assets/img/logo-parallax.png" alt="Parallax" style="height: 24px; width: auto; display: block;"><span style="font-size: 18px; font-weight: 500; letter-spacing: -0.01em; color: #F5F6F7;">Parallax</span></a>
+<div style="display: flex; align-items: center; gap: 10px;">
+<div style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px;">
+<button data-dc-on="click:toFr" style="background: none; border: none; cursor: pointer; padding: 0; font-family: 'Space Grotesk', sans-serif; font-size: 12px; color: #F5F6F7;" data-dc-tpl-style="background: none; border: none; cursor: pointer; padding: 0; font-family: 'Space Grotesk', sans-serif; font-size: 12px; color: {{ frColor }};">FR</button>
+<span style="color: #39414F;">/</span>
+<button data-dc-on="click:toEn" style="background: none; border: none; cursor: pointer; padding: 0; font-family: 'Space Grotesk', sans-serif; font-size: 12px; color: #8A92A6;" data-dc-tpl-style="background: none; border: none; cursor: pointer; padding: 0; font-family: 'Space Grotesk', sans-serif; font-size: 12px; color: {{ enColor }};">EN</button>
+</div>
+<a href="espace-client.html" class="hvr" style="display: inline-flex; align-items: center; gap: 6px; border: 0.5px solid #39414F; border-radius: 999px; padding: 7px 12px; font-size: 13px; color: #F5F6F7;">
+<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#AEB6C6" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8 11 V8 a4 4 0 0 1 8 0 v3"></path></svg>
+Espace client</a>
+<button aria-label="Ouvrir le menu" style="width: 38px; height: 38px; display: flex; align-items: center; justify-content: center; background: transparent; border: none; cursor: pointer;">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#F5F6F7" stroke-width="1.6" stroke-linecap="round"><path d="M4 7 H20"></path><path d="M4 12 H20"></path><path d="M4 17 H20"></path></svg>
+</button>
+</div>
+</header>
+
+<section style="padding: 34px 22px 8px;">
+<div style="font-size: 12px; color: #AEB6C6; letter-spacing: 0.04em; margin-bottom: 18px;">Studio photo &amp; vidéo</div>
+<h1 style="margin: 0; font-size: 46px; line-height: 0.98; font-weight: 500; letter-spacing: -0.03em; color: #F5F6F7;">Photo &amp; vidéo.</h1>
+<p style="margin: 18px 0 0; font-size: 15px; color: #AEB6C6;">Clips · Publicité · Portraits · Documentaire</p>
+</section>
+
+<section style="padding: 24px 22px 32px;">
+<div style="position: relative; width: 100%; box-sizing: border-box; aspect-ratio: 16 / 9; background: #141822; border: 0.5px solid #232B3A; border-radius: 14px; overflow: hidden; display: flex; align-items: center; justify-content: center;">
+<button aria-label="Lire le showreel" style="width: 62px; height: 62px; border-radius: 50%; background: rgba(12,15,23,0.45); border: 1.5px solid #1E9EFF; display: flex; align-items: center; justify-content: center; cursor: pointer;" data-dc-tpl-style="width: 62px; height: 62px; border-radius: 50%; background: rgba(12,15,23,0.45); border: 1.5px solid {{accent}}; display: flex; align-items: center; justify-content: center; cursor: pointer;">
+<svg width="20" height="22" viewBox="0 0 26 28" fill="none"><path d="M4 3 L23 14 L4 25 Z" fill="#F5F6F7"></path></svg>
+</button>
+<div style="position: absolute; left: 16px; bottom: 14px; font-size: 12px; color: #F5F6F7;">Showreel 2026</div>
+<div style="position: absolute; right: 16px; bottom: 14px; font-size: 11px; color: #8A92A6;">[Vidéo]</div>
+</div>
+</section>
+
+<section style="padding: 32px 22px 8px; border-top: 0.5px solid #1b2230;">
+<div style="width: 100%; box-sizing: border-box; aspect-ratio: 3 / 4; background: #141822; border: 0.5px solid #232B3A; border-radius: 14px; display: flex; align-items: flex-end; padding: 16px;"><span style="font-size: 12px; color: #8A92A6;">[Votre photo]</span></div>
+<h2 style="margin: 24px 0 12px; font-size: 28px; font-weight: 500; letter-spacing: -0.02em; color: #F5F6F7;">Maxime &amp; Ludovic</h2>
+<p style="margin: 0; font-size: 16px; line-height: 1.6; color: #AEB6C6;">Nous sommes Maxime et Ludovic, un duo photo et vidéo. Ensemble, nous réalisons clips, publicités et portraits avec la même exigence.</p>
+</section>
+
+<section style="padding: 40px 22px; border-top: 0.5px solid #1b2230;">
+<h2 style="margin: 0 0 28px; font-size: 14px; font-weight: 400; color: #AEB6C6; letter-spacing: 0.04em;">Savoir-faire</h2>
+<div style="margin-bottom: 30px;">
+<div style="font-size: 22px; font-weight: 500; color: #F5F6F7; margin-bottom: 14px;">Photo</div>
+<ul style="list-style: none; padding: 0; margin: 0; font-size: 16px; color: #AEB6C6; line-height: 2.1;">
+<li>Portrait</li>
+<li>Produit</li>
+<li>Lieu</li>
+<li>Événement</li>
+</ul>
+</div>
+<div>
+<div style="font-size: 22px; font-weight: 500; color: #F5F6F7; margin-bottom: 14px;">Vidéo</div>
+<ul style="list-style: none; padding: 0; margin: 0; font-size: 16px; color: #AEB6C6; line-height: 2.1;">
+<li>Clip musical</li>
+<li>Publicité</li>
+<li>Documentaire</li>
+<li>Réseaux sociaux — vertical &amp; horizontal</li>
+</ul>
+</div>
+</section>
+
+
+<section id="contact" style="padding: 40px 22px 40px; border-top: 0.5px solid #1b2230;">
+<h2 style="margin: 0 0 26px; font-size: 34px; font-weight: 500; letter-spacing: -0.02em; color: #F5F6F7;">Contact</h2>
+<div style="display: flex; flex-direction: column; gap: 22px; font-size: 16px;">
+<div>
+<div style="color: #8A92A6; font-size: 12px; margin-bottom: 8px;">Email</div>
+<a href="#" style="color: #1E9EFF;" data-dc-tpl-style="color: {{accent}};">[hello@2-8studio.be]</a>
+</div>
+<div>
+<div style="color: #8A92A6; font-size: 12px; margin-bottom: 8px;">Réseaux</div>
+<a href="#" style="color: #AEB6C6;">Instagram</a>
+<span style="color: #39414F;"> · </span>
+<a href="#" style="color: #AEB6C6;">YouTube</a>
+</div>
+</div>
+</section>
+
+<div style="height: 120px; background: linear-gradient(180deg, #0C0F17 0%, #072421 100%);"></div>
+
+<section id="sempra" style="padding: 16px 22px 72px; background: #072421; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 22px;">
+<div style="font-family: 'Hanken Grotesk', sans-serif; font-size: 12px; color: #B1B7AB; letter-spacing: 0.14em; text-transform: uppercase;">L'autre studio de LS studio</div>
+<img src="assets/img/img-73c121e112.png" alt="SEMPRA — studio photo &amp; vidéo de mariage" style="width: 230px; max-width: 78%; height: auto;">
+<p style="margin: 0; font-family: 'Cormorant Garamond', serif; font-size: 28px; font-weight: 500; line-height: 1.2; color: #FBF6F0;">Photographie &amp; vidéo de mariage</p>
+<a href="#" class="sempra hvr" style="display: inline-flex; align-items: center; gap: 14px; border: 0.5px solid rgba(177,183,171,0.4); border-radius: 999px; padding: 7px 7px 7px 24px; font-family: 'Hanken Grotesk', sans-serif; font-size: 16px; letter-spacing: 0.02em; color: #FBF6F0;"><span>Découvrir SEMPRA</span><span style="flex: none; width: 40px; height: 40px; border-radius: 50%; border: 0.5px solid #D2B17D; display: inline-flex; align-items: center; justify-content: center;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#FBF6F0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12 H19"></path><path d="M13 6 L19 12 L13 18"></path></svg></span></a>
+</section>
+
+<footer style="padding: 20px 22px 40px; background: #072421; border-top: 0.5px solid rgba(177,183,171,0.16); display: flex; flex-direction: column; font-family: 'Hanken Grotesk', sans-serif; font-size: 12px; color: #7E8C86;">
+<nav style="display: flex; flex-direction: column; margin-bottom: 14px;">
+<a href="mentions-legales.html" class="sempra" style="color: #B1B7AB; display: block; padding: 11px 0; font-size: 15px;">Mentions légales</a>
+<a href="confidentialite.html" class="sempra" style="color: #B1B7AB; display: block; padding: 11px 0; font-size: 15px;">Politique de confidentialité</a>
+<a href="cgv.html" class="sempra" style="color: #B1B7AB; display: block; padding: 11px 0; font-size: 15px;">CGV</a>
+<a href="cookies.html" class="sempra" style="color: #B1B7AB; display: block; padding: 11px 0; font-size: 15px;">Cookies</a>
+</nav>
+<span style="font-size: 12px; color: #7E8C86;">© 2026 LS studio — Parallax</span>
+</footer>
+
+</div>
+<button aria-label="Remonter en haut de la page" data-dc-on="click:toTop" style="position: absolute; right: 20px; bottom: 20px; width: 48px; height: 48px; border-radius: 50%; background: rgba(12,15,23,0.72); border: 0.5px solid #1E9EFF; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 10; opacity: 0; pointer-events: none; transition: opacity 0.25s ease, background 0.3s ease, border-color 0.3s ease;" data-dc-tpl-style="position: absolute; right: 20px; bottom: 20px; width: 48px; height: 48px; border-radius: 50%; background: {{ btnBg }}; border: 0.5px solid {{ btnBorder }}; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 10; opacity: {{ btnOpacity }}; pointer-events: {{ btnPointer }}; transition: opacity 0.25s ease, background 0.3s ease, border-color 0.3s ease;">
+<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#F5F6F7" data-dc-tpl-stroke="{{ btnArrow }}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19 V5"></path><path d="M5 12 L12 5 L19 12"></path></svg>
+</button>
+</div>
+<script src="assets/js/dc-lite.js"></script>
+<script>
+const DICT = {"[Votre photo]": "[Your photo]", "Nous sommes Maxime et Ludovic, un duo photo et vidéo. Ensemble, nous réalisons clips, publicités et portraits avec la même exigence.": "We are Maxime and Ludovic, a photo and video duo. Together we create music videos, commercials and portraits with the same standard.", "Portfolio": "Portfolio", "Espace client": "Client area", "Mentions légales": "Legal notice", "Politique de confidentialité": "Privacy policy", "CGV": "Terms", "Studio photo & vidéo": "Photo & video studio", "Photo & vidéo.": "Photo & video.", "Clips · Publicité · Portraits · Documentaire": "Music videos · Advertising · Portraits · Documentary", "[Photo horizontale — Maxime & toi]": "[Horizontal photo — Maxime & you]", "Maxime et [ton prénom], fondateurs de Parallax. Nous réalisons ensemble photo et vidéo — du clip à la publicité.": "Maxime and [your name], founders of Parallax. Together we create photo and video — from music videos to advertising.", "Maxime et [ton prénom] — fondateurs de Parallax. Photo et vidéo, du clip à la publicité.": "Maxime and [your name] — founders of Parallax. Photo and video, from music videos to advertising.", "Savoir-faire": "What we do", "Vidéo": "Video", "Produit": "Product", "Lieu": "Location", "Événement": "Event", "Clip musical": "Music video", "Publicité": "Advertising", "Documentaire": "Documentary", "Réseaux sociaux — vertical & horizontal": "Social media — vertical & horizontal", "Le studio": "The studio", "Parallax est le pôle création d'images de LS studio, mené par Maxime et [ton prénom]. Chaque sujet — marque, produit, lieu ou artiste — est mis en lumière avec la même exigence, de la photo au film.": "Parallax is the image-making arm of LS studio, led by Maxime and [your name]. Every subject — brand, product, location or artist — is brought to light with the same standard, from photo to film.", "Réseaux": "Social", "L'autre studio de LS studio": "The other LS studio brand", "Photographie & vidéo de mariage": "Wedding photography & video", "Découvrir SEMPRA": "Discover SEMPRA", "Parallax est le pôle création d'images de LS studio, basé en Belgique. Nous concevons et réalisons photo et vidéo pour les marques, les artistes et les lieux — du clip musical au spot publicitaire, du portrait au documentaire. Une même exigence, quel que soit le format.": "Parallax is the image-making arm of LS studio, based in Belgium. We design and produce photo and video for brands, artists and venues — from music videos to commercials, from portraits to documentary. The same standard, whatever the format.", "Qui sommes-nous": "Who we are", "[Photo — ton prénom]": "[Photo — your name]", "[Ton prénom]": "[Your name]", "Co-fondateur": "Co-founder", "Notre approche": "Our approach", "Nous travaillons en petit comité, du repérage au montage final. Chaque projet est pensé comme une image : lumière, cadre, rythme — rien de superflu.": "We work as a small team, from location scouting to the final edit. Every project is approached like a single image: light, framing, rhythm — nothing superfluous.", "Une demande, un devis, une question ? Écrivez-nous.": "A request, a quote, a question? Write to us.", "Nom": "Name", "Message": "Message", "Envoyer": "Send", "Connectez-vous pour accéder à vos photos et vidéos.": "Log in to access your photos and videos.", "Mot de passe": "Password", "Se connecter": "Log in", "Mot de passe oublié ?": "Forgot password?", "Conditions générales de vente": "Terms of sale", "Politique cookies": "Cookie policy", "Dernière mise à jour : [date]": "Last updated: [date]", "Ce contenu est un gabarit à compléter et à faire valider par un juriste avant mise en ligne.": "This content is a template to complete and have reviewed by a lawyer before publishing.", "[à compléter]": "[to complete]", "Données collectées": "Data collected", "Finalités du traitement": "Purposes of processing", "Base légale": "Legal basis", "Durée de conservation": "Retention period", "Vos droits (RGPD)": "Your rights (GDPR)", "Accès, rectification, effacement, opposition, portabilité. [à compléter]": "Access, rectification, erasure, objection, portability. [to complete]", "Objet": "Scope", "Devis et commande": "Quote and order", "Prix et paiement": "Pricing and payment", "Livraison des fichiers": "File delivery", "Droits d'auteur et cession": "Copyright and transfer", "Droit de rétractation": "Right of withdrawal", "Litiges": "Disputes", "Qu'est-ce qu'un cookie": "What is a cookie", "Cookies utilisés": "Cookies used", "Gestion et consentement": "Management and consent", "Éditeur du site": "Site publisher", "Forme juridique": "Legal form", "Siège social": "Registered office", "N° d'entreprise (BCE)": "Company number (BCE)", "N° TVA": "VAT number", "Responsable de la publication": "Publication director", "Hébergeur": "Host", "[adresse]": "[address]", "[nom]": "[name]", "[nom et adresse de l'hébergeur]": "[host name and address]"};
+const PLACE = {"Votre nom": "Your name", "Parlez-nous de votre projet": "Tell us about your project"};
+class Component extends DCLogic {
+constructor(props) {
+super(props);
+this.state = { scrolled: false, overSempra: false, lang: 'fr' };
+this._orig = new WeakMap();
+this.onScroll = () => {
+const el = this.scrollEl; if (!el) return;
+const scrolled = el.scrollTop > 60;
+let overSempra = false;
+const s = el.querySelector('#sempra');
+if (s) { const c = el.getBoundingClientRect(), r = s.getBoundingClientRect(); overSempra = r.top <= c.bottom - 90; }
+if (scrolled !== this.state.scrolled || overSempra !== this.state.overSempra) this.setState({ scrolled, overSempra });
+};
+this.setScrollEl = (el) => { if (el && this.scrollEl !== el) { this.scrollEl = el; el.addEventListener('scroll', this.onScroll); } };
+this.toTop = () => { if (this.scrollEl) this.scrollEl.scrollTo({ top: 0, behavior: 'smooth' }); };
+this.applyLang = (lang) => {
+const root = this.scrollEl; if (!root) return;
+const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+const nodes = []; let node; while (node = w.nextNode()) nodes.push(node);
+nodes.forEach((n) => {
+const t = n.nodeValue.trim(); if (!t) return;
+if (!this._orig.has(n)) { if (DICT[t] !== undefined) this._orig.set(n, n.nodeValue); else return; }
+const fr = this._orig.get(n).trim();
+n.nodeValue = (lang === 'en') ? (DICT[fr] !== undefined ? DICT[fr] : fr) : this._orig.get(n);
+});
+root.querySelectorAll('input, textarea').forEach((el) => {
+const p = el.getAttribute('placeholder'); if (p === null) return;
+if (el.__frph === undefined) { if (PLACE[p] !== undefined) el.__frph = p; else return; }
+el.setAttribute('placeholder', (lang === 'en') ? PLACE[el.__frph] : el.__frph);
+});
+};
+this.setLang = (lang) => { this.setState({ lang }); this.applyLang(lang); };
+this.toFr = () => this.setLang('fr');
+this.toEn = () => this.setLang('en');
+}
+renderVals() {
+const s = this.state.scrolled, g = this.state.overSempra, l = this.state.lang;
+return {
+accent: this.props.accent ?? '#1E9EFF', ink: this.props.ink ?? '#0C0F17',
+setScrollEl: this.setScrollEl, toTop: this.toTop,
+btnOpacity: s ? '1' : '0', btnPointer: s ? 'auto' : 'none',
+btnBorder: g ? '#D2B17D' : (this.props.accent ?? '#1E9EFF'),
+btnBg: g ? 'rgba(7,36,33,0.72)' : 'rgba(12,15,23,0.72)',
+btnArrow: g ? '#FBF6F0' : '#F5F6F7',
+toFr: this.toFr, toEn: this.toEn,
+frColor: l === 'fr' ? '#F5F6F7' : '#8A92A6',
+enColor: l === 'en' ? '#F5F6F7' : '#8A92A6'
+};
+}
+}
+DCLite.mount(Component, {"accent": "#1E9EFF", "ink": "#0C0F17"});
+</script>
+</body>
+</html>
