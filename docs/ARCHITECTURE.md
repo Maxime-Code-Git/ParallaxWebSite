@@ -18,17 +18,48 @@ ParallaxWebSite/
   apps/
     web/
       app/
+        lib/
+          admin-auth.server.ts
+          auth.server.ts
+          env.server.ts
+          rate-limit.server.ts
+          security.server.ts
+          session.server.ts
+        routes/
+          admin/
+            dashboard.module.css
+            dashboard.tsx
+            login.module.css
+            login.tsx
+            logout.tsx
+          home.module.css
+          home.tsx
+        app.css
+        entry.server.tsx
+        root.tsx
+        routes.ts
       public/
+        fonts/
+          LICENSE.txt
+          space-grotesk-latin-400-normal.woff2
+          space-grotesk-latin-500-normal.woff2
+      scripts/
+        admin-hash.js
       tests/
       package.json
       tsconfig.json
       vite.config.ts
+      vitest.config.ts
   packages/
     shared/
       src/
       package.json
       tsconfig.json
+  scripts/
+    env-loader.js
+    env-loader.d.ts
   docs/
+    ADMIN_SETUP.md
     ARCHITECTURE.md
     SEMPRA_REUSE_MAP.md
     WORKFLOW_CHATGPT_GEMINI.md
@@ -43,9 +74,10 @@ ParallaxWebSite/
   tsconfig.json
 ```
 
-- `apps/web` : Application principale sous React Router v8, React 19 et Vite 8 en mode SSR. Contient les routes, layouts, composants UI et services serveur.
+- `apps/web` : Application principale sous React Router v8, React 19 et Vite 8 en mode SSR. Contient les routes, layouts, composants UI, scripts et services serveur.
 - `packages/shared` : Package interne partage (`@parallax/shared`) reserve exclusivement aux types, schemas et validateurs purs, sans import de modules serveur (`node:*`), sans donnees sensibles et sans secrets.
-- `docs/` : Documentation technique de reference.
+- `scripts/` : Outils monorepo partages, notamment le chargeur d'environnement `env-loader.js`.
+- `docs/` : Documentation technique de reference et guides d'exploitation.
 
 ## 3. Scripts disponibles
 
@@ -55,8 +87,9 @@ Depuis la racine du monorepo :
 - `npm run build` : Compile les packages et produit les bundles client et serveur SSR pour `apps/web`.
 - `npm run typecheck` : Execute la verification statique des types TypeScript sur l'ensemble des workspaces (`apps/web` et `packages/shared`).
 - `npm run lint` : Execute ESLint sur l'ensemble du projet avec zero warning autorise.
-- `npm run test` : Execute les tests unitaires et de configuration avec Vitest.
+- `npm run test` : Execute les tests unitaires et d'integration avec Vitest.
 - `npm run start` : Demarre le serveur de production pour `apps/web`.
+- `npm run admin:hash` : Lance l'outil interactif securise de generation de hash administrateur Argon2id.
 
 ## 4. Conventions TypeScript et CSS Modules
 
@@ -71,83 +104,56 @@ Depuis la racine du monorepo :
 - Utilisation exclusive de CSS Modules pour le scoping des composants graphiques.
 - Option `localsConvention: "camelCase"` configuree dans Vite.
 - Tokens de design centralises dans `app/app.css` :
-  - Variables `--px-*` pour l'identite sombre de Parallax (fond `#0C0F17`, accent `#1E9EFF`, texte `#F5F6F7`, police Space Grotesk).
+  - Variables `--px-*` pour l'identite sombre de Parallax (fond `#0C0F17`, surface `#141822`, accent `#1E9EFF`, texte `#F5F6F7`, police Space Grotesk).
   - Variables `--sp-*` pour le bloc dedie SEMPRA (fond `#072421`, or `#D2B17D`, typographies Cormorant Garamond et Hanken Grotesk).
+- Polices d'ecriture locales : Space Grotesk 400 et 500 hebergees localement sous licence SIL Open Font License 1.1 (`/public/fonts/`). Aucun chargement externe Google Fonts a l'execution.
 - Interdiction stricte des styles inline dans le code JSX/TSX.
 
-## 5. Separation code public, serveur et tests
+## 5. Exigence de fidelite visuelle aux references
 
-- Code public et composants partages : situes dans `apps/web/app/`.
-- Code reserve au serveur : suffixe `.server.ts` ou place dans un sous-dossier `.server/` (automatiquement exclus du bundle client par le bundler React Router).
-- Code reserve au client : suffixe `.client.ts` ou `.client.tsx` (exclus du rendu initial SSR si necessaire).
-- Tests automatises :
-  - Tests unitaires et smoke tests : dans `apps/web/tests/`, executes via Vitest et jsdom.
-  - Setup de test dans `apps/web/tests/setup.ts`.
+- Les fichiers situes dans `References/parallax-site/` (`index.html`, `mobile.html`, `contact.html`, `espace-client.html`, etc.) constituent la reference visuelle et structurelle obligatoire du projet.
+- Les interfaces portees doivent reproduire fidelement la mise en page, l'ordre des sections, les espacements, les arrondis, les largeurs des cartes, les champs et les boutons issus des HTML fournis.
+- L'administration (non modelisee dans le prototype) derive ses cartes de connexion, champs et boutons directement des composants de `espace-client.html` et `contact.html` (carte 480px max, indicateur bleu 40px, bordures 0.5px, fond `#141822`, bouton accent `#1E9EFF`).
+- Le dossier `References/` demeure en lecture seule stricte dans le depot.
 
-## 6. Principe des donnees persistantes hors du depot
+## 6. Socle de securite administrateur (Lot 1)
 
-Le code applicatif et les donnees persistantes sont strictement separes :
+1. **Chargement d'environnement (`env-loader.js` et `env.server.ts`)** :
+   - Isolation absolue en test (`NODE_ENV === "test"` n'effectue aucune lecture de `.env.local`).
+   - Priorite aux variables deja definies dans le processus.
+   - Validation stricte des chemins de stockage (absolus, hors depot, permissions verifiees, rejet des liens symboliques).
+   - Validation stricte de `PUBLIC_SITE_URL` (HTTPS obligatoire en production).
+   - En l'absence de configuration administrateur valide, l'acces a `/admin` retourne une reponse 503 sans fuite d'informations.
 
-- Aucune donnee persistante, media client, base de donnees SQLite ou secret n'est committe dans Git, ni place dans `public/` ou `build/`.
-- Les chemins de persistance sont configures via des variables d'environnement externes (`.env.local` hors Git) :
-  - `SITE_CONTENT_PATH` : Emplacement externe pour le fichier JSON de contenu.
-  - `GALLERY_DB_PATH` : Emplacement externe de la base SQLite des galeries.
-  - `GALLERY_MEDIA_PATH` : Emplacement externe pour le stockage des photos et videos.
-  - `GALLERY_IMPORT_PATH` : Repertoire externe de transit pour les imports de medias.
-  - `RATE_LIMIT_DB_PATH` : Emplacement externe de la base SQLite du rate limiting.
-- En developpement comme en production, ces dossiers doivent se situer en dehors de l'arborescence du code suivi par Git.
+2. **Authentification et gestion de session (`auth.server.ts`, `session.server.ts`)** :
+   - Hachage de mot de passe par Argon2id via `@node-rs/argon2` (cout memoire 19456 Ko, temps 2 passes, parallelisme 1 thread).
+   - Invalidation automatique des sessions via `credentialVersion` basee sur HMAC-SHA256 du hash et du secret de session.
+   - Cookie de session dedie `__parallax_admin_session`, `HttpOnly`, `SameSite=Strict`, `Path=/`, `Secure` en production.
+   - Duree de vie maximale de session de 8 heures, validee cote serveur via timestamp signe (`expiresAt`), et non uniquement par le `Max-Age` du navigateur.
+   - Session anonyme temporaire pour porter le jeton CSRF de pre-connexion, transformee en session authentifiee apres validation du mot de passe.
 
-## 7. Versionnage du contenu Parallax
+3. **Protection des mutations et limitation de debit (`security.server.ts`, `rate-limit.server.ts`)** :
+   - Validation d'origine stricte (`Origin` egal a `PUBLIC_SITE_URL`).
+   - Validation CSRF en temps constant (`crypto.timingSafeEqual`).
+   - Rejet des methodes autres que POST pour les mutations (405 avec en-tete `Allow: POST`).
+   - Rejet des types de contenu differents de `application/x-www-form-urlencoded` (415).
+   - Lecture bornee en streaming des requetes a 8 KiB maximum pour l'authentification (413 Payload Too Large en cas de depassement).
+   - Rejet des champs sensibles dupliques.
+   - Limitation transactionnelle SQLite des tentatives de connexion : 5 tentatives sur fenetre glissante de 15 minutes, basee sur le hachage HMAC de l'adresse IP (aucune IP brute stockee).
+   - La deconnexion est protegee par CSRF et Origin mais n'est pas bloquee par le quota de tentatives de connexion.
 
-- Le contenu Parallax demarre directement et exclusivement en version 1 (`schemaVersion: 1`).
-- Aucune dette technique liee aux versions anterieures ou aux schemas historiques de Sempra n'est importee.
-- Toute evolution future fera l'objet d'un lot specifique avec migration explicite.
+4. **En-tetes de securite et CSP SSR (`entry.server.tsx`)** :
+   - Nonce cryptographique 16 octets regenere a chaque requete SSR.
+   - Content-Security-Policy stricte en production : aucun `unsafe-inline`, aucun `unsafe-eval`, `object-src 'none'`, `frame-ancestors 'none'`, `base-uri 'self'`, `form-action 'self'`.
+   - Reponses d'administration (y compris erreurs et redirections) protegees par `Cache-Control: no-store` et `X-Robots-Tag: noindex, nofollow`.
 
-## 8. Proposition de cartographie des routes (a valider lot par lot)
+## 7. Cartographie des routes livrees (Lot 1)
 
-Cette arborescence represente une proposition architecturale pour les lots futurs et n'est pas encore implementee :
-
-- Routes publiques francaises :
-  - `/fr` : Accueil
-  - `/fr/projets` : Portfolio (rubriques Documentaire, Publicite et realisations)
-  - `/fr/studio` : Presentation du studio et des fondateurs
-  - `/fr/contact` : Formulaire de demande de projet
-  - `/fr/espace-client` : Saisie du code d'acces galerie unique
-  - `/fr/galerie/:id` : Consultation et telechargement de galerie privee
-  - `/fr/mentions-legales`, `/fr/confidentialite`, `/fr/cgv`, `/fr/cookies` : Pages legales
-- Routes publiques anglaises :
-  - Miroir sous le prefixe `/en/` (`/en/projects`, `/en/studio`, `/en/contact`, `/en/client-area`, `/en/gallery/:id`, `/en/legal`, etc.)
+- Routes publiques :
+  - `/` : Page d'accueil technique de demarrage.
 - Routes d'administration :
-  - `/admin` : Connexion
-  - `/admin/portfolio` : Gestion des realisations et medias
-  - `/admin/galleries` : Gestion des galeries clients et generation des codes
-  - `/admin/legal` : Edition et publication des textes juridiques
-  - `/admin/settings` : Configuration generale
-
-## 9. Differences connues entre les documents de reference
-
-Pour lever toute ambiguite lors des developpements futurs :
-
-1. **Espace client et galerie** :
-   - Le guide PDF mentionnait un couple e-mail / mot de passe.
-   - **Regle retenue** : Le prototype actuel et le contexte fonctionnel exigent **un seul champ code d'acces** par galerie client. Aucun compte utilisateur classique avec mot de passe n'est requis.
-2. **Typographies et styles** :
-   - Le prototype HTML utilisait Google Fonts et des styles inline.
-   - **Regle retenue** : En production, les polices doivent etre hebergees localement sous licence et les styles inline doivent etre remplaces par des CSS Modules.
-3. **Mise en page mobile** :
-   - Le prototype fournissait une page separee `mobile.html`.
-   - **Regle retenue** : Fusionner la mise en page dans une interface responsive unique via media queries CSS.
-4. **Portfolio et panneau lateral** :
-   - Le prototype affiche deux rubriques visibles : Documentaire et Publicite.
-   - **Regle retenue** : Distinguer clairement les rubriques structurelles des realisations (projets). Le portfolio n'est pas limite a deux projets fixes mais supporte plusieurs realisations par rubrique.
-   - **Direction du panneau lateral** :
-     - Si la vignette cliquee est a gauche => entree depuis la droite.
-     - Si la vignette cliquee est a droite => entree depuis la gauche.
-     - Fermeture du panneau vers le cote d'origine d'entree.
-   - Les aspects avances (routes localisees, lien direct, historique, touche Escape, piege a focus, blocage du scroll arriere-plan, prefers-reduced-motion) seront traites dans le lot portfolio dedie.
-5. **Informations manquantes a fournir ulterieurement** :
-   - Coordonnees reelles (e-mail, telephone, adresse du studio) ;
-   - Donnees d'immatriculation (numero BCE, TVA) ;
-   - Liens des reseaux sociaux officiels (Instagram, YouTube) ;
-   - Fichiers medias sources defintifs (photos et video showreel HD).
-   Ces informations seront injectees lors des lots correspondants sans bloquer le socle actuel.
+  - `GET /admin` : Page de connexion si anonyme ; redirection 303 vers `/admin/dashboard` si deja connecte.
+  - `POST /admin` : Traitement de la connexion administrateur.
+  - `GET /admin/dashboard` : Tableau de bord securise presentant les 8 modules a venir.
+  - `POST /admin/logout` : Deconnexion securisee avec CSRF et destruction de la session.
+  - `GET /admin/logout` : Rejet 405 Method Not Allowed avec en-tete `Allow: POST`.
