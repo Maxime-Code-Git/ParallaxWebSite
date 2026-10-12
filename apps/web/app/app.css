@@ -1,0 +1,49 @@
+:root {
+  /* Parallax tokens */
+  --px-ink: #0C0F17;
+  --px-surface: #141822;
+  --px-surface-img: #10141D;
+  --px-media: #090B13;
+  --px-text: #F5F6F7;
+  --px-text-lead: #C7CED9;
+  --px-text-2: #AEB6C6;
+  --px-text-3: #8A92A6;
+  --px-subtle: #39414F;
+  --px-border: #232B3A;
+  --px-border-input: #2A313F;
+  --px-line: #1B2230;
+  --px-accent: #1E9EFF;
+  --px-accent-hover: #5FB8FF;
+  --px-header-bg: rgba(12, 15, 23, 0.9);
+  --px-overlay: rgba(12, 15, 23, 0.72);
+
+  /* SEMPRA section tokens */
+  --sp-green: #072421;
+  --sp-cream: #FBF6F0;
+  --sp-gold: #D2B17D;
+  --sp-gold-hover: #E4C99A;
+  --sp-sage: #B1B7AB;
+  --sp-sage-dark: #7E8C86;
+  --sp-border: rgba(177, 183, 171, 0.4);
+  --sp-line: rgba(177, 183, 171, 0.16);
+  --sp-overlay: rgba(7, 36, 33, 0.72);
+  --px-to-sp: linear-gradient(180deg, #0C0F17 0%, #072421 100%);
+
+  /* Typography */
+  --font-parallax: 'Space Grotesk', sans-serif;
+  --font-sp-display: 'Cormorant Garamond', serif;
+  --font-sp-text: 'Hanken Grotesk', sans-serif;
+
+  /* Radii */
+  --r-pill: 999px;
+  --r-card: 18px;
+  --r-media: 16px;
+  --r-input: 8px;
+}
+
+body {
+  margin: 0;
+  background: var(--px-ink);
+  color: var(--px-text);
+  font-family: var(--font-parallax);
+}
