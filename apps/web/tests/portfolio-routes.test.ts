@@ -98,15 +98,33 @@ describe("Portfolio Localized Routing & Directional Panels (Lot 3)", () => {
     it("loader preserves direction passed via ?dir= query parameter", async () => {
       // Documentary with ?dir=left
       const reqLeft = new Request("http://localhost:3000/fr/projets/documentaire?dir=left");
-      const resLeft = await publicPortfolioLoader(makeLoaderArgs(reqLeft));
+      const resLeft = await publicPortfolioLoader(makeLoaderArgs(reqLeft, { rubrique: "documentaire" }));
       const dataLeft = (await resLeft.json()) as { panelState: { direction: string } };
       expect(dataLeft.panelState.direction).toBe("left");
 
       // Advertising with ?dir=right
       const reqRight = new Request("http://localhost:3000/en/projects/advertising?dir=right");
-      const resRight = await publicPortfolioLoader(makeLoaderArgs(reqRight));
+      const resRight = await publicPortfolioLoader(makeLoaderArgs(reqRight, { category: "advertising" }));
       const dataRight = (await resRight.json()) as { panelState: { direction: string } };
       expect(dataRight.panelState.direction).toBe("right");
+    });
+
+    it.each([
+      { path: "/fr/projets/documentaire", params: { rubrique: "documentaire" }, category: "documentary", direction: "right" },
+      { path: "/fr/projets/publicite", params: { rubrique: "publicite" }, category: "advertising", direction: "left" },
+      { path: "/en/projects/documentary", params: { category: "documentary" }, category: "documentary", direction: "right" },
+      { path: "/en/projects/advertising", params: { category: "advertising" }, category: "advertising", direction: "left" },
+    ])("returns the same section for document and .data navigation: $path", async ({ path: sectionPath, params, category, direction }) => {
+      const routeParams: Record<string, string> = {};
+      if (params.rubrique) routeParams.rubrique = params.rubrique;
+      if (params.category) routeParams.category = params.category;
+      for (const suffix of ["", ".data"]) {
+        const request = new Request(`http://localhost:3000${sectionPath}${suffix}?dir=${direction}`);
+        const response = await publicPortfolioLoader(makeLoaderArgs(request, routeParams));
+        expect(response.status).toBe(200);
+        const data = await response.json() as { panelState: { isOpen: boolean; activeCategory: string; activeProject: unknown; direction: string } };
+        expect(data.panelState).toEqual({ isOpen: true, activeCategory: category, activeProject: null, direction });
+      }
     });
 
     it("strictly enforces localized category allowlist (throws 404 for unknown or incoherent category)", async () => {
@@ -124,10 +142,9 @@ describe("Portfolio Localized Routing & Directional Panels (Lot 3)", () => {
 
       // Unknown section URL directly
       const reqUnknownSec = new Request("http://localhost:3000/fr/projets/inconnue");
-      const resUnknownSec = await publicPortfolioLoader(makeLoaderArgs(reqUnknownSec));
-      const dataUnknownSec = (await resUnknownSec.json()) as { panelState: { isOpen: boolean } };
-      // Not a recognized section, so panel stays closed (overview)
-      expect(dataUnknownSec.panelState.isOpen).toBe(false);
+      await expect(
+        publicPortfolioLoader(makeLoaderArgs(reqUnknownSec, { rubrique: "inconnue" }))
+      ).rejects.toSatisfy((res: Response) => res.status === 404);
     });
   });
 

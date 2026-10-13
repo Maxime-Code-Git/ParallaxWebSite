@@ -301,7 +301,7 @@ describe("Portfolio Lifecycle & Cross-Storage Segregation (Lot 3)", () => {
   it("Step 4 & 5: tests direct section URL access, SSR consistency and FR/EN alternates with direction preservation", async () => {
     // Documentary section route
     const docReq = new Request("http://localhost:3000/fr/projets/documentaire");
-    const docRes = await portfolioPublicLoader(makeLoaderArgs(docReq));
+    const docRes = await portfolioPublicLoader(makeLoaderArgs(docReq, { rubrique: "documentaire" }));
     const docData = (await docRes.json()) as {
       lang: string;
       panelState: { isOpen: boolean; activeCategory: string; direction: string };
@@ -318,7 +318,7 @@ describe("Portfolio Lifecycle & Cross-Storage Segregation (Lot 3)", () => {
 
     // Advertising section route
     const pubReq = new Request("http://localhost:3000/en/projects/advertising");
-    const pubRes = await portfolioPublicLoader(makeLoaderArgs(pubReq));
+    const pubRes = await portfolioPublicLoader(makeLoaderArgs(pubReq, { category: "advertising" }));
     const pubData = (await pubRes.json()) as {
       lang: string;
       panelState: { isOpen: boolean; activeCategory: string; direction: string };

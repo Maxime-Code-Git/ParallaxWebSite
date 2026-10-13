@@ -89,20 +89,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const { content, publicProjects } = getPublicPortfolioContent();
   const common = getSiteContent().common;
 
-  // Determine section or project route from URL params & pathname
+  // Use route params: client navigations keep the .data suffix in request.url.
   let activeCategory: PortfolioCategory | null = null;
   let activeProject: PortfolioProject | null = null;
 
-  const isDocuSection =
-    pathname === "/fr/projets/documentaire" || pathname === "/en/projects/documentary";
-  const isPubSection =
-    pathname === "/fr/projets/publicite" || pathname === "/en/projects/advertising";
-
-  if (isDocuSection) {
-    activeCategory = "documentary";
-  } else if (isPubSection) {
-    activeCategory = "advertising";
-  } else if (params.rubrique || params.category) {
+  if (params.rubrique || params.category) {
     let cat: PortfolioCategory | null = null;
     if (lang === "fr") {
       const raw = (params.rubrique || "").toLowerCase();
@@ -117,15 +108,15 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     }
 
     const slug = lang === "fr" ? params.slugFr : params.slugEn;
-    if (!slug) throw new Response("Slug manquant", { status: 404 });
-
-    const found = publicProjects.find(
-      (p) => (lang === "fr" ? p.slugFr === slug : p.slugEn === slug) && p.category === cat
-    );
-    if (!found) {
-      throw new Response("Projet introuvable", { status: 404 });
+    if (slug) {
+      const found = publicProjects.find(
+        (p) => (lang === "fr" ? p.slugFr === slug : p.slugEn === slug) && p.category === cat
+      );
+      if (!found) {
+        throw new Response("Projet introuvable", { status: 404 });
+      }
+      activeProject = found;
     }
-    activeProject = found;
     activeCategory = cat;
   }
 
@@ -280,9 +271,6 @@ export default function PortfolioPage() {
         const timer = setTimeout(() => {
           setPhase("closed");
           document.body.classList.remove(styles.bodyScrollLocked);
-          if (triggerRef.current) {
-            triggerRef.current.focus();
-          }
         }, delay);
         return () => clearTimeout(timer);
       } else {
@@ -291,6 +279,13 @@ export default function PortfolioPage() {
       }
     }
   }, [panelState.isOpen, panelState.direction, location.pathname, isReducedMotion]);
+
+  // Restore focus after React has removed inert from the trigger's ancestors.
+  useEffect(() => {
+    if (phase === "closed" && triggerRef.current?.isConnected) {
+      triggerRef.current.focus();
+    }
+  }, [phase]);
 
   // Handle ESC key (with priority to VideoModal)
   useEffect(() => {
@@ -347,9 +342,6 @@ export default function PortfolioPage() {
       setPhase("closed");
       document.body.classList.remove(styles.bodyScrollLocked);
       navigate(getPortfolioOverviewUrl(lang), { replace: false });
-      if (triggerRef.current) {
-        triggerRef.current.focus();
-      }
     }, delay);
   }
 
