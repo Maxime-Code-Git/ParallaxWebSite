@@ -1,0 +1,194 @@
+.header {
+  height: 88px;
+  box-sizing: border-box;
+  padding: 0 80px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 0.5px solid var(--px-line);
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: var(--px-header-bg);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--px-text);
+  text-decoration: none;
+}
+
+.logo {
+  height: 30px;
+  width: auto;
+  display: block;
+}
+
+.brandName {
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--px-text);
+}
+
+.nav {
+  display: flex;
+  gap: 36px;
+  align-items: center;
+  font-size: 15px;
+}
+
+.navLink {
+  color: var(--px-text-2);
+  text-decoration: none;
+  transition: color 0.18s ease;
+}
+
+.navLink:hover {
+  color: var(--px-accent-hover);
+}
+
+.navLinkActive {
+  color: var(--px-text);
+}
+
+.langSwitch {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+}
+
+.langButton {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  font-family: var(--font-parallax);
+  font-size: 13px;
+  text-decoration: none;
+  transition: color 0.18s ease;
+}
+
+.langButtonActive {
+  color: var(--px-text);
+  font-weight: 500;
+}
+
+.langButtonInactive {
+  color: var(--px-text-3);
+}
+
+.langButtonInactive:hover {
+  color: var(--px-text-2);
+}
+
+.langDivider {
+  color: var(--px-subtle);
+}
+
+.clientAreaButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 0.5px solid var(--px-subtle);
+  border-radius: var(--r-pill);
+  padding: 9px 18px;
+  font-size: 14px;
+  color: var(--px-text);
+  text-decoration: none;
+  transition: transform 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+}
+
+.clientAreaButton:hover {
+  transform: scale(1.05);
+  border-color: var(--px-accent);
+  color: var(--px-text);
+}
+
+.burgerButton {
+  display: none;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 8px;
+  color: var(--px-text);
+  align-items: center;
+  justify-content: center;
+}
+
+.mobileMenu {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .header {
+    height: 58px;
+    padding: 0 20px;
+  }
+
+  .logo {
+    height: 24px;
+  }
+
+  .brandName {
+    font-size: 18px;
+  }
+
+  .navLinksDesktop {
+    display: none;
+  }
+
+  .burgerButton {
+    display: flex;
+  }
+
+  .clientAreaButton {
+    padding: 7px 12px;
+    font-size: 13px;
+    gap: 6px;
+  }
+
+  .langSwitch {
+    font-size: 12px;
+    gap: 6px;
+  }
+
+  .langButton {
+    font-size: 12px;
+  }
+
+  .mobileMenuOpen {
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    top: 58px;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(12, 15, 23, 0.98);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    padding: 32px 24px;
+    gap: 24px;
+    z-index: 49;
+    border-top: 0.5px solid var(--px-line);
+  }
+
+  .mobileNavLink {
+    font-size: 20px;
+    font-weight: 500;
+    color: var(--px-text);
+    padding: 12px 0;
+    border-bottom: 0.5px solid var(--px-border);
+    text-decoration: none;
+  }
+
+  .mobileNavLink:hover {
+    color: var(--px-accent-hover);
+  }
+}

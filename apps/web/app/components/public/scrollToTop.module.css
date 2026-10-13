@@ -1,0 +1,46 @@
+.btn {
+  position: fixed;
+  right: 32px;
+  bottom: 32px;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: rgba(12, 15, 23, 0.72);
+  border: 0.5px solid var(--px-accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 40;
+  transition: opacity 0.25s ease, background 0.3s ease, border-color 0.3s ease, transform 0.18s ease;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.btn:hover {
+  transform: scale(1.08);
+}
+
+.btnSempra {
+  background: rgba(7, 36, 33, 0.72);
+  border-color: var(--sp-gold);
+}
+
+.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+@media (max-width: 900px) {
+  .btn {
+    right: 20px;
+    bottom: 20px;
+    width: 48px;
+    height: 48px;
+  }
+}
