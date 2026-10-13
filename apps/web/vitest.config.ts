@@ -14,8 +14,6 @@ export default defineConfig({
         "../../packages/shared/src/index.ts"
       ),
       "~": path.resolve(__dirname, "app"),
-      react: path.resolve(__dirname, "node_modules/react"),
-      "react-dom": path.resolve(__dirname, "node_modules/react-dom"),
     },
     dedupe: ["react", "react-dom", "react-router"],
   },
