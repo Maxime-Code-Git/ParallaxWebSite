@@ -203,5 +203,43 @@ describe("Environment Validation (env.server.ts)", () => {
         );
       });
     });
+
+    it("validates valid SITE_MEDIA_PATH when provided to validate-startup.js", async () => {
+      const validDir = fs.realpathSync(os.tmpdir());
+      const validDbPath = path.join(validDir, `startup-test-media-${Date.now()}.sqlite`);
+      const validContentPath = path.join(validDir, `startup-content-test-media-${Date.now()}.json`);
+      const validMediaPath = path.join(validDir, `startup-media-dir-${Date.now()}`);
+      fs.mkdirSync(validMediaPath, { recursive: true, mode: 0o700 });
+
+      await new Promise<void>((resolve, reject) => {
+        execFile(
+          "node",
+          [scriptPath],
+          {
+            env: {
+              PATH: process.env.PATH,
+              NODE_ENV: "production",
+              PUBLIC_SITE_URL: "https://parallax.example.com",
+              ADMIN_PASSWORD_HASH: "$argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHQ$c29tZWhhc2g",
+              ADMIN_SESSION_SECRET: "valid-session-secret-min-32-chars-long!",
+              RATE_LIMIT_SECRET: "valid-ratelimit-secret-min-32-chars-long!",
+              RATE_LIMIT_DB_PATH: validDbPath,
+              SITE_CONTENT_PATH: validContentPath,
+              SITE_MEDIA_PATH: validMediaPath,
+              TRUST_PROXY: "false",
+            },
+          },
+          (error, stdout) => {
+            try {
+              expect(error).toBeNull();
+              expect(stdout).toContain("Configuration de demarrage valide avec succes");
+              resolve();
+            } catch (err) {
+              reject(err);
+            }
+          }
+        );
+      });
+    });
   });
 });
