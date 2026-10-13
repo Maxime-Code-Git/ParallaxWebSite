@@ -14,7 +14,7 @@ Ce document inventorie formellement les briques techniques de référence du pro
 | **Outil de hachage CLI** | `scripts/admin-hash.js` | **Porté et adapté** | **Lot 1 & 1 bis** (`apps/web/scripts/admin-hash.js`) |
 | **Schéma éditorial & Persistance atomique** | `site-content.server.ts`, `atomic-fs.server.ts` | **Porté et adapté** | **Lot 2** (`apps/web/app/lib/site-content.server.ts`, `site-content.shared.ts`, `atomic-fs.server.ts`) |
 | **Pipeline d'import d'images de site (Lot 2 bis)** | `api.admin.home-image.ts`, `home-media.server.ts`, `portfolio-image.server.ts`, `media.home.*.tsx`, `ImageUploader.tsx` | **Porté et adapté** | **Lot 2 bis** (`apps/web/app/lib/media-image.server.ts`, `routes/media/site-variant.ts`, `routes/api/admin-media-upload.ts`, `ImageUploader.tsx`) |
-| **Portfolio & Médias publics** | `portfolio-content.server.ts`, `portfolio-media.server.ts` | **Différé** | Lot 3 (Portfolio & vitrine) |
+| **Portfolio & Médias publics (Lot 3)** | `portfolio-content.server.ts`, `portfolio-image.server.ts`, `portfolio-media.server.ts`, `portfolio-transaction.server.ts`, `admin.portfolio.tsx`, `admin.portfolio.upload.tsx`, `PortfolioPage.tsx` | **Porté et adapté** | **Lot 3** (`apps/web/app/lib/portfolio-content.shared.ts`, `portfolio-content.server.ts`, `routes/admin/portfolio.tsx`, `routes/admin/portfolio-edit.tsx`, `routes/admin/portfolio-section.tsx`, `routes/public/portfolio.tsx`, `routes/api/admin-portfolio-upload.ts`, `routes/media/portfolio-variant.ts`) |
 | **Galeries privées & Téléchargements ZIP** | `gallery-*.server.ts`, code unique | **Différé** | Lot 4 (Espace client & galeries) |
 | **Previews WebP / Sharp** | `gallery-preview.server.ts`, `portfolio-image.server.ts` | **Différé** | Lot 4 / Lot 3 |
 | **Suppression & Rétention RGPD** | `gallery-deletion-worker.server.ts` | **Différé** | Lot 5 |
@@ -175,38 +175,47 @@ Ce document inventorie formellement les briques techniques de référence du pro
 
 ---
 
-## 4. Portfolio et medias publics
+## 4. Portfolio et medias publics (Lot 3)
 
 1. **Fichiers consultes (commit Sempra `89bfee31ae5d477f71c95e83a0d55305521f426f`)** :
-   - `apps/web/app/lib/portfolio-content.server.ts`
-   - `apps/web/app/lib/portfolio-image.server.ts`
-   - `apps/web/app/lib/portfolio-media.server.ts`
-   - `apps/web/app/lib/portfolio-transaction.server.ts`
-   - `apps/web/app/routes/portfolio.media.$photoId.$variant.tsx`
+   - `apps/web/app/lib/portfolio-content.server.ts` : validation Zod V2, révisions, sauvegardes atomiques, slugs uniques, ordre et filtrage public.
+   - `apps/web/app/lib/portfolio-image.server.ts`, `portfolio-media.server.ts` et `portfolio-transaction.server.ts` : traitement des variantes, distribution et coordination fichiers/métadonnées.
+   - `apps/web/app/routes/admin.portfolio.tsx` et `admin.portfolio.upload.tsx` : administration et upload.
+   - `apps/web/app/routes/PortfolioPage.tsx`, `fr.portfolio.tsx` et `en.portfolio.tsx` : filtrage public, rendu responsive et consentement vidéo.
 
 2. **Fonctions, types et comportements observes** :
-   - `getPortfolioContent()`, `savePortfolio()`, `assertPortfolioRevision()` : gestion de l'arborescence des categories et photos avec validation de schema V2 (ici valide via Zod `portfolioSchemaV2`).
-   - `generateSlug()`, `generateUniqueSlug()` : generation d'identifiants URL uniques.
-   - `portfolio-media.server.ts` : streaming securise avec controle des chemins, types MIME et en-tetes HTTP de cache (`Cache-Control: public, max-age=31536000, immutable`).
-   - `portfolio-image.server.ts` : traitement des variantes d'images avec application eventuelle de watermark et extraction de metadonnees.
-   - `portfolio-transaction.server.ts` : coordination transactionnelle entre ecriture disque et mise a jour des metadonnees.
+   - `getPortfolioContent()`, `savePortfolio()`, révision aléatoire et rotation des backups physiques.
+   - Slugs uniques dans l'espace de noms des rubriques.
+   - Streaming sécurisé avec contrôle d'accès, types MIME, `O_NOFOLLOW` et en-têtes HTTP immuables (`Cache-Control: public, max-age=31536000, immutable`).
+   - `ConcurrencyLimiter(2)` bornant les traitements Sharp simultanés.
+   - Traitement par lot côté client avec file séquentielle d'upload.
 
 3. **Choix** :
-   - **Différé au Lot 3 (Portfolio & vitrine)**.
+   - **Porté et adapté au Lot 3** :
+     - Modèle éditorial : `apps/web/app/lib/portfolio-content.shared.ts`, `apps/web/app/lib/portfolio-content.server.ts`.
+     - Administration : `apps/web/app/routes/admin/portfolio.tsx`, `apps/web/app/routes/admin/portfolio-edit.tsx`, `apps/web/app/routes/admin/portfolio-section.tsx`.
+     - Upload & Médias : `apps/web/app/routes/api/admin-portfolio-upload.ts`, `apps/web/app/routes/media/portfolio-variant.ts`, `apps/web/app/routes/admin/portfolio-media.ts`.
+     - Vitrine publique & panneaux : `apps/web/app/routes/public/portfolio.tsx`, `apps/web/app/components/public/ResponsivePortfolioImage.tsx`, `apps/web/app/lib/localized-urls.ts`.
 
-4. **Adaptations Parallax** :
-   - Deux rubriques structurelles distinctes : Documentaire et Publicite.
-   - Distinction claire entre les rubriques et les realisations (projets multiples au sein de chaque rubrique).
-   - Panneau lateral d'ouverture dynamique : entree depuis la droite si miniature cliquee a gauche, entree depuis la gauche si miniature cliquee a droite, fermeture vers le bord d'origine.
-   - Suppression du moteur de filigrane (watermark) Sempra.
-   - Stockage persistant externe via `PORTFOLIO_CONTENT_PATH` et `PORTFOLIO_MEDIA_PATH`.
+4. **Adaptations et durcissements Parallax** :
+   - **Modèle de réalisations Parallax (schemaVersion 1)** : remplacement du catalogue de photos individuelles Sempra par des réalisations structurées (titre, résumé, blocs de contenu typés, SEO, galerie d'images ordonnée, vidéo YouTube/Vimeo avec couverture dédiée, side auto/left/right, ordre, statut brouillon/publié, archivage).
+   - **Deux rubriques structurelles stables** : `documentary` (Documentaire / Documentary) et `advertising` (Publicité / Advertising) administrables (titre, intro, couverture, showreel vidéo, boutons) sans possibilité de suppression des identifiants métier.
+   - **Panneau coulissant directionnel unique** : transition 500ms `cubic-bezier(0.7, 0, 0.2, 1)`, formule déterministe obligatoire `const panelDirection = imageSide === "left" ? "right" : "left"` garantissant l'ouverture depuis la droite si l'image est à gauche et depuis la gauche si l'image est à droite (permettant deux directions distinctes pour la rubrique Publicité selon la rangée cliquée). Navigation entre rubrique et fiche réalisation dans le même panneau sans modales empilées.
+   - **Séparation stricte des stockages** : variables `PORTFOLIO_CONTENT_PATH` et `PORTFOLIO_MEDIA_PATH` séparées de `SITE_CONTENT_PATH` et `SITE_MEDIA_PATH`. Le nettoyage d'un sous-système ne parcourt ni ne supprime jamais les fichiers de l'autre.
+   - **Pipeline d'import d'images de portfolio** : réutilisation de `verifySecurePathChain`, `atomicWriteJson` et partage du `ConcurrencyLimiter(2)` Sharp avec `SITE_MEDIA_PATH`. Saturation 503 avec `Retry-After: 2`. File séquentielle bornée côté client avec rafraîchissement de la révision serveur à chaque étape et préservation des textes/sélections en cas d'upload ou de 409.
+   - **Rétention bornée et rotation réelle** : 5 vrais backups physiques conservés, détection des orphelins excluant les images référencées par les sauvegardes valides et report sécurisé de purge si une sauvegarde est illisible.
+   - **Diffusion sécurisée** : contrôle strict que l'image demandée est référencée par un projet effectivement publié ou une rubrique publique. Les brouillons ne sont consultables que via la route d'aperçu d'administration authentifiée.
+   - **SEO, hreflang et header partagé** : routes localisées `/fr/projets`, `/fr/projets/documentaire`, `/fr/projets/publicite`, `/fr/projets/:rubrique/:slugFr` et équivalents `/en/projects/*` avec balises canoniques, hreflang et synchronisation de la langue préservant la réalisation active.
 
-5. **Tests Sempra pertinents** :
-   - `apps/web/tests/portfolio-content.server.test.ts`
-   - `apps/web/tests/portfolio-media.test.ts`
+5. **Tests Parallax utiles** :
+   - `apps/web/tests/portfolio-content.test.ts`
+   - `apps/web/tests/portfolio-routes.test.ts`
+   - `apps/web/tests/video.test.ts`
+   - `apps/web/tests/env.server.test.ts`
 
-6. **Elements non verifies** :
-   - Comportement des transitions CSS sous charge reseau lente.
+6. **Éléments non vérifiés** :
+   - Navigateurs mobiles WebKit anciens (< iOS 15) pour les animations complexes de backdrop-filter.
+
 
 ---
 

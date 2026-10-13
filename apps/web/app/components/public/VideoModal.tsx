@@ -67,8 +67,17 @@ export function VideoModal({ isOpen, onClose, videoUrl, lang }: VideoModalProps)
   useEffect(() => {
     if (!isOpen) {
       setConsented(false);
+      return;
     }
-  }, [isOpen]);
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        onClose();
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 

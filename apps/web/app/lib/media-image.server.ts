@@ -10,6 +10,13 @@ import {
   type UploadedMediaMetadata,
   type SiteContent,
 } from "./site-content.shared";
+import {
+  type PortfolioMediaItem,
+  type PortfolioMediaOwnerType,
+  type PortfolioMediaSlot,
+  type PortfolioVariantName,
+  type PortfolioMediaVariant,
+} from "./portfolio-content.shared";
 import { getBackups } from "./atomic-fs.server";
 
 export class SafeImageError extends Error {
@@ -708,4 +715,210 @@ export function cleanupUnreferencedMedia(
     return { cleaned: [] };
   }
 }
+
+export interface ProcessedPortfolioMediaWithStaging extends PortfolioMediaItem {
+  stagingDir: string;
+}
+
+export async function processPortfolioMediaImage(
+  tempFilePath: string,
+  allowedTempDir: string,
+  ownerType: PortfolioMediaOwnerType,
+  ownerId: string,
+  mediaSlot: PortfolioMediaSlot,
+  mediaBasePath: string
+): Promise<ProcessedPortfolioMediaWithStaging> {
+  return imageProcessingLimiter.run(async () => {
+    const { width: originalWidth, height: originalHeight, format: originalFormat } =
+      await validateImageFile(tempFilePath, allowedTempDir);
+
+    const imageId = crypto.randomUUID();
+    const createdFiles: string[] = [];
+    const createdDirs: string[] = [];
+
+    const resolvedMediaBasePath = path.resolve(mediaBasePath);
+    ensureStrictDirectoryCreated(resolvedMediaBasePath, path.resolve(resolvedMediaBasePath, ".."));
+
+    const stagingBaseDir = path.resolve(resolvedMediaBasePath, "staging");
+    const stagingDir = path.resolve(stagingBaseDir, imageId);
+
+    try {
+      for (const dir of [stagingBaseDir, stagingDir]) {
+        ensureStrictDirectoryCreated(dir, resolvedMediaBasePath);
+        createdDirs.push(dir);
+      }
+
+      const variants: PortfolioMediaVariant[] = [];
+
+      for (const breakpoint of VARIANT_BREAKPOINTS) {
+        if (originalWidth <= breakpoint.maxWidth && originalHeight <= breakpoint.maxWidth) {
+          if (variants.length > 0) {
+            continue;
+          }
+        }
+
+        const isLandscape = originalWidth >= originalHeight;
+        let targetWidth: number | undefined;
+        let targetHeight: number | undefined;
+
+        if (isLandscape) {
+          targetWidth = Math.min(breakpoint.maxWidth, originalWidth);
+        } else {
+          targetHeight = Math.min(breakpoint.maxWidth, originalHeight);
+        }
+
+        const basePipeline = sharp(tempFilePath, { limitInputPixels: MAX_PIXELS })
+          .rotate()
+          .resize(targetWidth, targetHeight, {
+            fit: "inside",
+            withoutEnlargement: true,
+          })
+          .toColorspace("srgb");
+
+        const webpBuffer = await basePipeline
+          .clone()
+          .webp({ quality: WEBP_QUALITY, effort: 4 })
+          .toBuffer();
+
+        const avifBuffer = await basePipeline
+          .clone()
+          .avif({ quality: AVIF_QUALITY, effort: AVIF_EFFORT })
+          .toBuffer();
+
+        const webpPath = path.join(stagingDir, `${breakpoint.name}.webp`);
+        const avifPath = path.join(stagingDir, `${breakpoint.name}.avif`);
+
+        fs.writeFileSync(webpPath, webpBuffer, { mode: 0o600 });
+        createdFiles.push(webpPath);
+        fs.writeFileSync(avifPath, avifBuffer, { mode: 0o600 });
+        createdFiles.push(avifPath);
+
+        const variantMeta = await sharp(webpBuffer).metadata();
+        const producedWidth = variantMeta.width ?? targetWidth ?? originalWidth;
+        const producedHeight = variantMeta.height ?? targetHeight ?? originalHeight;
+
+        variants.push({
+          name: breakpoint.name,
+          width: producedWidth,
+          height: producedHeight,
+          avifSize: avifBuffer.length,
+          webpSize: webpBuffer.length,
+          sizeBytesWebp: webpBuffer.length,
+          sizeBytesAvif: avifBuffer.length,
+        });
+      }
+
+      return {
+        imageId,
+        ownerType,
+        ownerId,
+        mediaSlot,
+        originalFormat,
+        originalWidth,
+        originalHeight,
+        variants,
+        createdAt: Date.now(),
+        stagingDir,
+      };
+    } catch (err) {
+      for (const f of createdFiles.reverse()) {
+        try {
+          fs.unlinkSync(f);
+        } catch {
+          // ignore
+        }
+      }
+      for (const d of createdDirs.reverse()) {
+        try {
+          fs.rmdirSync(d);
+        } catch {
+          // ignore
+        }
+      }
+      if (err instanceof SafeImageError) {
+        throw err;
+      }
+      throw new SafeImageError("Échec du traitement et de l'enregistrement de l'image de portfolio.");
+    }
+  });
+}
+
+export function publishStagedPortfolioMedia(
+  imageId: string,
+  ownerType: PortfolioMediaOwnerType,
+  ownerId: string,
+  mediaSlot: PortfolioMediaSlot,
+  mediaBasePath: string
+): string {
+  const resolvedMediaBasePath = path.resolve(mediaBasePath);
+  const stagingDir = path.resolve(resolvedMediaBasePath, "staging", imageId);
+
+  verifySecurePathChain(resolvedMediaBasePath, ["staging", imageId], "directory");
+
+  const ownerRoot = `${ownerType}s`;
+  const ownerDir = path.resolve(resolvedMediaBasePath, ownerRoot, ownerId);
+  const slotDir = path.resolve(ownerDir, mediaSlot);
+  const finalMediaDir = path.resolve(slotDir, imageId);
+
+  ensureStrictDirectoryCreated(slotDir, resolvedMediaBasePath);
+
+  if (fs.existsSync(finalMediaDir)) {
+    cleanupMediaDirectory(finalMediaDir, resolvedMediaBasePath);
+  }
+
+  fs.renameSync(stagingDir, finalMediaDir);
+
+  verifySecurePathChain(resolvedMediaBasePath, [ownerRoot, ownerId, mediaSlot, imageId], "directory");
+
+  return finalMediaDir;
+}
+
+export function cleanupStagedPortfolioMedia(imageId: string, mediaBasePath: string): void {
+  const resolvedMediaBasePath = path.resolve(mediaBasePath);
+  const stagingDir = path.resolve(resolvedMediaBasePath, "staging", imageId);
+  cleanupMediaDirectory(stagingDir, resolvedMediaBasePath);
+}
+
+export function cleanupPublishedPortfolioMedia(
+  ownerType: PortfolioMediaOwnerType,
+  ownerId: string,
+  mediaSlot: PortfolioMediaSlot,
+  imageId: string,
+  mediaBasePath: string
+): void {
+  const resolvedMediaBasePath = path.resolve(mediaBasePath);
+  const ownerRoot = `${ownerType}s`;
+  const finalMediaDir = path.resolve(resolvedMediaBasePath, ownerRoot, ownerId, mediaSlot, imageId);
+  cleanupMediaDirectory(finalMediaDir, resolvedMediaBasePath);
+}
+
+export async function openPortfolioVariant(
+  mediaBasePath: string,
+  ownerType: PortfolioMediaOwnerType,
+  ownerId: string,
+  mediaSlot: PortfolioMediaSlot,
+  imageId: string,
+  variant: PortfolioVariantName,
+  ext: "webp" | "avif"
+): Promise<{ fileHandle: fs.promises.FileHandle; size: number; mimeType: string }> {
+  const resolvedMediaBasePath = path.resolve(mediaBasePath);
+  const fileName = `${variant}.${ext}`;
+  const ownerRoot = `${ownerType}s`;
+
+  verifySecurePathChain(resolvedMediaBasePath, [ownerRoot, ownerId, mediaSlot, imageId, fileName], "file");
+
+  const targetPath = path.resolve(resolvedMediaBasePath, ownerRoot, ownerId, mediaSlot, imageId, fileName);
+
+  const noFollow = typeof fs.constants.O_NOFOLLOW === "number" ? fs.constants.O_NOFOLLOW : 0;
+  const fileHandle = await fs.promises.open(targetPath, fs.constants.O_RDONLY | noFollow);
+  const openedStat = await fileHandle.stat();
+  if (!openedStat.isFile()) {
+    await fileHandle.close();
+    throw new SafeImageError("L'élément demandé n'est pas un fichier régulier.");
+  }
+
+  const mimeType = ext === "webp" ? "image/webp" : "image/avif";
+  return { fileHandle, size: openedStat.size, mimeType };
+}
+
 

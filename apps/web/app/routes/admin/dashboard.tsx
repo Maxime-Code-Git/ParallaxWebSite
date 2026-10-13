@@ -62,8 +62,9 @@ const MODULES: DashboardModule[] = [
     id: "portfolio",
     title: "Projets et portfolio",
     description: "Création des fiches projets, catégorisation, photos et vidéos associées.",
-    status: "Lot suivant",
-    isActive: false,
+    status: "Actif",
+    isActive: true,
+    href: "/admin/portfolio",
   },
   {
     id: "studio",
