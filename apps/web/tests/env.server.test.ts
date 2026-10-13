@@ -177,8 +177,13 @@ describe("Environment Validation (env.server.ts)", () => {
       const validMediaPath = path.join(validDir, `startup-media-test-${Date.now()}`);
       const validPortfolioContentPath = path.join(validDir, `startup-portfolio-content-${Date.now()}.json`);
       const validPortfolioMediaPath = path.join(validDir, `startup-portfolio-media-${Date.now()}`);
+      const validGalleryDbPath = path.join(validDir, `startup-gallery-db-${Date.now()}.sqlite`);
+      const validGalleryMediaPath = path.join(validDir, `startup-gallery-media-${Date.now()}`);
+      const validGalleryImportPath = path.join(validDir, `startup-gallery-import-${Date.now()}`);
       fs.mkdirSync(validMediaPath, { recursive: true, mode: 0o700 });
       fs.mkdirSync(validPortfolioMediaPath, { recursive: true, mode: 0o700 });
+      fs.mkdirSync(validGalleryMediaPath, { recursive: true, mode: 0o700 });
+      fs.mkdirSync(validGalleryImportPath, { recursive: true, mode: 0o700 });
       await new Promise<void>((resolve, reject) => {
         execFile(
           "node",
@@ -196,6 +201,11 @@ describe("Environment Validation (env.server.ts)", () => {
               SITE_MEDIA_PATH: validMediaPath,
               PORTFOLIO_CONTENT_PATH: validPortfolioContentPath,
               PORTFOLIO_MEDIA_PATH: validPortfolioMediaPath,
+              GALLERY_DB_PATH: validGalleryDbPath,
+              GALLERY_MEDIA_PATH: validGalleryMediaPath,
+              GALLERY_IMPORT_PATH: validGalleryImportPath,
+              GALLERY_SECRET: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+              GALLERY_CODE_ENCRYPTION_KEY: "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
               TRUST_PROXY: "false",
             },
           },
@@ -219,8 +229,13 @@ describe("Environment Validation (env.server.ts)", () => {
       const validMediaPath = path.join(validDir, `startup-media-dir-${Date.now()}`);
       const validPortfolioContentPath = path.join(validDir, `startup-portfolio-content-${Date.now()}.json`);
       const validPortfolioMediaPath = path.join(validDir, `startup-portfolio-media-${Date.now()}`);
+      const validGalleryDbPath = path.join(validDir, `startup-gallery-db-media-${Date.now()}.sqlite`);
+      const validGalleryMediaPath = path.join(validDir, `startup-gallery-media-dir-${Date.now()}`);
+      const validGalleryImportPath = path.join(validDir, `startup-gallery-import-dir-${Date.now()}`);
       fs.mkdirSync(validMediaPath, { recursive: true, mode: 0o700 });
       fs.mkdirSync(validPortfolioMediaPath, { recursive: true, mode: 0o700 });
+      fs.mkdirSync(validGalleryMediaPath, { recursive: true, mode: 0o700 });
+      fs.mkdirSync(validGalleryImportPath, { recursive: true, mode: 0o700 });
 
       await new Promise<void>((resolve, reject) => {
         execFile(
@@ -239,6 +254,11 @@ describe("Environment Validation (env.server.ts)", () => {
               SITE_MEDIA_PATH: validMediaPath,
               PORTFOLIO_CONTENT_PATH: validPortfolioContentPath,
               PORTFOLIO_MEDIA_PATH: validPortfolioMediaPath,
+              GALLERY_DB_PATH: validGalleryDbPath,
+              GALLERY_MEDIA_PATH: validGalleryMediaPath,
+              GALLERY_IMPORT_PATH: validGalleryImportPath,
+              GALLERY_SECRET: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+              GALLERY_CODE_ENCRYPTION_KEY: "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
               TRUST_PROXY: "false",
             },
           },
