@@ -181,7 +181,8 @@ function validateStoragePath(val: string | undefined, name: string): string {
 export const ENV = {
   get PUBLIC_SITE_URL(): string {
     const isProd = process.env.NODE_ENV === "production";
-    const url = process.env.PUBLIC_SITE_URL || (isProd ? "" : "http://localhost:3000");
+    const isLocalPreview = process.env.PARALLAX_LOCAL_PREVIEW === "true";
+    const url = process.env.PUBLIC_SITE_URL || (isProd && !isLocalPreview ? "" : "http://localhost:3000");
     if (!url) {
       throw new Error("CRITICAL: PUBLIC_SITE_URL est obligatoire.");
     }
@@ -190,12 +191,27 @@ export const ENV = {
       if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
         throw new Error("PROTOCOL_INVALID");
       }
-      if (isProd && parsed.protocol !== "https:") {
+      if (isLocalPreview) {
+        if (process.env.TRUST_PROXY === "true") {
+          throw new Error("PREVIEW_PROXY_FORBIDDEN");
+        }
+        if (parsed.protocol !== "http:" || (parsed.hostname !== "127.0.0.1" && parsed.hostname !== "localhost")) {
+          throw new Error("PREVIEW_HOST_INVALID");
+        }
+      } else if (isProd && parsed.protocol !== "https:") {
         throw new Error("HTTPS_REQUIRED");
       }
     } catch (e: unknown) {
-      if (e instanceof Error && e.message === "HTTPS_REQUIRED") {
-        throw new Error("CRITICAL: PUBLIC_SITE_URL doit obligatoirement utiliser https:// en production.", { cause: e });
+      if (e instanceof Error) {
+        if (e.message === "PREVIEW_PROXY_FORBIDDEN") {
+          throw new Error("CRITICAL: PARALLAX_LOCAL_PREVIEW est incompatible avec TRUST_PROXY=true.", { cause: e });
+        }
+        if (e.message === "PREVIEW_HOST_INVALID") {
+          throw new Error("CRITICAL: PARALLAX_LOCAL_PREVIEW n'est autorise qu'avec une URL HTTP sur 127.0.0.1 ou localhost.", { cause: e });
+        }
+        if (e.message === "HTTPS_REQUIRED") {
+          throw new Error("CRITICAL: PUBLIC_SITE_URL doit obligatoirement utiliser https:// en production.", { cause: e });
+        }
       }
       throw new Error("CRITICAL: PUBLIC_SITE_URL n'est pas une URL valide ou n'utilise pas HTTP/HTTPS.", { cause: e });
     }
@@ -237,10 +253,43 @@ export const ENV = {
     return validateStoragePath(val, "RATE_LIMIT_DB_PATH");
   },
 
+  get SITE_CONTENT_PATH(): string {
+    const isTest = process.env.NODE_ENV === "test";
+    const val = process.env.SITE_CONTENT_PATH;
+
+    if (isTest) {
+      return validateTestPath(val, "SITE_CONTENT_PATH");
+    }
+
+    return validateStoragePath(val, "SITE_CONTENT_PATH");
+  },
+
   get TRUST_PROXY(): boolean {
     return process.env.TRUST_PROXY === "true";
   },
+
+  get PARALLAX_LOCAL_PREVIEW(): boolean {
+    return process.env.PARALLAX_LOCAL_PREVIEW === "true";
+  },
 };
+
+export function isLocalPreviewMode(): boolean {
+  if (process.env.PARALLAX_LOCAL_PREVIEW !== "true") return false;
+  if (process.env.TRUST_PROXY === "true") {
+    throw new Error("CRITICAL: PARALLAX_LOCAL_PREVIEW est incompatible avec TRUST_PROXY=true.");
+  }
+  const url = process.env.PUBLIC_SITE_URL || "";
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "http:" || (parsed.hostname !== "127.0.0.1" && parsed.hostname !== "localhost")) {
+      throw new Error("CRITICAL: PARALLAX_LOCAL_PREVIEW n'est autorise qu'avec une URL HTTP sur 127.0.0.1 ou localhost.");
+    }
+  } catch (e) {
+    if (e instanceof Error && e.message.startsWith("CRITICAL:")) throw e;
+    throw new Error("CRITICAL: PARALLAX_LOCAL_PREVIEW n'est autorise qu'avec une URL HTTP sur 127.0.0.1 ou localhost.", { cause: e });
+  }
+  return true;
+}
 
 export interface AdminConfig {
   hash: string;
