@@ -16,7 +16,4 @@ export default [
   route("admin/home", "routes/admin/home.tsx"),
   route("admin/studio", "routes/admin/studio.tsx"),
   route("admin/logout", "routes/admin/logout.tsx"),
-
-  // Local preview helper (strictly 404 in production unless PARALLAX_LOCAL_PREVIEW=true)
-  route("preview/login", "routes/preview-login.ts"),
 ] satisfies RouteConfig;

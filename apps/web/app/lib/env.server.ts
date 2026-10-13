@@ -192,12 +192,7 @@ export const ENV = {
         throw new Error("PROTOCOL_INVALID");
       }
       if (isLocalPreview) {
-        if (process.env.TRUST_PROXY === "true") {
-          throw new Error("PREVIEW_PROXY_FORBIDDEN");
-        }
-        if (parsed.protocol !== "http:" || (parsed.hostname !== "127.0.0.1" && parsed.hostname !== "localhost")) {
-          throw new Error("PREVIEW_HOST_INVALID");
-        }
+        isLocalPreviewMode();
       } else if (isProd && parsed.protocol !== "https:") {
         throw new Error("HTTPS_REQUIRED");
       }
@@ -275,8 +270,12 @@ export const ENV = {
 
 export function isLocalPreviewMode(): boolean {
   if (process.env.PARALLAX_LOCAL_PREVIEW !== "true") return false;
-  if (process.env.TRUST_PROXY === "true") {
-    throw new Error("CRITICAL: PARALLAX_LOCAL_PREVIEW est incompatible avec TRUST_PROXY=true.");
+  if (process.env.TRUST_PROXY === "true" || process.env.TRUST_PROXY !== "false") {
+    throw new Error("CRITICAL: PARALLAX_LOCAL_PREVIEW est incompatible avec TRUST_PROXY=true (exige explicitement TRUST_PROXY=false).");
+  }
+  const host = process.env.HOST;
+  if (host !== "127.0.0.1" && host !== "localhost") {
+    throw new Error(`CRITICAL: PARALLAX_LOCAL_PREVIEW exige un bind loopback local explicite (HOST=127.0.0.1 ou localhost). Bind '${host}' interdit.`);
   }
   const url = process.env.PUBLIC_SITE_URL || "";
   try {
@@ -291,6 +290,10 @@ export function isLocalPreviewMode(): boolean {
   return true;
 }
 
+export function validateContentConfig(): string {
+  return ENV.SITE_CONTENT_PATH;
+}
+
 export interface AdminConfig {
   hash: string;
   sessionSecret: string;
@@ -301,6 +304,9 @@ export interface AdminConfig {
 }
 
 export function validateAdminConfig(): AdminConfig {
+  if (process.env.PARALLAX_LOCAL_PREVIEW === "true") {
+    isLocalPreviewMode();
+  }
   const siteUrl = ENV.PUBLIC_SITE_URL;
 
   const hash = process.env.ADMIN_PASSWORD_HASH;
@@ -339,13 +345,19 @@ export function validateAdminConfig(): AdminConfig {
   };
 }
 
-let hasValidatedProduction = false;
+let hasValidatedStartup = false;
 export function validateServerStartup(): void {
-  if (hasValidatedProduction) {
+  if (hasValidatedStartup) {
     return;
   }
-  if (process.env.NODE_ENV === "production" && !process.env.VITEST) {
-    validateAdminConfig();
-    hasValidatedProduction = true;
+  if (!process.env.VITEST) {
+    if (process.env.PARALLAX_LOCAL_PREVIEW === "true") {
+      isLocalPreviewMode();
+    }
+    validateContentConfig();
+    if (process.env.NODE_ENV === "production") {
+      validateAdminConfig();
+    }
+    hasValidatedStartup = true;
   }
 }

@@ -56,10 +56,17 @@ export default function HomePage() {
       <section className={styles.showreelSection}>
         <div
           className={styles.showreelCard}
-          style={{ backgroundImage: `url(${showreelCoverUrl})` }}
           role="region"
           aria-label={home.showreel.coverImageAlt[lang]}
         >
+          {showreelCoverUrl && (
+            <img
+              src={showreelCoverUrl}
+              alt={home.showreel.coverImageAlt[lang]}
+              className={styles.showreelCoverImg}
+              loading="lazy"
+            />
+          )}
           <div className={styles.showreelOverlay} />
           <button
             type="button"
@@ -83,12 +90,16 @@ export default function HomePage() {
       {/* Duo Maxime & Ludovic */}
       <section className={styles.duoSection}>
         <div className={styles.duoGrid}>
-          <div
-            className={styles.duoImage}
-            style={{ backgroundImage: `url(${duoImageUrl})` }}
-            role="img"
-            aria-label={home.duo.imageAlt[lang]}
-          />
+          <div className={styles.duoImageWrapper}>
+            {duoImageUrl && (
+              <img
+                src={duoImageUrl}
+                alt={home.duo.imageAlt[lang]}
+                className={styles.duoImage}
+                loading="lazy"
+              />
+            )}
+          </div>
           <div className={styles.duoContent}>
             <h2 className={styles.duoTitle}>{home.duo.title[lang]}</h2>
             <p className={styles.duoText}>{home.duo.text[lang]}</p>

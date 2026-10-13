@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
-import { validateAdminConfig } from "../app/lib/env.server.ts";
+import { validateAdminConfig, validateContentConfig } from "../app/lib/env.server.ts";
 
 export function runStartupValidation() {
   try {
     validateAdminConfig();
+    validateContentConfig();
     console.log("Configuration de demarrage valide avec succes.");
     return true;
   } catch (err) {

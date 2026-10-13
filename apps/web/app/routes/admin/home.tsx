@@ -6,7 +6,12 @@ import {
   createAdminHeaders,
   composeAdminHeaders,
 } from "../../lib/admin-auth.server";
-import { validateOrigin } from "../../lib/security.server";
+import {
+  validateOrigin,
+  readStrictFormUrlEncoded,
+  ActionSecurityError,
+} from "../../lib/security.server";
+import { constantTimeEqual } from "../../lib/auth.server";
 import {
   getRawSiteContent,
   saveHomeContent,
@@ -51,7 +56,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
 export async function action({ request }: ActionFunctionArgs) {
   const headers = createAdminHeaders();
   if (request.method !== "POST") {
-    return new Response(null, { status: 405, headers: { ...headers, Allow: "POST" } });
+    headers.set("Allow", "POST");
+    return new Response("Method Not Allowed", { status: 405, headers });
   }
 
   const session = await requireValidAdminSession(request);
@@ -59,43 +65,24 @@ export async function action({ request }: ActionFunctionArgs) {
     return Response.json({ error: "Forbidden" }, { status: 403, headers });
   }
 
-  const contentType = request.headers.get("Content-Type") || "";
-  const mimeType = contentType.split(";")[0]?.trim().toLowerCase();
-  if (mimeType !== "application/x-www-form-urlencoded") {
-    return Response.json({ error: "Unsupported Media Type" }, { status: 415, headers });
-  }
-
-  if (!request.body) {
-    return Response.json({ error: "Empty body" }, { status: 400, headers });
-  }
-
-  const MAX_BODY_SIZE = 500 * 1024;
-  let totalBytes = 0;
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = [];
-
+  let formData: URLSearchParams;
   try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (value) {
-        totalBytes += value.byteLength;
-        if (totalBytes > MAX_BODY_SIZE) {
-          await reader.cancel("Payload too large");
-          return Response.json({ error: "Payload too large" }, { status: 413, headers });
-        }
-        chunks.push(value);
-      }
+    formData = await readStrictFormUrlEncoded(request, 500 * 1024, [
+      "csrfToken",
+      "revision",
+      "homeData",
+    ]);
+  } catch (err) {
+    if (err instanceof ActionSecurityError) {
+      if (err.status === 405) headers.set("Allow", "POST");
+      return new Response(err.message, { status: err.status, headers });
     }
-  } catch {
-    return Response.json({ error: "Invalid body stream" }, { status: 400, headers });
+    return new Response("Bad Request", { status: 400, headers });
   }
-
-  const rawBody = Buffer.concat(chunks).toString("utf-8");
-  const formData = new URLSearchParams(rawBody);
 
   const csrfToken = String(formData.get("csrfToken") || "");
-  if (!csrfToken || csrfToken !== session.get("csrfToken")) {
+  const sessionCsrf = session.get("csrfToken") || "";
+  if (!csrfToken || !constantTimeEqual(csrfToken, sessionCsrf)) {
     return Response.json({ error: "Jeton CSRF invalide." }, { status: 403, headers });
   }
 
@@ -156,9 +143,6 @@ export default function AdminHomePage() {
   useEffect(() => {
     if (actionData?.newRevision) {
       setCurrentRevision(actionData.newRevision);
-    } else if (actionData?.latestRevision) {
-      // In conflict, update current revision so user can save again without reloading
-      setCurrentRevision(actionData.latestRevision);
     }
   }, [actionData]);
 
@@ -227,7 +211,23 @@ export default function AdminHomePage() {
           </div>
         )}
 
-        {actionData?.error && (
+        {actionData?.conflict && actionData.latestRevision && currentRevision !== actionData.latestRevision && (
+          <div className={styles.conflictBox} role="alert">
+            <p className={styles.conflictText}>{actionData.error}</p>
+            <p className={styles.conflictNotice}>
+              Une nouvelle tentative immédiate sera refusée pour protéger les données distantes. Pour confirmer vos modifications par-dessus la dernière révision ({actionData.latestRevision.slice(0, 8)}...), cliquez sur le bouton ci-dessous :
+            </p>
+            <button
+              type="button"
+              onClick={() => setCurrentRevision(actionData.latestRevision!)}
+              className={styles.conflictResolveButton}
+            >
+              Adopter la nouvelle révision ({actionData.latestRevision.slice(0, 8)}...) et autoriser l'enregistrement
+            </button>
+          </div>
+        )}
+
+        {actionData?.error && !actionData.conflict && (
           <div className={styles.alertError} role="alert">
             {actionData.error}
           </div>

@@ -148,4 +148,21 @@ describe("site-content.server", () => {
     };
     expect(() => validateSiteContent(modified)).toThrow(ValidationError);
   });
+
+  it("strictly rejects relative SITE_CONTENT_PATH when calling getSiteContentFilePath without creating files", () => {
+    const relativeTarget = "data/site-content.json";
+    process.env.SITE_CONTENT_PATH = relativeTarget;
+
+    expect(() => getSiteContent()).toThrow(/CRITICAL:.*doit etre un chemin absolu/);
+    expect(fs.existsSync(path.resolve(process.cwd(), relativeTarget))).toBe(false);
+  });
+
+  it("strictly rejects in-repo SITE_CONTENT_PATH when calling getSiteContentFilePath", () => {
+    process.env.NODE_ENV = "production";
+    const inRepoPath = path.resolve(process.cwd(), "apps/web/site-content.json");
+    process.env.SITE_CONTENT_PATH = inRepoPath;
+
+    expect(() => getSiteContent()).toThrow(/CRITICAL:.*ne doit pas se trouver dans le depot/);
+    expect(fs.existsSync(inRepoPath)).toBe(false);
+  });
 });

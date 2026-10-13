@@ -6,12 +6,26 @@ import {
   ScrollRestoration,
   isRouteErrorResponse,
   useRouteError,
+  useLocation,
 } from "react-router";
 import "./app.css";
 
+function resolveLanguage(pathname?: string): "fr" | "en" {
+  if (!pathname) return "fr";
+  return pathname === "/en" || pathname.startsWith("/en/") ? "en" : "fr";
+}
+
 export function Layout({ children }: { children: React.ReactNode }) {
+  let lang: "fr" | "en" = "fr";
+  try {
+    const location = useLocation();
+    lang = resolveLanguage(location?.pathname);
+  } catch {
+    // fallback to default fr
+  }
+
   return (
-    <html lang="fr">
+    <html lang={lang}>
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -33,26 +47,45 @@ export default function App() {
 
 export function ErrorBoundary() {
   const error = useRouteError();
-  let message = "Une erreur inattendue est survenue.";
-  let title = "Erreur";
+  let lang: "fr" | "en" = "fr";
+  try {
+    const location = useLocation();
+    lang = resolveLanguage(location?.pathname);
+  } catch {
+    // fallback to default fr
+  }
+
+  const isEn = lang === "en";
+
+  let title = isEn ? "Error" : "Erreur";
+  let message = isEn
+    ? "An unexpected error occurred."
+    : "Une erreur inattendue est survenue.";
 
   if (isRouteErrorResponse(error)) {
     if (error.status === 404) {
-      title = "Page non trouvée";
-      message = "La page demandée n'existe pas.";
+      title = isEn ? "Page Not Found" : "Page non trouvée";
+      message = isEn
+        ? "The requested page does not exist."
+        : "La page demandée n'existe pas.";
     } else {
-      title = `Erreur ${error.status}`;
-      message = error.statusText || message;
+      title = isEn ? `Error ${error.status}` : `Erreur ${error.status}`;
+      message = isEn
+        ? "An unexpected error occurred."
+        : "Une erreur inattendue est survenue.";
     }
   }
+
+  const homeHref = isEn ? "/en" : "/fr";
+  const homeText = isEn ? "Back to home" : "Retour à l'accueil";
 
   return (
     <div className="errorContainer">
       <div className="errorCard">
         <h1 className="errorTitle">{title}</h1>
         <p className="errorMessage">{message}</p>
-        <a href="/fr" className="errorLink">
-          Retour à l'accueil
+        <a href={homeHref} className="errorLink">
+          {homeText}
         </a>
       </div>
     </div>

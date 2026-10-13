@@ -277,3 +277,60 @@
     padding: 24px 18px;
   }
 }
+
+.memberDividerBlock {
+  margin-top: 24px;
+  padding-top: 24px;
+  border-top: 0.5px solid var(--px-border);
+}
+
+.memberBlockTitle {
+  margin: 0 0 16px;
+  font-size: 16px;
+  color: var(--px-text);
+  font-weight: 500;
+}
+
+.memberFieldSpaced {
+  margin-top: 12px;
+}
+
+.conflictBox {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #fca5a5;
+  border-radius: var(--r-card);
+  padding: 18px 22px;
+  margin-bottom: 28px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.conflictText {
+  margin: 0 0 10px;
+  font-weight: 500;
+  color: #fca5a5;
+}
+
+.conflictNotice {
+  margin: 0 0 14px;
+  color: var(--px-text-2);
+  font-size: 13px;
+}
+
+.conflictResolveButton {
+  background: rgba(239, 68, 68, 0.2);
+  border: 1px solid rgba(239, 68, 68, 0.5);
+  color: #ffffff;
+  border-radius: var(--r-pill);
+  padding: 8px 18px;
+  font-family: var(--font-parallax);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.conflictResolveButton:hover {
+  background: rgba(239, 68, 68, 0.35);
+}

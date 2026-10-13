@@ -237,5 +237,135 @@ describe("Editorial Routes and Actions", () => {
       const json = await response.json();
       expect(json.conflict).toBe(true);
     });
+
+    it("returns 405 with Allow: POST header when GET is received on actions", async () => {
+      const cookie = await createValidAdminCookie();
+      const reqHome = new Request("http://localhost:3000/admin/home", {
+        method: "GET",
+        headers: { Cookie: cookie },
+      });
+      const resHome = await adminHomeAction(makeActionArgs(reqHome));
+      expect(resHome.status).toBe(405);
+      expect(resHome.headers.get("Allow")).toBe("POST");
+
+      const reqStudio = new Request("http://localhost:3000/admin/studio", {
+        method: "GET",
+        headers: { Cookie: cookie },
+      });
+      const resStudio = await adminStudioAction(makeActionArgs(reqStudio));
+      expect(resStudio.status).toBe(405);
+      expect(resStudio.headers.get("Allow")).toBe("POST");
+    });
+
+    it("two-editor scenario: A and B start at r1, B saves r2, A receives 409 and resubmitting without resolving does NOT overwrite B", async () => {
+      const cookieA = await createValidAdminCookie("csrf-editor-a");
+      const cookieB = await createValidAdminCookie("csrf-editor-b");
+
+      const initialContent = getSiteContent();
+      const r1 = initialContent.revision;
+
+      // Editor B changes duo title and saves -> creates r2
+      const homeB = {
+        ...initialContent.home,
+        duo: {
+          ...initialContent.home.duo,
+          title: { fr: "Modif par B", en: "Edit by B" },
+        },
+      };
+      const reqB = new Request("http://localhost:3000/admin/home", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: "http://localhost:3000",
+          Cookie: cookieB,
+        },
+        body: new URLSearchParams({
+          csrfToken: "csrf-editor-b",
+          revision: r1,
+          homeData: JSON.stringify(homeB),
+        }).toString(),
+      });
+      const resB = await adminHomeAction(makeActionArgs(reqB));
+      expect(resB.status).toBe(200);
+      const jsonB = await resB.json();
+      const r2 = jsonB.newRevision;
+      expect(r2).not.toBe(r1);
+
+      // Editor A was working on hero title with stale revision r1
+      const homeA = {
+        ...initialContent.home,
+        hero: {
+          ...initialContent.home.hero,
+          title: { fr: "Modif par A", en: "Edit by A" },
+        },
+      };
+      const reqA1 = new Request("http://localhost:3000/admin/home", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: "http://localhost:3000",
+          Cookie: cookieA,
+        },
+        body: new URLSearchParams({
+          csrfToken: "csrf-editor-a",
+          revision: r1, // stale!
+          homeData: JSON.stringify(homeA),
+        }).toString(),
+      });
+      const resA1 = await adminHomeAction(makeActionArgs(reqA1));
+      expect(resA1.status).toBe(409);
+      const jsonA1 = await resA1.json();
+      expect(jsonA1.conflict).toBe(true);
+      expect(jsonA1.latestRevision).toBe(r2);
+
+      // Verify B's modifications are intact in storage
+      expect(getSiteContent().home.duo.title.fr).toBe("Modif par B");
+
+      // Clicking save again without updating revision STILL yields 409, does NOT overwrite B
+      const reqA2 = new Request("http://localhost:3000/admin/home", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: "http://localhost:3000",
+          Cookie: cookieA,
+        },
+        body: new URLSearchParams({
+          csrfToken: "csrf-editor-a",
+          revision: r1, // STILL r1
+          homeData: JSON.stringify(homeA),
+        }).toString(),
+      });
+      const resA2 = await adminHomeAction(makeActionArgs(reqA2));
+      expect(resA2.status).toBe(409);
+      expect(getSiteContent().home.duo.title.fr).toBe("Modif par B");
+
+      // Once resolved explicitly to r2, Editor A can merge / apply and save successfully
+      const currentOnServer = getSiteContent();
+      const mergedHomeA = {
+        ...currentOnServer.home,
+        hero: {
+          ...currentOnServer.home.hero,
+          title: { fr: "Modif par A", en: "Edit by A" },
+        },
+      };
+      const reqA3 = new Request("http://localhost:3000/admin/home", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: "http://localhost:3000",
+          Cookie: cookieA,
+        },
+        body: new URLSearchParams({
+          csrfToken: "csrf-editor-a",
+          revision: r2, // updated to server's revision
+          homeData: JSON.stringify(mergedHomeA),
+        }).toString(),
+      });
+      const resA3 = await adminHomeAction(makeActionArgs(reqA3));
+      expect(resA3.status).toBe(200);
+      const finalContent = getSiteContent();
+      expect(finalContent.home.duo.title.fr).toBe("Modif par B"); // B's work preserved
+      expect(finalContent.home.hero.title.fr).toBe("Modif par A"); // A's work applied
+    });
   });
 });

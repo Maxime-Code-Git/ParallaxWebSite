@@ -1,5 +1,4 @@
 import fs from "node:fs";
-import path from "node:path";
 import crypto from "node:crypto";
 import defaultContent from "../content/default-site-content.json";
 import { atomicWriteJson } from "./atomic-fs.server";
@@ -39,10 +38,7 @@ export class ValidationError extends Error {
 }
 
 export function getSiteContentFilePath(): string {
-  if (process.env.SITE_CONTENT_PATH) {
-    return path.resolve(process.env.SITE_CONTENT_PATH);
-  }
-  return path.resolve(ENV.SITE_CONTENT_PATH);
+  return ENV.SITE_CONTENT_PATH;
 }
 
 function assertObject(val: unknown, context: string): Record<string, unknown> {
@@ -316,6 +312,9 @@ export function getRawSiteContent(): { content: SiteContent; isCorrupted: boolea
     const parsed = JSON.parse(content);
     return { content: validateSiteContent(parsed), isCorrupted: false };
   } catch (err) {
+    if (err instanceof Error && err.message.startsWith("CRITICAL:")) {
+      throw err;
+    }
     console.error("Erreur de validation ou de lecture du contenu éditorial :", err);
     return { content: validateSiteContent(defaultContent), isCorrupted: true };
   }

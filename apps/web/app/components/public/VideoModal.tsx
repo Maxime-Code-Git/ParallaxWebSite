@@ -8,26 +8,52 @@ interface VideoModalProps {
   lang: "fr" | "en";
 }
 
-function parseVideoEmbedUrl(url: string): string | null {
+export function parseVideoEmbedUrl(url: string | null | undefined): string | null {
   if (!url) return null;
   try {
-    const parsed = new URL(url);
-    if (parsed.hostname.includes("youtube.com") || parsed.hostname.includes("youtu.be")) {
+    const u = new URL(url);
+    if (u.protocol !== "https:") return null;
+    if (u.username || u.password) return null;
+
+    const host = u.hostname.toLowerCase();
+
+    const isYouTube =
+      host === "youtube.com" ||
+      host === "www.youtube.com" ||
+      host === "m.youtube.com" ||
+      host === "youtu.be";
+
+    if (isYouTube) {
       let videoId = "";
-      if (parsed.hostname.includes("youtu.be")) {
-        videoId = parsed.pathname.slice(1);
-      } else {
-        videoId = parsed.searchParams.get("v") || "";
+      if (host === "youtu.be") {
+        videoId = u.pathname.slice(1);
+      } else if (u.pathname === "/watch") {
+        videoId = u.searchParams.get("v") || "";
+      } else if (u.pathname.startsWith("/shorts/")) {
+        videoId = u.pathname.slice(8);
+      } else if (u.pathname.startsWith("/embed/")) {
+        videoId = u.pathname.slice(7);
       }
-      if (videoId) {
+      if (/^[A-Za-z0-9_-]{11}$/.test(videoId)) {
         return `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1`;
       }
+      return null;
     }
-    if (parsed.hostname.includes("vimeo.com")) {
-      const match = parsed.pathname.match(/\/(\d+)/);
-      if (match && match[1]) {
-        return `https://player.vimeo.com/video/${match[1]}?autoplay=1`;
+
+    const isVimeo =
+      host === "vimeo.com" ||
+      host === "www.vimeo.com" ||
+      host === "player.vimeo.com";
+
+    if (isVimeo) {
+      const match = u.pathname.match(/^\/(?:video\/)?(\d+)$/);
+      if (match) {
+        const videoId = match[1];
+        if (/^\d{5,15}$/.test(videoId)) {
+          return `https://player.vimeo.com/video/${videoId}?autoplay=1&dnt=1`;
+        }
       }
+      return null;
     }
   } catch {
     return null;

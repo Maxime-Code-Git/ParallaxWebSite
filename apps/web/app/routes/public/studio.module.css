@@ -72,15 +72,22 @@
   width: 100%;
 }
 
-.memberImage {
+.memberImageWrapper {
   width: 100%;
   box-sizing: border-box;
   aspect-ratio: 4 / 5;
-  background-size: cover;
-  background-position: center;
   background-color: var(--px-surface);
   border: 0.5px solid var(--px-border);
   border-radius: 12px;
+  overflow: hidden;
+}
+
+.memberImage {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  display: block;
 }
 
 .memberName {

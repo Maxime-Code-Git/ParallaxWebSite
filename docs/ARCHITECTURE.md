@@ -55,7 +55,6 @@ ParallaxWebSite/
             home.tsx
             studio.module.css
             studio.tsx
-          preview-login.ts
           root-redirect.tsx
         app.css
         entry.server.tsx

@@ -65,12 +65,16 @@ export default function StudioPage() {
 
             return (
               <article key={member.id} className={styles.memberCard}>
-                <div
-                  className={styles.memberImage}
-                  style={{ backgroundImage: `url(${memberImageUrl})` }}
-                  role="img"
-                  aria-label={member.imageAlt[lang]}
-                />
+                <div className={styles.memberImageWrapper}>
+                  {memberImageUrl && (
+                    <img
+                      src={memberImageUrl}
+                      alt={member.imageAlt[lang]}
+                      className={styles.memberImage}
+                      loading="lazy"
+                    />
+                  )}
+                </div>
                 <h3 className={styles.memberName}>{member.name}</h3>
                 <div className={styles.memberRole}>{member.role[lang]}</div>
               </article>
