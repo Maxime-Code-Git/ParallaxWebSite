@@ -1,0 +1,459 @@
+.container {
+  width: 100%;
+  min-height: 100vh;
+  background: var(--px-ink);
+  color: var(--px-text);
+  font-family: var(--font-parallax);
+  position: relative;
+  overflow-x: hidden;
+}
+
+/* Hero Section */
+.heroSection {
+  padding: 44px 80px 26px;
+}
+
+.heroBadge {
+  font-size: 14px;
+  color: var(--px-text-2);
+  letter-spacing: 0.04em;
+  margin-bottom: 18px;
+}
+
+.heroTitle {
+  margin: 0;
+  font-size: 76px;
+  line-height: 0.98;
+  font-weight: 500;
+  letter-spacing: -0.03em;
+  color: var(--px-text);
+}
+
+.heroSubtitle {
+  margin: 18px 0 0;
+  font-size: 19px;
+  color: var(--px-text-2);
+}
+
+/* Showreel Section */
+.showreelSection {
+  padding: 0 80px 36px;
+}
+
+.showreelCard {
+  position: relative;
+  width: 100%;
+  max-width: 1040px;
+  margin: 0 auto;
+  box-sizing: border-box;
+  aspect-ratio: 16 / 9;
+  background-color: var(--px-surface);
+  border: 0.5px solid var(--px-border);
+  border-radius: var(--r-media);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.showreelCoverImg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  z-index: 1;
+}
+
+.showreelOverlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(9, 11, 19, 0.3);
+  z-index: 2;
+}
+
+.playButton {
+  position: relative;
+  width: 88px;
+  height: 88px;
+  border-radius: 50%;
+  background: rgba(12, 15, 23, 0.45);
+  border: 1.5px solid var(--px-accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+  z-index: 3;
+}
+
+.playButton:hover {
+  transform: scale(1.08);
+  border-color: var(--px-accent-hover);
+  background: rgba(12, 15, 23, 0.65);
+}
+
+.playIcon {
+  width: 26px;
+  height: 28px;
+  margin-left: 4px;
+}
+
+.showreelLabel {
+  position: absolute;
+  left: 30px;
+  bottom: 26px;
+  font-size: 15px;
+  color: var(--px-text);
+  z-index: 3;
+}
+
+/* Duo Section */
+.duoSection {
+  padding: 72px 80px 64px;
+  border-top: 0.5px solid var(--px-line);
+}
+
+.duoGrid {
+  display: grid;
+  grid-template-columns: 0.78fr 1fr;
+  gap: 72px;
+  align-items: center;
+}
+
+.duoImageWrapper {
+  width: 100%;
+  box-sizing: border-box;
+  aspect-ratio: 3 / 4;
+  background-color: var(--px-surface);
+  border: 0.5px solid var(--px-border);
+  border-radius: var(--r-media);
+  overflow: hidden;
+}
+
+.duoImage {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center top;
+  display: block;
+}
+
+.duoContent {
+  max-width: 460px;
+}
+
+.duoTitle {
+  margin: 0 0 20px;
+  font-size: 40px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  color: var(--px-text);
+}
+
+.duoText {
+  margin: 0;
+  font-size: 19px;
+  line-height: 1.6;
+  color: var(--px-text-2);
+}
+
+/* Savoir-faire Section */
+.savoirFaireSection {
+  padding: 80px 80px;
+  border-top: 0.5px solid var(--px-line);
+}
+
+.sectionHeader {
+  margin: 0 0 40px;
+  font-size: 15px;
+  font-weight: 400;
+  color: var(--px-text-2);
+  letter-spacing: 0.04em;
+}
+
+.savoirFaireGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 32px;
+}
+
+.categoryTitle {
+  font-size: 26px;
+  font-weight: 500;
+  color: var(--px-text);
+  margin-bottom: 22px;
+}
+
+.categoryList {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  font-size: 18px;
+  color: var(--px-text-2);
+  line-height: 2.2;
+}
+
+/* Contact Section */
+.contactSection {
+  padding: 80px 80px 52px;
+  border-top: 0.5px solid var(--px-line);
+}
+
+.contactTitle {
+  margin: 0 0 32px;
+  font-size: 56px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  color: var(--px-text);
+}
+
+.contactItems {
+  display: flex;
+  gap: 64px;
+  flex-wrap: wrap;
+  font-size: 17px;
+}
+
+.contactBlockLabel {
+  color: var(--px-text-3);
+  font-size: 13px;
+  margin-bottom: 10px;
+}
+
+.contactEmailLink {
+  color: var(--px-accent);
+  text-decoration: none;
+  transition: color 0.18s ease;
+}
+
+.contactEmailLink:hover {
+  color: var(--px-accent-hover);
+}
+
+.contactSocialLink {
+  color: var(--px-text-2);
+  text-decoration: none;
+  transition: color 0.18s ease;
+}
+
+.contactSocialLink:hover {
+  color: var(--px-accent-hover);
+}
+
+.contactDivider {
+  color: var(--px-subtle);
+}
+
+/* Transition to SEMPRA */
+.transitionGradient {
+  height: 160px;
+  background: var(--px-to-sp);
+}
+
+/* SEMPRA Section */
+.sempraSection {
+  padding: 20px 80px 130px;
+  background: var(--sp-green);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 32px;
+}
+
+.sempraBadge {
+  font-family: var(--font-sp-text);
+  font-size: 13px;
+  color: var(--sp-sage);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.sempraLogo {
+  width: 380px;
+  max-width: 62%;
+  height: auto;
+  display: block;
+}
+
+.sempraTitle {
+  margin: 0;
+  font-family: var(--font-sp-display);
+  font-size: 42px;
+  font-weight: 500;
+  line-height: 1.15;
+  color: var(--sp-cream);
+}
+
+.sempraButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 18px;
+  border: 0.5px solid var(--sp-border);
+  border-radius: var(--r-pill);
+  padding: 8px 8px 8px 30px;
+  font-family: var(--font-sp-text);
+  font-size: 18px;
+  letter-spacing: 0.02em;
+  color: var(--sp-cream);
+  text-decoration: none;
+  transition: transform 0.18s ease, color 0.18s ease, border-color 0.18s ease;
+}
+
+.sempraButton:hover {
+  transform: scale(1.05);
+  color: var(--sp-gold-hover);
+  border-color: var(--sp-gold);
+}
+
+.sempraButtonIcon {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 0.5px solid var(--sp-gold);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Responsive adjustments (Mobile prototype: 390px) */
+@media (max-width: 900px) {
+  .heroSection {
+    padding: 34px 22px 8px;
+  }
+
+  .heroBadge {
+    font-size: 12px;
+  }
+
+  .heroTitle {
+    font-size: 46px;
+  }
+
+  .heroSubtitle {
+    font-size: 15px;
+  }
+
+  .showreelSection {
+    padding: 24px 22px 32px;
+  }
+
+  .showreelCard {
+    border-radius: 14px;
+  }
+
+  .playButton {
+    width: 62px;
+    height: 62px;
+  }
+
+  .playIcon {
+    width: 20px;
+    height: 22px;
+  }
+
+  .showreelLabel {
+    left: 16px;
+    bottom: 14px;
+    font-size: 12px;
+  }
+
+  .duoSection {
+    padding: 32px 22px 8px;
+  }
+
+  .duoGrid {
+    grid-template-columns: 1fr;
+    gap: 24px;
+  }
+
+  .duoTitle {
+    font-size: 28px;
+    margin: 24px 0 12px;
+  }
+
+  .duoText {
+    font-size: 16px;
+  }
+
+  .savoirFaireSection {
+    padding: 40px 22px;
+  }
+
+  .sectionHeader {
+    font-size: 14px;
+    margin-bottom: 28px;
+  }
+
+  .savoirFaireGrid {
+    grid-template-columns: 1fr;
+    gap: 30px;
+  }
+
+  .categoryTitle {
+    font-size: 22px;
+    margin-bottom: 14px;
+  }
+
+  .categoryList {
+    font-size: 16px;
+    line-height: 2.1;
+  }
+
+  .contactSection {
+    padding: 40px 22px 40px;
+  }
+
+  .contactTitle {
+    font-size: 34px;
+    margin-bottom: 26px;
+  }
+
+  .contactItems {
+    flex-direction: column;
+    gap: 22px;
+    font-size: 16px;
+  }
+
+  .contactBlockLabel {
+    font-size: 12px;
+    margin-bottom: 8px;
+  }
+
+  .transitionGradient {
+    height: 120px;
+  }
+
+  .sempraSection {
+    padding: 16px 22px 72px;
+    gap: 22px;
+  }
+
+  .sempraBadge {
+    font-size: 12px;
+  }
+
+  .sempraLogo {
+    width: 230px;
+    max-width: 78%;
+  }
+
+  .sempraTitle {
+    font-size: 28px;
+    line-height: 1.2;
+  }
+
+  .sempraButton {
+    font-size: 16px;
+    padding: 7px 7px 7px 24px;
+    gap: 14px;
+  }
+
+  .sempraButtonIcon {
+    width: 40px;
+    height: 40px;
+  }
+}

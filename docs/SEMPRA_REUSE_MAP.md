@@ -12,7 +12,8 @@ Ce document inventorie formellement les briques techniques de référence du pro
 | **Sécurité des requêtes & Rate limiting** | `security.server.ts`, `rate-limit.server.ts` | **Porté et adapté** | **Lot 1 & 1 bis** (`apps/web/app/lib/security.server.ts`, `rate-limit.server.ts`) |
 | **Headers de sécurité & CSP SSR** | `entry.server.tsx` | **Porté et adapté** | **Lot 1 & 1 bis** (`apps/web/app/entry.server.tsx`) |
 | **Outil de hachage CLI** | `scripts/admin-hash.js` | **Porté et adapté** | **Lot 1 & 1 bis** (`apps/web/scripts/admin-hash.js`) |
-| **Schéma éditorial & Persistance atomique** | `site-content.server.ts`, `atomic-fs.server.ts` | **Différé** | Lot 2 (Éditorial V1) |
+| **Schéma éditorial & Persistance atomique** | `site-content.server.ts`, `atomic-fs.server.ts` | **Porté et adapté** | **Lot 2** (`apps/web/app/lib/site-content.server.ts`, `site-content.shared.ts`, `atomic-fs.server.ts`) |
+| **Pipeline d'import d'images de site (Lot 2 bis)** | `api.admin.home-image.ts`, `home-media.server.ts`, `portfolio-image.server.ts`, `media.home.*.tsx`, `ImageUploader.tsx` | **Porté et adapté** | **Lot 2 bis** (`apps/web/app/lib/media-image.server.ts`, `routes/media/site-variant.ts`, `routes/api/admin-media-upload.ts`, `ImageUploader.tsx`) |
 | **Portfolio & Médias publics** | `portfolio-content.server.ts`, `portfolio-media.server.ts` | **Différé** | Lot 3 (Portfolio & vitrine) |
 | **Galeries privées & Téléchargements ZIP** | `gallery-*.server.ts`, code unique | **Différé** | Lot 4 (Espace client & galeries) |
 | **Previews WebP / Sharp** | `gallery-preview.server.ts`, `portfolio-image.server.ts` | **Différé** | Lot 4 / Lot 3 |
@@ -104,26 +105,73 @@ Ce document inventorie formellement les briques techniques de référence du pro
 
 2. **Fonctions, types et comportements observes** :
    - `validateSiteContent(data)` : validateurs stricts ecrits a la main pour chaque section (PAS de schema Zod dans ce module).
-   - Detection des conflits de revision : chaque fonction de mise a jour (`saveSettings`, `saveLegalPageDraft`, etc.) exige un parametre `previousRevision` et refuse l'ecriture si la revision du fichier disque a evolue.
-   - `atomicWrite(filePath, content)` et `atomicWriteJson(filePath, data)` dans `atomic-fs.server.ts` : ecriture dans un fichier temporaire (`.tmp.[hex]`), `fsyncSync` du descripteur de fichier et du repertoire, puis renommage atomique (`renameSync`). Creation d'une copie de sauvegarde (`.bak`) prealable et rotation des 5 derniers backups (`rotateBackups`).
+   - Detection des conflits de revision : chaque fonction de mise a jour (`saveSettings`, `saveLegalPageDraft`, etc.) exige un parametre `previousRevision` et refuse l'ecriture avec une erreur 409 si la revision du fichier disque a evolue.
+   - `atomicWrite(filePath, content)` et `atomicWriteJson(filePath, data)` dans `atomic-fs.server.ts` : ecriture dans un fichier temporaire (`.tmp.[hex]`), `fsyncSync` du descripteur de fichier et du repertoire, puis renommage atomique (`renameSync`). Creation d'une copie de sauvegarde (`.bak`) prealable et rotation des 5 derniers backups (`rotateBackups`), permissions 0600.
    - Note sur la concurrence : l'ecriture atomique garantit l'integrite physique du fichier en cas de plantage, mais ne constitue pas un verrouillage distribue entre processus distincts (d'ou la necessite de la detection de revision).
 
 3. **Choix** :
-   - **Différé pour les formulaires éditoriaux du Lot 2**.
-   - Note : Zod reste une option de conception elegante pour le futur schema Parallax, mais doit etre distingue du validateur manuel observe dans Sempra.
+   - **Porté et adapté au Lot 2**.
 
 4. **Adaptations Parallax** :
    - Schema de contenu neuf demarrant directement en `schemaVersion: 1`.
-   - Structure editoriale adaptee a Parallax : Showreel, Fondateurs (Maxime & Ludovic), Rubriques de creation, bloc dedie SEMPRA.
-   - Emplacement externe configure par `SITE_CONTENT_PATH`.
+   - Structure editoriale propre a Parallax : Showreel (avec modal de consentement tiers sans tiers au simple affichage), Fondateurs (Maxime & Ludovic), Rubriques de creation photo & video (ponctuation simple, sans tirets cadratins/demi-cadratins), bloc dedie SEMPRA distinct, Studio (intro, portraits, approche).
+   - Separation claire `site-content.shared.ts` (interfaces, `ALLOWED_IMAGE_MAP`, `resolveAllowedImage`) pour eviter toute fuite de code serveur dans le build client Vite, et `site-content.server.ts` (I/O, mutations atomiques, validation).
+   - Emplacement externe configure par `SITE_CONTENT_PATH` (ex: `/Users/profadmin/.parallax-data/site-content.json`). Fichier initialise a partir de `default-site-content.json` uniquement s'il n'existe pas ; aucune reinitialisation au redemarrage.
+   - Formulaires d'administration Accueil (`/admin/home`) et Studio (`/admin/studio`) : validation serveur stricte, lecture bornee a 500 Ko, validation Origin/CSRF, protection anti-conflit de revision 409 preservant les saisies utilisateur, et etats accessibles (`role="status"`, `role="alert"`).
+   - Selection d'images bornee strictement a `ALLOWED_IMAGE_MAP` ; aucun chemin de fichier arbitraire accepte en saisie.
 
-5. **Tests Sempra pertinents** :
-   - `apps/web/tests/site-content.server.test.ts`
-   - `apps/web/tests/atomic-fs.server.test.ts`
-   - `apps/web/tests/site-content-migration.server.test.ts`
+5. **Tests Parallax utiles portes de Sempra** :
+   - `apps/web/tests/atomic-fs.server.test.ts` (ecriture atomique, fsync, backups .bak, rotation a 5 fichiers, permissions 0600)
+   - `apps/web/tests/site-content.server.test.ts` (initialisation, validation, persistance, conflit 409)
+   - `apps/web/tests/editorial-routes.test.ts` (loaders/actions publics et admin, protection de session, mutations)
+   - `apps/web/tests/preview-mode.test.ts` (contraintes strictes de previsualisation locale et runner)
 
 6. **Elements non verifies** :
-   - Performance de lecture synchrone repetee lors de fortes charges concurrentes sans couche de memoire cache.
+   - Performance de lecture synchrone repetee lors de tres fortes charges concurrentes sans couche de memoire cache.
+
+---
+
+## 3 bis. Pipeline d'import d'images de site (Lot 2 bis)
+
+1. **Fichiers consultés (commit Sempra `89bfee31ae5d477f71c95e83a0d55305521f426f`)** :
+   - `apps/web/app/routes/api.admin.home-image.ts`
+   - `apps/web/app/lib/home-media.server.ts`
+   - `apps/web/app/lib/portfolio-image.server.ts`
+   - `apps/web/app/routes/media.home.$imageId.$variant.tsx`
+   - `apps/web/app/components/admin/ImageUploader.tsx`
+
+2. **Fonctions, types et comportements observés** :
+   - Réception multipart/form-data en streaming avec `busboy`, borne stricte de taille (25 Mo).
+   - Pipeline Sharp produisant des variantes WebP (qualité 82) et AVIF (qualité 65, effort 4) pour les points de rupture (640p, 960p, 1440p, 1920p).
+   - Auto-orientation EXIF via `sharp.rotate()`, espace sRGB, stripping de métadonnées pour protéger la vie privée.
+   - `ConcurrencyLimiter(2)` bornant à 2 les traitements Sharp simultanés pour préserver les ressources serveur.
+   - Route de diffusion des variantes avec calcul d'ETag, statut 304, et en-têtes de cache immuables (`Cache-Control: public, max-age=31536000, immutable`).
+
+3. **Choix** :
+   - **Porté et adapté au Lot 2 bis** (`apps/web/app/lib/media-image.server.ts`, `apps/web/app/routes/media/site-variant.ts`, `apps/web/app/routes/api/admin-media-upload.ts`, `apps/web/app/components/admin/ImageUploader.tsx`).
+
+4. **Adaptations et durcissements Parallax** :
+   - Suppression totale du moteur de filigrane (watermark) Sempra.
+   - Support des 4 emplacements éditoriaux actuels (`showreel_cover`, `duo`, `portrait_ludovic`, `portrait_maxime`).
+   - Rétablissement vers l'image de référence par défaut (`x-media-action: revert`).
+   - Validation décimale stricte de `Content-Length` (`/^\d+$/`) rejetant toute valeur partiellement numérique.
+   - Saturation du limiteur traduite par une exception dédiée `ConcurrencyLimitError` retournant HTTP 503 avec en-tête `Retry-After: 2`.
+   - Isolation en staging privé (`staging/<imageId>`) prévenant la suppression prématurée des fichiers en cours par un import concurrent terminant son nettoyage.
+   - Publication coordonnée avec vérification de révision avant `renameSync` atomique et rollback circonscrit aux seuls fichiers de l'import en cas de 409.
+   - Confinement strict des chemins via `verifySecurePathChain` examinant chaque composant (`site`, emplacement, UUID, variante, fichier) avec `lstatSync` sans suivre les liens symboliques, avec `O_NOFOLLOW` complémentaire et gestion d'erreurs en 404 sans fuite de chemins.
+   - Rétention bornée et rotation réelle : exploitation de `getBackups(siteContentPath)` de `atomic-fs.server.ts` préservant les variantes des 5 sauvegardes physiques, purge des anciennes métadonnées non rattachées et report sécurisé du nettoyage en cas de sauvegarde illisible.
+   - Validation de cohérence des références importées lors des sauvegardes de formulaire : UUID connu, correspondance clé/métadonnées, emplacement cohérent et variantes valides.
+
+5. **Tests Parallax utiles** :
+   - `apps/web/tests/media-image.server.test.ts`
+   - `apps/web/tests/admin-media-upload.test.ts`
+   - `apps/web/tests/site-variant.route.test.ts`
+   - `apps/web/tests/confinement-security.test.ts`
+   - `apps/web/tests/bounded-retention.test.ts`
+   - `apps/web/tests/concurrent-upload-isolation.test.ts`
+
+6. **Éléments non vérifiés** :
+   - Remplacement concurrent des dossiers sur le disque par un acteur local en temps réel (race condition d'OS local sans garantie absolue démontrée).
 
 ---
 

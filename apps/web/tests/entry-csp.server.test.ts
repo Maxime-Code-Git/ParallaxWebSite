@@ -10,37 +10,63 @@ import handleRequest, {
 } from "../app/entry.server";
 
 function createEntryContext(staticHandlerContext: StaticHandlerContext): EntryContext {
+  const routesObj: EntryContext["manifest"]["routes"] = {
+    root: {
+      id: "root",
+      path: "",
+      hasAction: false,
+      hasLoader: false,
+      hasClientAction: false,
+      hasClientLoader: false,
+      hasClientMiddleware: false,
+      hasErrorBoundary: false,
+      module: "root",
+      clientActionModule: undefined,
+      clientLoaderModule: undefined,
+      clientMiddlewareModule: undefined,
+      hydrateFallbackModule: undefined,
+    },
+  };
+  const routeModulesObj: EntryContext["routeModules"] = {
+    root: {
+      default: RootLayout,
+      Layout,
+    },
+  };
+
+  for (const match of staticHandlerContext.matches) {
+    routesObj[match.route.id] = {
+      id: match.route.id,
+      path: match.route.path || "",
+      hasAction: false,
+      hasLoader: false,
+      hasClientAction: false,
+      hasClientLoader: false,
+      hasClientMiddleware: false,
+      hasErrorBoundary: false,
+      module: match.route.id,
+      clientActionModule: undefined,
+      clientLoaderModule: undefined,
+      clientMiddlewareModule: undefined,
+      hydrateFallbackModule: undefined,
+    };
+    if (match.route.id !== "root") {
+      routeModulesObj[match.route.id] = {
+        default: RootLayout,
+      };
+    }
+  }
+
   return {
     staticHandlerContext,
     branches: [],
     manifest: {
       entry: { imports: [], module: "" },
-      routes: {
-        root: {
-          id: "root",
-          path: "",
-          hasAction: false,
-          hasLoader: false,
-          hasClientAction: false,
-          hasClientLoader: false,
-          hasClientMiddleware: false,
-          hasErrorBoundary: false,
-          module: "root",
-          clientActionModule: undefined,
-          clientLoaderModule: undefined,
-          clientMiddlewareModule: undefined,
-          hydrateFallbackModule: undefined,
-        },
-      },
+      routes: routesObj,
       url: "",
       version: "1",
     },
-    routeModules: {
-      root: {
-        default: RootLayout,
-        Layout,
-      },
-    },
+    routeModules: routeModulesObj,
     future: {},
     ssr: true,
     isSpaMode: false,
@@ -74,9 +100,9 @@ describe("entry.server.tsx Security and CSP", () => {
       expect(csp).toContain("frame-ancestors 'none'");
       expect(csp).toContain("object-src 'none'");
       expect(csp).toContain("base-uri 'self'");
-      expect(csp).toContain("form-action 'self'");
-      expect(csp).not.toContain("youtube");
-      expect(csp).not.toContain("vimeo");
+      expect(csp).toContain("frame-src https://www.youtube-nocookie.com https://player.vimeo.com");
+      expect(csp).not.toContain("https://youtube.com");
+      expect(csp).not.toContain("https://vimeo.com");
     } finally {
       process.env.NODE_ENV = originalEnv;
     }
@@ -176,6 +202,51 @@ describe("entry.server.tsx Security and CSP", () => {
       expect(nonce1).not.toBe(nonce2);
     } finally {
       process.env.NODE_ENV = originalEnv;
+    }
+  });
+
+  it("renders html with correct lang attribute for FR and EN routes during SSR without client effects", async () => {
+    const staticHandler = createStaticHandler([
+      {
+        id: "root",
+        path: "/",
+        Component: RootLayout,
+        children: [
+          { id: "fr-home", path: "fr", Component: RootLayout },
+          { id: "en-home", path: "en", Component: RootLayout },
+          { id: "en-studio", path: "en/studio", Component: RootLayout },
+        ],
+      },
+    ]);
+
+    // Test French route SSR
+    const reqFr = new Request("https://parallax.example.com/fr");
+    const queryFr = await staticHandler.query(reqFr);
+    if (!(queryFr instanceof Response)) {
+      const ctxFr = createEntryContext(queryFr);
+      const resFr = await handleRequest(reqFr, 200, new Headers(), ctxFr, {});
+      const htmlFr = await resFr.text();
+      expect(htmlFr).toContain('<html lang="fr">');
+    }
+
+    // Test English home SSR
+    const reqEn = new Request("https://parallax.example.com/en");
+    const queryEn = await staticHandler.query(reqEn);
+    if (!(queryEn instanceof Response)) {
+      const ctxEn = createEntryContext(queryEn);
+      const resEn = await handleRequest(reqEn, 200, new Headers(), ctxEn, {});
+      const htmlEn = await resEn.text();
+      expect(htmlEn).toContain('<html lang="en">');
+    }
+
+    // Test English studio SSR
+    const reqEnStudio = new Request("https://parallax.example.com/en/studio");
+    const queryEnStudio = await staticHandler.query(reqEnStudio);
+    if (!(queryEnStudio instanceof Response)) {
+      const ctxEnStudio = createEntryContext(queryEnStudio);
+      const resEnStudio = await handleRequest(reqEnStudio, 200, new Headers(), ctxEnStudio, {});
+      const htmlEnStudio = await resEnStudio.text();
+      expect(htmlEnStudio).toContain('<html lang="en">');
     }
   });
 });

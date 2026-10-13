@@ -27,6 +27,8 @@ export function applyAdminSecurityHeaders(headers: Headers, url: string): void {
   }
 }
 
+import { validateServerStartup } from "./lib/env.server";
+
 export default function handleRequest(
   request: Request,
   responseStatusCode: number,
@@ -34,6 +36,7 @@ export default function handleRequest(
   routerContext: EntryContext,
   _loadContext: Record<string, unknown>
 ) {
+  validateServerStartup();
   return isbot(request.headers.get("user-agent") ?? "")
     ? handleBotRequest(request, responseStatusCode, responseHeaders, routerContext)
     : handleBrowserRequest(request, responseStatusCode, responseHeaders, routerContext);
@@ -56,6 +59,7 @@ export function buildCsp(nonce: string): string {
     "font-src 'self'",
     "img-src 'self' data:",
     `connect-src ${connectSrc}`,
+    "frame-src https://www.youtube-nocookie.com https://player.vimeo.com",
     "frame-ancestors 'none'",
     "base-uri 'self'",
     "form-action 'self'",

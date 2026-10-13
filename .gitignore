@@ -27,6 +27,7 @@ test-results/
 data/
 uploads/
 media/
+!apps/web/app/routes/media/
 .trash/
 
 # Certificates and keys

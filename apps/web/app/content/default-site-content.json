@@ -1,0 +1,258 @@
+{
+  "schemaVersion": 1,
+  "revision": "00000000000000000000000000000001",
+  "updatedAt": "2026-10-13T10:00:00.000Z",
+  "common": {
+    "brandName": "Parallax",
+    "navigation": {
+      "portfolio": {
+        "fr": "Portfolio",
+        "en": "Portfolio"
+      },
+      "studio": {
+        "fr": "Studio",
+        "en": "Studio"
+      },
+      "contact": {
+        "fr": "Contact",
+        "en": "Contact"
+      },
+      "sempra": {
+        "fr": "SEMPRA ↗",
+        "en": "SEMPRA ↗"
+      },
+      "clientArea": {
+        "fr": "Espace client",
+        "en": "Client area"
+      }
+    },
+    "footer": {
+      "copyright": {
+        "fr": "© 2026 LS studio - Parallax",
+        "en": "© 2026 LS studio - Parallax"
+      },
+      "legalNotice": {
+        "fr": "Mentions légales",
+        "en": "Legal notice"
+      },
+      "privacy": {
+        "fr": "Politique de confidentialité",
+        "en": "Privacy policy"
+      },
+      "terms": {
+        "fr": "CGV",
+        "en": "Terms"
+      },
+      "cookies": {
+        "fr": "Cookies",
+        "en": "Cookies"
+      }
+    }
+  },
+  "home": {
+    "seo": {
+      "title": {
+        "fr": "Parallax - Studio photo & vidéo",
+        "en": "Parallax - Photo & video studio"
+      },
+      "description": {
+        "fr": "Parallax, studio photo et vidéo par Maxime et Ludovic. Clips, publicités, portraits et documentaires.",
+        "en": "Parallax, photo and video studio by Maxime and Ludovic. Music videos, commercials, portraits and documentaries."
+      }
+    },
+    "hero": {
+      "badge": {
+        "fr": "Studio photo & vidéo",
+        "en": "Photo & video studio"
+      },
+      "title": {
+        "fr": "Photo & vidéo.",
+        "en": "Photo & video."
+      },
+      "subtitle": {
+        "fr": "Clips · Publicité · Portraits · Documentaire",
+        "en": "Music videos · Advertising · Portraits · Documentary"
+      }
+    },
+    "showreel": {
+      "title": {
+        "fr": "Showreel 2026",
+        "en": "Showreel 2026"
+      },
+      "coverImageId": "index-showreel",
+      "coverImageAlt": {
+        "fr": "Couverture du showreel Parallax 2026",
+        "en": "Parallax 2026 showreel cover"
+      },
+      "videoUrl": ""
+    },
+    "duo": {
+      "title": {
+        "fr": "Maxime & Ludovic",
+        "en": "Maxime & Ludovic"
+      },
+      "text": {
+        "fr": "Nous sommes Maxime et Ludovic, un duo photo et vidéo. Ensemble, nous réalisons clips, publicités et portraits avec la même exigence.",
+        "en": "We are Maxime and Ludovic, a photo and video duo. Together we create music videos, commercials and portraits with the same standard."
+      },
+      "imageId": "index-duo",
+      "imageAlt": {
+        "fr": "Maxime et Ludovic, fondateurs de Parallax",
+        "en": "Maxime and Ludovic, founders of Parallax"
+      }
+    },
+    "savoirFaire": {
+      "title": {
+        "fr": "Savoir-faire",
+        "en": "What we do"
+      },
+      "photoTitle": {
+        "fr": "Photo",
+        "en": "Photo"
+      },
+      "photoItems": [
+        {
+          "fr": "Portrait",
+          "en": "Portrait"
+        },
+        {
+          "fr": "Produit",
+          "en": "Product"
+        },
+        {
+          "fr": "Lieu",
+          "en": "Location"
+        },
+        {
+          "fr": "Événement",
+          "en": "Event"
+        }
+      ],
+      "videoTitle": {
+        "fr": "Vidéo",
+        "en": "Video"
+      },
+      "videoItems": [
+        {
+          "fr": "Clip musical",
+          "en": "Music video"
+        },
+        {
+          "fr": "Publicité",
+          "en": "Advertising"
+        },
+        {
+          "fr": "Documentaire",
+          "en": "Documentary"
+        },
+        {
+          "fr": "Réseaux sociaux - vertical & horizontal",
+          "en": "Social media - vertical & horizontal"
+        }
+      ]
+    },
+    "contact": {
+      "title": {
+        "fr": "Contact",
+        "en": "Contact"
+      },
+      "emailLabel": {
+        "fr": "Email",
+        "en": "Email"
+      },
+      "email": "",
+      "socialLabel": {
+        "fr": "Réseaux",
+        "en": "Social"
+      },
+      "instagramUrl": "https://instagram.com",
+      "youtubeUrl": "https://youtube.com"
+    },
+    "sempra": {
+      "badge": {
+        "fr": "L'autre studio de LS studio",
+        "en": "The other LS studio brand"
+      },
+      "title": {
+        "fr": "Photographie & vidéo de mariage",
+        "en": "Wedding photography & video"
+      },
+      "buttonText": {
+        "fr": "Découvrir SEMPRA",
+        "en": "Discover SEMPRA"
+      },
+      "buttonUrl": "#"
+    }
+  },
+  "studio": {
+    "seo": {
+      "title": {
+        "fr": "Parallax - Le studio",
+        "en": "Parallax - The studio"
+      },
+      "description": {
+        "fr": "Découvrez le studio Parallax, fondé par Maxime et Ludovic. Notre équipe, notre approche et notre vision.",
+        "en": "Discover Parallax studio, founded by Maxime and Ludovic. Our team, approach and vision."
+      }
+    },
+    "hero": {
+      "title": {
+        "fr": "Le studio",
+        "en": "The studio"
+      },
+      "text": {
+        "fr": "Parallax est le pôle création d'images de LS studio, basé en Belgique. Nous concevons et réalisons photo et vidéo pour les marques, les artistes et les lieux - du clip musical au spot publicitaire, du portrait au documentaire. Une même exigence, quel que soit le format.",
+        "en": "Parallax is the image-making arm of LS studio, based in Belgium. We design and produce photo and video for brands, artists and venues - from music videos to commercials, from portraits to documentary. The same standard, whatever the format."
+      }
+    },
+    "team": {
+      "title": {
+        "fr": "Qui sommes-nous",
+        "en": "Who we are"
+      },
+      "members": [
+        {
+          "id": "ludovic",
+          "name": "Ludovic",
+          "role": {
+            "fr": "Cofondateur & vidéaste",
+            "en": "Co-founder & videographer"
+          },
+          "imageId": "studio-ludovic",
+          "imageAlt": {
+            "fr": "Portrait de Ludovic, cofondateur et vidéaste",
+            "en": "Portrait of Ludovic, co-founder and videographer"
+          }
+        },
+        {
+          "id": "maxime",
+          "name": "Maxime",
+          "role": {
+            "fr": "Cofondateur & photographe",
+            "en": "Co-founder & photographer"
+          },
+          "imageId": "studio-maxime",
+          "imageAlt": {
+            "fr": "Portrait de Maxime, cofondateur et photographe",
+            "en": "Portrait of Maxime, co-founder and photographer"
+          }
+        }
+      ]
+    },
+    "approach": {
+      "title": {
+        "fr": "Notre approche",
+        "en": "Our approach"
+      },
+      "headline": {
+        "fr": "On met toutes les chances du côté de votre image.",
+        "en": "We give your image every chance to work."
+      },
+      "text": {
+        "fr": "Avant de filmer, nous cherchons à comprendre ce que vous voulez obtenir : plus de visibilité, plus de désir, plus de ventes. Ensuite, chaque choix - lumière, cadre, rythme - vise à mettre votre produit dans les meilleures conditions pour convaincre. Nous ne pouvons pas promettre un chiffre, mais nous nous engageons à tout faire pour que vos images jouent en votre faveur.",
+        "en": "Before we shoot, we work to understand what you're after: more visibility, more desire, more sales. Then every choice - light, framing, rhythm - is made to give your product the best conditions to convince. We can't promise a number, but we commit to doing everything so your images work in your favour."
+      }
+    }
+  },
+  "media": {}
+}

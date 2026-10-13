@@ -6,12 +6,26 @@ import {
   ScrollRestoration,
   isRouteErrorResponse,
   useRouteError,
+  useLocation,
 } from "react-router";
 import "./app.css";
 
+function resolveLanguage(pathname?: string): "fr" | "en" {
+  if (!pathname) return "fr";
+  return pathname === "/en" || pathname.startsWith("/en/") ? "en" : "fr";
+}
+
 export function Layout({ children }: { children: React.ReactNode }) {
+  let lang: "fr" | "en" = "fr";
+  try {
+    const location = useLocation();
+    lang = resolveLanguage(location?.pathname);
+  } catch {
+    // fallback to default fr
+  }
+
   return (
-    <html lang="fr">
+    <html lang={lang}>
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -33,24 +47,46 @@ export default function App() {
 
 export function ErrorBoundary() {
   const error = useRouteError();
-  let message = "Une erreur inattendue est survenue.";
-  let title = "Erreur";
+  let lang: "fr" | "en" = "fr";
+  try {
+    const location = useLocation();
+    lang = resolveLanguage(location?.pathname);
+  } catch {
+    // fallback to default fr
+  }
+
+  const isEn = lang === "en";
+
+  let title = isEn ? "Error" : "Erreur";
+  let message = isEn
+    ? "An unexpected error occurred."
+    : "Une erreur inattendue est survenue.";
 
   if (isRouteErrorResponse(error)) {
     if (error.status === 404) {
-      title = "Page non trouvée";
-      message = "La page demandée n'existe pas.";
+      title = isEn ? "Page Not Found" : "Page non trouvée";
+      message = isEn
+        ? "The requested page does not exist."
+        : "La page demandée n'existe pas.";
     } else {
-      title = `Erreur ${error.status}`;
-      message = error.statusText || message;
+      title = isEn ? `Error ${error.status}` : `Erreur ${error.status}`;
+      message = isEn
+        ? "An unexpected error occurred."
+        : "Une erreur inattendue est survenue.";
     }
   }
 
+  const homeHref = isEn ? "/en" : "/fr";
+  const homeText = isEn ? "Back to home" : "Retour à l'accueil";
+
   return (
-    <div style={{ display: "flex", minHeight: "100vh", alignItems: "center", justifyContent: "center", backgroundColor: "#0b0f19", color: "#e2e8f0", fontFamily: "system-ui, sans-serif" }}>
-      <div style={{ textAlign: "center", padding: "2rem" }}>
-        <h1 style={{ fontSize: "1.75rem", marginBottom: "0.5rem" }}>{title}</h1>
-        <p style={{ color: "#94a3b8" }}>{message}</p>
+    <div className="errorContainer">
+      <div className="errorCard">
+        <h1 className="errorTitle">{title}</h1>
+        <p className="errorMessage">{message}</p>
+        <a href={homeHref} className="errorLink">
+          {homeText}
+        </a>
       </div>
     </div>
   );

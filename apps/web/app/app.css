@@ -14,6 +14,54 @@
   src: url('/fonts/space-grotesk-latin-500-normal.woff2') format('woff2');
 }
 
+@font-face {
+  font-family: 'Cormorant Garamond';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/CormorantGaramond-Regular.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Cormorant Garamond';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/fonts/CormorantGaramond-Medium.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Cormorant Garamond';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('/fonts/CormorantGaramond-SemiBold.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Cormorant Garamond';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/CormorantGaramond-Italic.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Hanken Grotesk';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/HankenGrotesk-Regular.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Hanken Grotesk';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/fonts/HankenGrotesk-Medium.woff2') format('woff2');
+}
+
 :root {
   /* Parallax tokens */
   --px-ink: #0C0F17;
@@ -47,8 +95,8 @@
 
   /* Typography */
   --font-parallax: 'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  --font-sp-display: 'Cormorant Garamond', serif;
-  --font-sp-text: 'Hanken Grotesk', sans-serif;
+  --font-sp-display: 'Cormorant Garamond', Georgia, serif;
+  --font-sp-text: 'Hanken Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 
   /* Radii */
   --r-pill: 999px;
@@ -58,9 +106,71 @@
   --r-input: 8px;
 }
 
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
 body {
   margin: 0;
   background: var(--px-ink);
   color: var(--px-text);
   font-family: var(--font-parallax);
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* Error Boundary classes (no unsafe-inline styles) */
+.errorContainer {
+  display: flex;
+  min-height: 100vh;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--px-ink);
+  color: var(--px-text);
+  font-family: var(--font-parallax);
+  padding: 1.5rem;
+}
+
+.errorCard {
+  text-align: center;
+  max-width: 480px;
+  padding: 2.5rem;
+  background: var(--px-surface);
+  border: 1px solid var(--px-border);
+  border-radius: var(--r-card);
+}
+
+.errorTitle {
+  font-size: 1.75rem;
+  font-weight: 500;
+  margin: 0 0 0.75rem 0;
+  color: var(--px-text);
+}
+
+.errorMessage {
+  margin: 0 0 1.5rem 0;
+  font-size: 1rem;
+  line-height: 1.5;
+  color: var(--px-text-2);
+}
+
+.errorLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.625rem 1.25rem;
+  background: var(--px-accent);
+  color: #ffffff;
+  border-radius: var(--r-pill);
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition: background 0.15s ease;
+}
+
+.errorLink:hover {
+  background: var(--px-accent-hover);
 }

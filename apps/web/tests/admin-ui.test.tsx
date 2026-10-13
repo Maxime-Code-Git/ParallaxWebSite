@@ -13,6 +13,9 @@ vi.mock("react-router", async (importOriginal) => {
     Form: ({ children, ...props }: React.FormHTMLAttributes<HTMLFormElement>) => (
       <form {...props}>{children}</form>
     ),
+    Link: ({ children, to, ...props }: { children: React.ReactNode; to: string; [key: string]: unknown }) => (
+      <a href={to} {...props}>{children}</a>
+    ),
   };
 });
 
@@ -121,8 +124,11 @@ describe("Admin UI Components", () => {
         expect(screen.getByRole("heading", { level: 3, name: modTitle })).toBeInTheDocument();
       }
 
-      const badges = screen.getAllByText("Lot suivant");
-      expect(badges.length).toBe(8);
+      const activeBadges = screen.getAllByText("Actif");
+      expect(activeBadges.length).toBe(2);
+
+      const nextLotBadges = screen.getAllByText("Lot suivant");
+      expect(nextLotBadges.length).toBe(6);
     });
   });
 });

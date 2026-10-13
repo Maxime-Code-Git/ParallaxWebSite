@@ -1,0 +1,336 @@
+.container {
+  min-height: 100vh;
+  box-sizing: border-box;
+  background: var(--px-ink);
+  color: var(--px-text);
+  font-family: var(--font-parallax);
+}
+
+.header {
+  height: 88px;
+  box-sizing: border-box;
+  padding: 0 80px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 0.5px solid var(--px-line);
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: var(--px-header-bg);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.headerLeft {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.backLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  color: var(--px-text-2);
+  text-decoration: none;
+  transition: color 0.18s ease;
+}
+
+.backLink:hover {
+  color: var(--px-accent);
+}
+
+.pageHeading {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 500;
+  color: var(--px-text);
+}
+
+.mainContent {
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 48px 40px 96px;
+  box-sizing: border-box;
+}
+
+.topBar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 32px;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.revisionTag {
+  font-size: 12px;
+  color: var(--px-text-3);
+  font-family: monospace;
+  background: var(--px-surface);
+  padding: 4px 10px;
+  border-radius: var(--r-input);
+  border: 0.5px solid var(--px-border);
+}
+
+.langTabs {
+  display: inline-flex;
+  background: var(--px-surface);
+  border: 0.5px solid var(--px-border);
+  border-radius: var(--r-pill);
+  padding: 3px;
+  gap: 4px;
+}
+
+.langTab {
+  background: none;
+  border: none;
+  color: var(--px-text-2);
+  padding: 6px 18px;
+  border-radius: var(--r-pill);
+  font-family: var(--font-parallax);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease;
+}
+
+.langTabActive {
+  background: var(--px-accent);
+  color: #ffffff;
+}
+
+.alertError {
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #fca5a5;
+  border-radius: var(--r-card);
+  padding: 16px 20px;
+  margin-bottom: 28px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.alertSuccess {
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  color: #6ee7b7;
+  border-radius: var(--r-card);
+  padding: 16px 20px;
+  margin-bottom: 28px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.sectionCard {
+  background: var(--px-surface);
+  border: 0.5px solid var(--px-border);
+  border-radius: var(--r-card);
+  padding: 32px;
+  margin-bottom: 28px;
+}
+
+.sectionTitle {
+  margin: 0 0 8px;
+  font-size: 20px;
+  font-weight: 500;
+  color: var(--px-text);
+}
+
+.sectionSubtitle {
+  margin: 0 0 24px;
+  font-size: 13px;
+  color: var(--px-text-2);
+}
+
+.fieldGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.fieldGroup:last-child {
+  margin-bottom: 0;
+}
+
+.label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--px-text);
+  display: flex;
+  justify-content: space-between;
+}
+
+.labelHint {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--px-text-3);
+}
+
+.input, .textarea, .select {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--px-surface-img);
+  border: 1px solid var(--px-border-input);
+  border-radius: var(--r-input);
+  padding: 10px 14px;
+  color: var(--px-text);
+  font-family: var(--font-parallax);
+  font-size: 14px;
+  line-height: 1.5;
+  transition: border-color 0.18s ease;
+}
+
+.input:focus, .textarea:focus, .select:focus {
+  outline: none;
+  border-color: var(--px-accent);
+}
+
+.textarea {
+  min-height: 90px;
+  resize: vertical;
+}
+
+.row2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+
+.imagePickerGroup {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  background: var(--px-surface-img);
+  padding: 12px;
+  border-radius: var(--r-input);
+  border: 1px solid var(--px-border-input);
+}
+
+.imagePreview {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 0.5px solid var(--px-border);
+  background: var(--px-media);
+}
+
+.actionBar {
+  position: sticky;
+  bottom: 24px;
+  background: rgba(20, 24, 34, 0.95);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--px-border);
+  border-radius: var(--r-card);
+  padding: 16px 24px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  z-index: 30;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  margin-top: 32px;
+}
+
+.saveButton {
+  background: var(--px-accent);
+  color: #ffffff;
+  border: none;
+  border-radius: var(--r-pill);
+  padding: 12px 28px;
+  font-family: var(--font-parallax);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.18s ease, transform 0.18s ease;
+}
+
+.saveButton:hover:not(:disabled) {
+  background: var(--px-accent-hover);
+  transform: scale(1.02);
+}
+
+.saveButton:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+@media (max-width: 900px) {
+  .header {
+    padding: 0 24px;
+  }
+
+  .mainContent {
+    padding: 32px 20px 80px;
+  }
+
+  .row2 {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .sectionCard {
+    padding: 24px 18px;
+  }
+}
+
+.memberDividerBlock {
+  margin-top: 24px;
+  padding-top: 24px;
+  border-top: 0.5px solid var(--px-border);
+}
+
+.memberBlockTitle {
+  margin: 0 0 16px;
+  font-size: 16px;
+  color: var(--px-text);
+  font-weight: 500;
+}
+
+.memberFieldSpaced {
+  margin-top: 12px;
+}
+
+.conflictBox {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #fca5a5;
+  border-radius: var(--r-card);
+  padding: 18px 22px;
+  margin-bottom: 28px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.conflictText {
+  margin: 0 0 10px;
+  font-weight: 500;
+  color: #fca5a5;
+}
+
+.conflictNotice {
+  margin: 0 0 14px;
+  color: var(--px-text-2);
+  font-size: 13px;
+}
+
+.conflictResolveButton {
+  background: rgba(239, 68, 68, 0.2);
+  border: 1px solid rgba(239, 68, 68, 0.5);
+  color: #ffffff;
+  border-radius: var(--r-pill);
+  padding: 8px 18px;
+  font-family: var(--font-parallax);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.conflictResolveButton:hover {
+  background: rgba(239, 68, 68, 0.35);
+}

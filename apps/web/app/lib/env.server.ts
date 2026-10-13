@@ -178,10 +178,108 @@ function validateStoragePath(val: string | undefined, name: string): string {
   return val;
 }
 
+function validateStorageDirectoryPath(val: string | undefined, name: string): string {
+  if (!val) {
+    throw new Error(`CRITICAL: La variable d'environnement ${name} est obligatoire.`);
+  }
+  if (!path.isAbsolute(val)) {
+    throw new Error(`CRITICAL: La variable d'environnement ${name} doit etre un chemin absolu.`);
+  }
+
+  checkNoSymlinksInPath(val, name);
+
+  const resolved = path.resolve(val);
+  const repoRoot = getMonorepoRoot();
+  let realRepoRoot = repoRoot;
+  try {
+    realRepoRoot = fs.realpathSync(repoRoot);
+  } catch {
+    // Ignored
+  }
+
+  const relResolved = path.relative(repoRoot, resolved);
+  const relReal = path.relative(realRepoRoot, resolved);
+  if (
+    (!relResolved.startsWith("..") && !path.isAbsolute(relResolved)) ||
+    (!relReal.startsWith("..") && !path.isAbsolute(relReal))
+  ) {
+    throw new Error(`CRITICAL: ${name} ne doit pas se trouver dans le depot du projet.`);
+  }
+
+  let realPathToCheck: string;
+  let stat: fs.Stats | undefined;
+
+  try {
+    const lstat = fs.lstatSync(val);
+    if (lstat.isSymbolicLink()) {
+      throw new Error(`CRITICAL: ${name} ne doit pas etre un lien symbolique.`);
+    }
+    stat = fs.statSync(val);
+    realPathToCheck = fs.realpathSync(val);
+  } catch (err: unknown) {
+    if (err && typeof err === "object" && "code" in err && (err as { code: unknown }).code === "ENOENT") {
+      const parentDir = path.dirname(val);
+      try {
+        const parentLstat = fs.lstatSync(parentDir);
+        if (parentLstat.isSymbolicLink()) {
+          throw new Error(`CRITICAL: Le dossier parent de ${name} ne doit pas etre un lien symbolique.`, { cause: err });
+        }
+        const parentStat = fs.statSync(parentDir);
+        if (!parentStat.isDirectory()) {
+          throw new Error(`CRITICAL: Le parent de ${name} doit etre un dossier.`, { cause: err });
+        }
+        fs.accessSync(parentDir, fs.constants.W_OK);
+        fs.mkdirSync(val, { recursive: true, mode: 0o700 });
+        try {
+          fs.chmodSync(val, 0o700);
+        } catch {
+          // best-effort
+        }
+        stat = fs.statSync(val);
+        realPathToCheck = fs.realpathSync(val);
+      } catch (parentErr) {
+        if (parentErr instanceof Error && parentErr.message.startsWith("CRITICAL:")) {
+          throw parentErr;
+        }
+        throw new Error(`CRITICAL: Le dossier parent de ${name} n'existe pas ou n'est pas inscriptible.`, { cause: parentErr });
+      }
+    } else {
+      if (err instanceof Error && err.message.startsWith("CRITICAL:")) {
+        throw err;
+      }
+      throw new Error(`CRITICAL: ${name} ou son dossier parent n'est pas inscriptible ou n'existe pas.`, { cause: err });
+    }
+  }
+
+  if (stat) {
+    if (!stat.isDirectory()) {
+      throw new Error(`CRITICAL: ${name} doit etre un repertoire.`);
+    }
+    try {
+      fs.accessSync(val, fs.constants.W_OK);
+      try {
+        fs.chmodSync(val, 0o700);
+      } catch {
+        // best-effort
+      }
+    } catch (accessErr) {
+      throw new Error(`CRITICAL: ${name} n'est pas accessible en ecriture.`, { cause: accessErr });
+    }
+  }
+
+  const rel = path.relative(realRepoRoot, realPathToCheck);
+  if (!rel.startsWith("..") && !path.isAbsolute(rel)) {
+    throw new Error(`CRITICAL: ${name} ne doit pas se trouver dans le depot du projet.`);
+  }
+
+  return realPathToCheck;
+}
+
 export const ENV = {
   get PUBLIC_SITE_URL(): string {
     const isProd = process.env.NODE_ENV === "production";
-    const url = process.env.PUBLIC_SITE_URL || (isProd ? "" : "http://localhost:3000");
+    const isLocalPreview = process.env.PARALLAX_LOCAL_PREVIEW === "true";
+    const url = process.env.PUBLIC_SITE_URL || (isProd && !isLocalPreview ? "" : "http://localhost:3000");
     if (!url) {
       throw new Error("CRITICAL: PUBLIC_SITE_URL est obligatoire.");
     }
@@ -190,12 +288,22 @@ export const ENV = {
       if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
         throw new Error("PROTOCOL_INVALID");
       }
-      if (isProd && parsed.protocol !== "https:") {
+      if (isLocalPreview) {
+        isLocalPreviewMode();
+      } else if (isProd && parsed.protocol !== "https:") {
         throw new Error("HTTPS_REQUIRED");
       }
     } catch (e: unknown) {
-      if (e instanceof Error && e.message === "HTTPS_REQUIRED") {
-        throw new Error("CRITICAL: PUBLIC_SITE_URL doit obligatoirement utiliser https:// en production.", { cause: e });
+      if (e instanceof Error) {
+        if (e.message === "PREVIEW_PROXY_FORBIDDEN") {
+          throw new Error("CRITICAL: PARALLAX_LOCAL_PREVIEW est incompatible avec TRUST_PROXY=true.", { cause: e });
+        }
+        if (e.message === "PREVIEW_HOST_INVALID") {
+          throw new Error("CRITICAL: PARALLAX_LOCAL_PREVIEW n'est autorise qu'avec une URL HTTP sur 127.0.0.1 ou localhost.", { cause: e });
+        }
+        if (e.message === "HTTPS_REQUIRED") {
+          throw new Error("CRITICAL: PUBLIC_SITE_URL doit obligatoirement utiliser https:// en production.", { cause: e });
+        }
       }
       throw new Error("CRITICAL: PUBLIC_SITE_URL n'est pas une URL valide ou n'utilise pas HTTP/HTTPS.", { cause: e });
     }
@@ -237,10 +345,70 @@ export const ENV = {
     return validateStoragePath(val, "RATE_LIMIT_DB_PATH");
   },
 
+  get SITE_CONTENT_PATH(): string {
+    const isTest = process.env.NODE_ENV === "test";
+    const val = process.env.SITE_CONTENT_PATH;
+
+    if (isTest) {
+      return validateTestPath(val, "SITE_CONTENT_PATH");
+    }
+
+    return validateStoragePath(val, "SITE_CONTENT_PATH");
+  },
+
+  get SITE_MEDIA_PATH(): string {
+    const isTest = process.env.NODE_ENV === "test";
+    const val = process.env.SITE_MEDIA_PATH;
+
+    if (isTest) {
+      const p = validateTestPath(val, "SITE_MEDIA_PATH");
+      if (!fs.existsSync(p)) {
+        fs.mkdirSync(p, { recursive: true, mode: 0o700 });
+      }
+      return p;
+    }
+
+    return validateStorageDirectoryPath(val, "SITE_MEDIA_PATH");
+  },
+
   get TRUST_PROXY(): boolean {
     return process.env.TRUST_PROXY === "true";
   },
+
+  get PARALLAX_LOCAL_PREVIEW(): boolean {
+    return process.env.PARALLAX_LOCAL_PREVIEW === "true";
+  },
 };
+
+export function isLocalPreviewMode(): boolean {
+  if (process.env.PARALLAX_LOCAL_PREVIEW !== "true") return false;
+  if (process.env.TRUST_PROXY === "true" || process.env.TRUST_PROXY !== "false") {
+    throw new Error("CRITICAL: PARALLAX_LOCAL_PREVIEW est incompatible avec TRUST_PROXY=true (exige explicitement TRUST_PROXY=false).");
+  }
+  const host = process.env.HOST;
+  if (host !== "127.0.0.1" && host !== "localhost") {
+    throw new Error(`CRITICAL: PARALLAX_LOCAL_PREVIEW exige un bind loopback local explicite (HOST=127.0.0.1 ou localhost). Bind '${host}' interdit.`);
+  }
+  const url = process.env.PUBLIC_SITE_URL || "";
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "http:" || (parsed.hostname !== "127.0.0.1" && parsed.hostname !== "localhost")) {
+      throw new Error("CRITICAL: PARALLAX_LOCAL_PREVIEW n'est autorise qu'avec une URL HTTP sur 127.0.0.1 ou localhost.");
+    }
+  } catch (e) {
+    if (e instanceof Error && e.message.startsWith("CRITICAL:")) throw e;
+    throw new Error("CRITICAL: PARALLAX_LOCAL_PREVIEW n'est autorise qu'avec une URL HTTP sur 127.0.0.1 ou localhost.", { cause: e });
+  }
+  return true;
+}
+
+export function validateContentConfig(): string {
+  return ENV.SITE_CONTENT_PATH;
+}
+
+export function validateMediaConfig(): string {
+  return ENV.SITE_MEDIA_PATH;
+}
 
 export interface AdminConfig {
   hash: string;
@@ -252,6 +420,9 @@ export interface AdminConfig {
 }
 
 export function validateAdminConfig(): AdminConfig {
+  if (process.env.PARALLAX_LOCAL_PREVIEW === "true") {
+    isLocalPreviewMode();
+  }
   const siteUrl = ENV.PUBLIC_SITE_URL;
 
   const hash = process.env.ADMIN_PASSWORD_HASH;
@@ -290,13 +461,20 @@ export function validateAdminConfig(): AdminConfig {
   };
 }
 
-let hasValidatedProduction = false;
+let hasValidatedStartup = false;
 export function validateServerStartup(): void {
-  if (hasValidatedProduction) {
+  if (hasValidatedStartup) {
     return;
   }
-  if (process.env.NODE_ENV === "production" && !process.env.VITEST) {
-    validateAdminConfig();
-    hasValidatedProduction = true;
+  if (!process.env.VITEST) {
+    if (process.env.PARALLAX_LOCAL_PREVIEW === "true") {
+      isLocalPreviewMode();
+    }
+    validateContentConfig();
+    validateMediaConfig();
+    if (process.env.NODE_ENV === "production") {
+      validateAdminConfig();
+    }
+    hasValidatedStartup = true;
   }
 }
