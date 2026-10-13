@@ -18,33 +18,59 @@ ParallaxWebSite/
   apps/
     web/
       app/
+        components/
+          public/
+            Footer.tsx
+            footer.module.css
+            Header.tsx
+            header.module.css
+            ScrollToTop.tsx
+            scrollToTop.module.css
+            VideoModal.tsx
+            videoModal.module.css
+        content/
+          default-site-content.json
         lib/
           admin-auth.server.ts
+          atomic-fs.server.ts
           auth.server.ts
           env.server.ts
           rate-limit.server.ts
           security.server.ts
           session.server.ts
+          site-content.server.ts
+          site-content.shared.ts
         routes/
           admin/
+            adminForms.module.css
             dashboard.module.css
             dashboard.tsx
+            home.tsx
             login.module.css
             login.tsx
             logout.tsx
-          home.module.css
-          home.tsx
+            studio.tsx
+          public/
+            home.module.css
+            home.tsx
+            studio.module.css
+            studio.tsx
+          preview-login.ts
+          root-redirect.tsx
         app.css
         entry.server.tsx
         root.tsx
         routes.ts
       public/
         fonts/
+          cormorant-garamond-*.woff2
+          hanken-grotesk-*.woff2
           LICENSE.txt
-          space-grotesk-latin-400-normal.woff2
-          space-grotesk-latin-500-normal.woff2
+          space-grotesk-*.woff2
+        img/
       scripts/
         admin-hash.js
+        preview-local.js
       tests/
       package.json
       tsconfig.json
@@ -89,6 +115,7 @@ Depuis la racine du monorepo :
 - `npm run lint` : Execute ESLint sur l'ensemble du projet avec zero warning autorise.
 - `npm run test` : Execute les tests unitaires et d'integration avec Vitest.
 - `npm run start` : Demarre le serveur de production pour `apps/web`.
+- `npm run preview:local` : Demarre le serveur de previsualisation de production local (`PARALLAX_LOCAL_PREVIEW=true`, lie a `127.0.0.1`).
 - `npm run admin:hash` : Lance l'outil interactif securise de generation de hash administrateur Argon2id.
 
 ## 4. Conventions TypeScript et CSS Modules
@@ -157,3 +184,20 @@ Depuis la racine du monorepo :
   - `GET /admin/dashboard` : Tableau de bord securise presentant les 8 modules a venir.
   - `POST /admin/logout` : Deconnexion securisee avec CSRF et destruction de la session.
   - `GET /admin/logout` : Rejet 405 Method Not Allowed avec en-tete `Allow: POST`.
+
+## 8. Vitrine FR/EN et contenus administrables (Lot 2)
+
+1. **Pages et routes livrees** :
+   - `GET /` : Redirection temporaire 302 vers `/fr`.
+   - `GET /fr` et `GET /en` : Page d'accueil publique fidele au prototype desktop (`index.html`) et mobile (`mobile.html`), avec Header responsive, choix de langue dynamique preservant la page courante, hero, showreel (modal de consentement sans tiers automatique au chargement), duo Maxime & Ludovic, savoir-faire photo & video (ponctuation simple sans tirets cadratins), contact, bloc SEMPRA isole avec palette et polices dediees, et Footer.
+   - `GET /fr/studio` et `GET /en/studio` : Page Studio avec portraits, roles et approche du duo.
+   - `GET /admin/home` et `POST /admin/home` : Formulaire d'administration de la page Accueil en francais et en anglais.
+   - `GET /admin/studio` et `POST /admin/studio` : Formulaire d'administration de la page Studio en francais et en anglais.
+   - `GET /preview/login` : Endpoint d'authentification de developpement local borne strictement au mode `PARALLAX_LOCAL_PREVIEW=true` (retourne 404 en production standard).
+
+2. **Modele de donnees et persistance (`schemaVersion: 1`)** :
+   - Stockage externe defini par `SITE_CONTENT_PATH` (ex: `/Users/profadmin/.parallax-data/site-content.json`).
+   - Ecriture atomique (`atomicWriteJson`) avec fichier temporaire, `fsync` du descripteur et du repertoire parent, rotation a 5 fichiers de sauvegarde `.bak`, et permissions `0600`.
+   - Suivi de revision par jeton hex 32 octets aleatoire et horodatage ISO serveur. En cas de tentative d'enregistrement concurrent avec une revision obsolete, le serveur renvoie une erreur HTTP 409 et preserve l'integrite des saisies de l'utilisateur dans l'interface sans perte de donnees.
+   - Selection de visuels strictement limitee aux identifiants autorises (`ALLOWED_IMAGE_MAP`). Aucun chemin arbitraire accepte en entree.
+

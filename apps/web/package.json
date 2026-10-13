@@ -9,6 +9,7 @@
     "test:watch": "vitest",
     "lint": "eslint .",
     "start": "node scripts/validate-startup.js && react-router-serve ./build/server/index.js",
+    "preview:local": "node scripts/preview-local.js",
     "typecheck": "react-router typegen && tsc",
     "admin:hash": "node scripts/admin-hash.js"
   },

@@ -1,0 +1,130 @@
+{
+  "v": 3,
+  "attachments": {},
+  "boards": {
+    "CGV.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "is_interactive": true,
+      "title": "CGV",
+      "w": 1440,
+      "x": 1520,
+      "y": 3060
+    },
+    "Confidentialite.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "is_interactive": true,
+      "title": "Confidentialité",
+      "w": 1440,
+      "x": 0,
+      "y": 3060
+    },
+    "Contact.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "is_interactive": true,
+      "title": "Contact",
+      "w": 1440,
+      "x": 1520,
+      "y": 1020
+    },
+    "Cookies.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "is_interactive": true,
+      "title": "Cookies",
+      "w": 1440,
+      "x": 0,
+      "y": 4080
+    },
+    "Espace-client.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "is_interactive": true,
+      "title": "Espace client",
+      "w": 1440,
+      "x": 0,
+      "y": 2040
+    },
+    "Galerie.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "is_interactive": true,
+      "title": "Galerie client",
+      "w": 1440,
+      "x": 1520,
+      "y": 4080
+    },
+    "Main.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "is_interactive": true,
+      "title": "Accueil — desktop",
+      "w": 1440,
+      "x": 0,
+      "y": 0
+    },
+    "Mentions-legales.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "is_interactive": true,
+      "title": "Mentions légales",
+      "w": 1440,
+      "x": 1520,
+      "y": 2040
+    },
+    "Mobile.dc.html": {
+      "expand": "fill",
+      "h": 844,
+      "is_interactive": true,
+      "title": "Accueil — mobile",
+      "w": 390,
+      "x": 1520,
+      "y": 0
+    },
+    "Projets.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "is_interactive": true,
+      "title": "Projets",
+      "w": 1440,
+      "x": 1520,
+      "y": 5100
+    },
+    "Studio.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "is_interactive": true,
+      "title": "Studio",
+      "w": 1440,
+      "x": 0,
+      "y": 1020
+    }
+  },
+  "createdOnFiles": {
+    "at": "2026-09-23T09:00:00Z",
+    "v": 1
+  },
+  "designSystems": [],
+  "launch": {
+    "file": "Main.dc.html",
+    "view": "focused"
+  },
+  "notes": {},
+  "order": [
+    "Main.dc.html",
+    "Mobile.dc.html",
+    "Projets.dc.html",
+    "Studio.dc.html",
+    "Contact.dc.html",
+    "Espace-client.dc.html",
+    "Mentions-legales.dc.html",
+    "Confidentialite.dc.html",
+    "CGV.dc.html",
+    "Cookies.dc.html",
+    "Galerie.dc.html"
+  ],
+  "pages": [],
+  "title": "Parallax — page d'accueil"
+}
