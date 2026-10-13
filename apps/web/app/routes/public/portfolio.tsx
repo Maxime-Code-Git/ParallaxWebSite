@@ -341,7 +341,7 @@ export default function PortfolioPage() {
     setTimeout(() => {
       setPhase("closed");
       document.body.classList.remove(styles.bodyScrollLocked);
-      navigate(getPortfolioOverviewUrl(lang), { replace: false });
+      navigate(getPortfolioOverviewUrl(lang), { replace: false, preventScrollReset: true });
     }, delay);
   }
 
@@ -396,6 +396,12 @@ export default function PortfolioPage() {
 
   return (
     <div className={styles.pageRoot}>
+      <div
+        className={styles.overviewPage}
+        data-portfolio-overview=""
+        data-direction={panelDirection}
+        data-state={phase}
+      >
       <div inert={phase !== "closed" ? true : undefined}>
         <Header common={common} lang={lang} currentRoute="portfolio" alternateUrls={alternateUrls} />
       </div>
@@ -421,6 +427,7 @@ export default function PortfolioPage() {
                     <div className={styles.imageCol}>
                       <Link
                         to={row.sectionUrl}
+                        preventScrollReset
                         className={styles.imageLink}
                         onClick={(e) => {
                           triggerRef.current = e.currentTarget;
@@ -451,6 +458,7 @@ export default function PortfolioPage() {
                         <p className={styles.projectSummary}>{row.summary}</p>
                         <Link
                           to={row.sectionUrl}
+                          preventScrollReset
                           className={`${styles.seeMoreBtn} ${styles.seeMoreBtnLeft}`}
                           onClick={(e) => {
                             triggerRef.current = e.currentTarget;
@@ -483,6 +491,7 @@ export default function PortfolioPage() {
                         <p className={styles.projectSummary}>{row.summary}</p>
                         <Link
                           to={row.sectionUrl}
+                          preventScrollReset
                           className={`${styles.seeMoreBtn} ${styles.seeMoreBtnRight}`}
                           onClick={(e) => {
                             triggerRef.current = e.currentTarget;
@@ -510,6 +519,7 @@ export default function PortfolioPage() {
                     <div className={styles.imageCol}>
                       <Link
                         to={row.sectionUrl}
+                        preventScrollReset
                         className={styles.imageLink}
                         onClick={(e) => {
                           triggerRef.current = e.currentTarget;
@@ -551,6 +561,7 @@ export default function PortfolioPage() {
       <div inert={phase !== "closed" ? true : undefined}>
         <Footer common={common} lang={lang} />
       </div>
+      </div>
 
       {/* Directional Sliding Panel Overlay */}
       <div
@@ -575,6 +586,7 @@ export default function PortfolioPage() {
             {effectiveProject ? (
               <Link
                 to={`${getPortfolioSectionUrl(effectiveProject.category, lang)}${dirParam}`}
+                preventScrollReset
                 className={styles.backBtn}
               >
                 <span className={`${styles.circleIcon} ${styles.circleIconLarge}`}>
@@ -776,6 +788,7 @@ export default function PortfolioPage() {
               <div className={styles.filterTabs}>
                 <Link
                   to={`${getPortfolioSectionUrl("documentary", lang)}${dirParam}`}
+                  preventScrollReset
                   className={`${styles.filterTab} ${
                     activeSec.category === "documentary" ? styles.filterTabActive : ""
                   }`}
@@ -784,6 +797,7 @@ export default function PortfolioPage() {
                 </Link>
                 <Link
                   to={`${getPortfolioSectionUrl("advertising", lang)}${dirParam}`}
+                  preventScrollReset
                   className={`${styles.filterTab} ${
                     activeSec.category === "advertising" ? styles.filterTabActive : ""
                   }`}
@@ -800,6 +814,7 @@ export default function PortfolioPage() {
                     return (
                       <Link
                         to={`${getPortfolioProjectUrl(p, lang)}${dirParam}`}
+                        preventScrollReset
                         key={p.id}
                         className={styles.projectCardLink}
                       >
