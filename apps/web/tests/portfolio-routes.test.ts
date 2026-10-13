@@ -329,4 +329,24 @@ describe("Portfolio Localized Routing & Directional Panels (Lot 3)", () => {
       expect(parseVideoUrl("<iframe src='...'></iframe>")).toBeNull();
     });
   });
+
+  describe("CSS Module Strict Contract Check", () => {
+    it("ensures zero undefined styles keys used in public/portfolio.tsx", () => {
+      const tsxPath = path.resolve(__dirname, "../app/routes/public/portfolio.tsx");
+      const cssPath = path.resolve(__dirname, "../app/routes/public/portfolio.module.css");
+      const tsxContent = fs.readFileSync(tsxPath, "utf8");
+      const cssContent = fs.readFileSync(cssPath, "utf8");
+
+      const styleMatches = [...tsxContent.matchAll(/styles\.([a-zA-Z0-9_]+)/g)].map((m) => m[1]);
+      const uniqueStyles = [...new Set(styleMatches)];
+
+      const classMatches = [...cssContent.matchAll(/\.([a-zA-Z0-9_-]+)/g)].map((m) => m[1]);
+      const toCamel = (s: string) => s.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
+      const exportedKeys = new Set([...classMatches, ...classMatches.map(toCamel)]);
+
+      const missing = uniqueStyles.filter((k) => !exportedKeys.has(k));
+      expect(missing).toEqual([]);
+      expect(uniqueStyles.length).toBeGreaterThan(50);
+    });
+  });
 });

@@ -10,17 +10,11 @@ export default [
   route("fr/studio", "routes/public/studio.tsx", { id: "fr-studio" }),
   route("en/studio", "routes/public/studio.tsx", { id: "en-studio" }),
 
-  // Public portfolio FR
-  route("fr/projets", "routes/public/portfolio.tsx", { id: "fr-portfolio" }),
-  route("fr/projets/documentaire", "routes/public/portfolio.tsx", { id: "fr-portfolio-doc" }),
-  route("fr/projets/publicite", "routes/public/portfolio.tsx", { id: "fr-portfolio-pub" }),
-  route("fr/projets/:rubrique/:slugFr", "routes/public/portfolio.tsx", { id: "fr-portfolio-project" }),
+  // Public portfolio FR (Persistent single route container)
+  route("fr/projets/:rubrique?/:slugFr?", "routes/public/portfolio.tsx", { id: "fr-portfolio" }),
 
-  // Public portfolio EN
-  route("en/projects", "routes/public/portfolio.tsx", { id: "en-portfolio" }),
-  route("en/projects/documentary", "routes/public/portfolio.tsx", { id: "en-portfolio-doc" }),
-  route("en/projects/advertising", "routes/public/portfolio.tsx", { id: "en-portfolio-pub" }),
-  route("en/projects/:category/:slugEn", "routes/public/portfolio.tsx", { id: "en-portfolio-project" }),
+  // Public portfolio EN (Persistent single route container)
+  route("en/projects/:category?/:slugEn?", "routes/public/portfolio.tsx", { id: "en-portfolio" }),
 
   // Administration
   route("admin", "routes/admin/login.tsx"),

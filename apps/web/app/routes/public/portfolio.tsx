@@ -174,13 +174,24 @@ export default function PortfolioPage() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Persistent panel lifecycle: "closed" | "open" | "closing"
-  const [phase, setPhase] = useState<"closed" | "open" | "closing">(
+  // Persistent panel lifecycle: "closed" | "opening" | "open" | "closing"
+  type PanelPhase = "closed" | "opening" | "open" | "closing";
+  const [phase, setPhase] = useState<PanelPhase>(
     panelState.isOpen ? "open" : "closed"
   );
   const [panelDirection, setPanelDirection] = useState<"left" | "right">(panelState.direction);
   const [showGallery, setShowGallery] = useState(false);
   const [activeVideoUrl, setActiveVideoUrl] = useState<string | null>(null);
+  const [isReducedMotion, setIsReducedMotion] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    setIsReducedMotion(mq.matches);
+    const handler = (e: MediaQueryListEvent) => setIsReducedMotion(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
 
   // Cached content ref to keep content rendered during closing animation
   const cachedContentRef = useRef<{
@@ -202,37 +213,84 @@ export default function PortfolioPage() {
   const triggerRef = useRef<HTMLElement | null>(null);
   const closeBtnRef = useRef<HTMLAnchorElement | null>(null);
   const isClosingRef = useRef(false);
+  const isInitialMountRef = useRef(true);
+  const prevIsOpenRef = useRef(panelState.isOpen);
 
   useEffect(() => {
-    if (panelState.isOpen) {
+    if (isInitialMountRef.current) {
+      isInitialMountRef.current = false;
+      prevIsOpenRef.current = panelState.isOpen;
+      if (panelState.isOpen) {
+        document.body.classList.add(styles.bodyScrollLocked);
+      }
+      return;
+    }
+
+    const wasOpen = prevIsOpenRef.current;
+    const isOpenNow = panelState.isOpen;
+    prevIsOpenRef.current = isOpenNow;
+
+    // Transition from CLOSED to OPEN: Real entrance animation
+    if (!wasOpen && isOpenNow) {
       isClosingRef.current = false;
       setPanelDirection(panelState.direction);
       setShowGallery(false);
-      setPhase("open");
+      // Frame 1: Mount visible off-screen without transition
+      setPhase("opening");
       document.body.classList.add(styles.bodyScrollLocked);
       if (panelRef.current) {
         panelRef.current.scrollTop = 0;
       }
-      setTimeout(() => {
-        closeBtnRef.current?.focus();
-      }, 50);
-    } else {
-      if (phase === "open") {
+
+      // Frame 2: Trigger transition into translateX(0)
+      let raf2Id = 0;
+      const raf1Id = requestAnimationFrame(() => {
+        raf2Id = requestAnimationFrame(() => {
+          setPhase("open");
+          setTimeout(() => {
+            closeBtnRef.current?.focus();
+          }, 50);
+        });
+      });
+
+      return () => {
+        cancelAnimationFrame(raf1Id);
+        if (raf2Id) cancelAnimationFrame(raf2Id);
+      };
+    }
+
+    // Already OPEN, navigating between category and project
+    if (wasOpen && isOpenNow) {
+      setPanelDirection(panelState.direction);
+      setShowGallery(false);
+      if (phase !== "open") {
+        setPhase("open");
+      }
+      if (panelRef.current) {
+        panelRef.current.scrollTop = 0;
+      }
+      return;
+    }
+
+    // Transition from OPEN to CLOSED (e.g. browser back button)
+    if (wasOpen && !isOpenNow) {
+      if (phase === "open" || phase === "opening") {
         setPhase("closing");
+        const delay = isReducedMotion ? 50 : 500;
         const timer = setTimeout(() => {
           setPhase("closed");
           document.body.classList.remove(styles.bodyScrollLocked);
           if (triggerRef.current) {
             triggerRef.current.focus();
           }
-        }, 500);
+        }, delay);
         return () => clearTimeout(timer);
       } else {
         setPhase("closed");
         document.body.classList.remove(styles.bodyScrollLocked);
       }
     }
-  }, [panelState.isOpen, panelState.direction, location.pathname]);
+  }, [panelState.isOpen, panelState.direction, location.pathname, isReducedMotion]);
 
   // Handle ESC key (with priority to VideoModal)
   useEffect(() => {
@@ -243,7 +301,7 @@ export default function PortfolioPage() {
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [phase, activeVideoUrl, lang]);
+  }, [phase, activeVideoUrl, lang, isReducedMotion]);
 
   // Focus trap within panelRef when open
   useEffect(() => {
@@ -284,6 +342,7 @@ export default function PortfolioPage() {
     isClosingRef.current = true;
     setPhase("closing");
 
+    const delay = isReducedMotion ? 50 : 500;
     setTimeout(() => {
       setPhase("closed");
       document.body.classList.remove(styles.bodyScrollLocked);
@@ -291,7 +350,7 @@ export default function PortfolioPage() {
       if (triggerRef.current) {
         triggerRef.current.focus();
       }
-    }, 500);
+    }, delay);
   }
 
   // Active or cached category/project for panel display
@@ -344,64 +403,67 @@ export default function PortfolioPage() {
   const dirParam = `?dir=${panelDirection}`;
 
   return (
-    <div className={styles.pageContainer}>
-      <Header common={common} lang={lang} currentRoute="portfolio" alternateUrls={alternateUrls} />
+    <div className={styles.pageRoot}>
+      <div inert={phase !== "closed" ? true : undefined}>
+        <Header common={common} lang={lang} currentRoute="portfolio" alternateUrls={alternateUrls} />
+      </div>
 
       {/* Main Showcase Feed */}
-      <main className={styles.mainFeed} inert={phase !== "closed"}>
+      <main className={styles.showcaseSection} inert={phase !== "closed" ? true : undefined}>
+        {/* Prototype Hero Title */}
+        <section className={styles.heroSection}>
+          <h1 className={styles.heroTitle}>{content.overview.title[lang]}</h1>
+        </section>
+
         {rowsToRender.length > 0 ? (
           rowsToRender.map((row, idx) => {
             const isLeftImage = row.side === "left";
+            const rowClass = `${styles.showcaseRow} ${
+              isLeftImage ? styles.rowLayoutLeft : styles.rowLayoutRight
+            } ${idx > 0 ? styles.rowOverlap : ""}`;
             return (
-              <section
-                key={`${row.category}-${idx}`}
-                className={`${styles.showcaseRow} ${
-                  isLeftImage ? styles.rowLeftImage : styles.rowRightImage
-                }`}
-              >
-                {/* Image block */}
-                <div className={styles.imageCol}>
-                  <Link
-                    to={row.sectionUrl}
-                    className={styles.imageLink}
-                    onClick={(e) => {
-                      triggerRef.current = e.currentTarget;
-                    }}
-                    aria-label={`Ouvrir la rubrique ${row.categoryTitle}`}
-                  >
-                    <div className={styles.imageWrapper}>
-                      {row.project.coverImageId && (
-                        <ResponsivePortfolioImage
-                          imageId={row.project.coverImageId}
-                          ownerType="project"
-                          ownerId={row.project.id}
-                          mediaSlot="cover"
-                          mediaMetadata={content.media[row.project.coverImageId]}
-                          alt={row.alt}
-                          className={styles.showcaseImg}
-                          loading={idx === 0 ? "eager" : "lazy"}
-                        />
-                      )}
+              <section key={`${row.category}-${idx}`} className={rowClass}>
+                {isLeftImage ? (
+                  <>
+                    {/* Left: Image block */}
+                    <div className={styles.imageCol}>
+                      <Link
+                        to={row.sectionUrl}
+                        className={styles.imageLink}
+                        onClick={(e) => {
+                          triggerRef.current = e.currentTarget;
+                        }}
+                        aria-label={`Ouvrir la rubrique ${row.categoryTitle}`}
+                      >
+                        <div className={styles.imageWrapper}>
+                          {row.project.coverImageId && (
+                            <ResponsivePortfolioImage
+                              imageId={row.project.coverImageId}
+                              ownerType="project"
+                              ownerId={row.project.id}
+                              mediaSlot="cover"
+                              mediaMetadata={content.media[row.project.coverImageId]}
+                              alt={row.alt}
+                              className={styles.showcaseImg}
+                              loading={idx === 0 ? "eager" : "lazy"}
+                            />
+                          )}
+                        </div>
+                      </Link>
                     </div>
-                  </Link>
-                </div>
 
-                {/* Text Content block */}
-                <div className={styles.textCol}>
-                  <div className={styles.textContent}>
-                    <h2 className={styles.categoryTag}>{row.categoryTitle}</h2>
-                    <p className={styles.projectSummary}>{row.summary}</p>
-                    <Link
-                      to={row.sectionUrl}
-                      className={`${styles.seeMoreBtn} ${
-                        isLeftImage ? styles.seeMoreBtnLeft : styles.seeMoreBtnRight
-                      }`}
-                      onClick={(e) => {
-                        triggerRef.current = e.currentTarget;
-                      }}
-                    >
-                      {isLeftImage ? (
-                        <>
+                    {/* Right: Text Content block (overlapping dark side of image) */}
+                    <div className={styles.textColLeft}>
+                      <div className={styles.textCard}>
+                        <div className={styles.categoryTag}>{row.categoryTitle}</div>
+                        <p className={styles.projectSummary}>{row.summary}</p>
+                        <Link
+                          to={row.sectionUrl}
+                          className={`${styles.seeMoreBtn} ${styles.seeMoreBtnLeft}`}
+                          onClick={(e) => {
+                            triggerRef.current = e.currentTarget;
+                          }}
+                        >
                           <span className={styles.btnLabel}>
                             {content.overview.seeMoreButton[lang]}
                           </span>
@@ -416,9 +478,24 @@ export default function PortfolioPage() {
                               />
                             </svg>
                           </span>
-                        </>
-                      ) : (
-                        <>
+                        </Link>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    {/* Left: Text Content block (overlapping dark side of image) */}
+                    <div className={styles.textColRight}>
+                      <div className={styles.textCard}>
+                        <div className={styles.categoryTag}>{row.categoryTitle}</div>
+                        <p className={styles.projectSummary}>{row.summary}</p>
+                        <Link
+                          to={row.sectionUrl}
+                          className={`${styles.seeMoreBtn} ${styles.seeMoreBtnRight}`}
+                          onClick={(e) => {
+                            triggerRef.current = e.currentTarget;
+                          }}
+                        >
                           <span className={styles.circleIcon}>
                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
                               <path
@@ -433,11 +510,38 @@ export default function PortfolioPage() {
                           <span className={styles.btnLabel}>
                             {content.overview.seeMoreButton[lang]}
                           </span>
-                        </>
-                      )}
-                    </Link>
-                  </div>
-                </div>
+                        </Link>
+                      </div>
+                    </div>
+
+                    {/* Right: Image block */}
+                    <div className={styles.imageCol}>
+                      <Link
+                        to={row.sectionUrl}
+                        className={styles.imageLink}
+                        onClick={(e) => {
+                          triggerRef.current = e.currentTarget;
+                        }}
+                        aria-label={`Ouvrir la rubrique ${row.categoryTitle}`}
+                      >
+                        <div className={styles.imageWrapper}>
+                          {row.project.coverImageId && (
+                            <ResponsivePortfolioImage
+                              imageId={row.project.coverImageId}
+                              ownerType="project"
+                              ownerId={row.project.id}
+                              mediaSlot="cover"
+                              mediaMetadata={content.media[row.project.coverImageId]}
+                              alt={row.alt}
+                              className={styles.showcaseImg}
+                              loading="lazy"
+                            />
+                          )}
+                        </div>
+                      </Link>
+                    </div>
+                  </>
+                )}
               </section>
             );
           })
@@ -452,7 +556,9 @@ export default function PortfolioPage() {
         )}
       </main>
 
-      <Footer common={common} lang={lang} />
+      <div inert={phase !== "closed" ? true : undefined}>
+        <Footer common={common} lang={lang} />
+      </div>
 
       {/* Directional Sliding Panel Overlay */}
       <div
@@ -468,7 +574,7 @@ export default function PortfolioPage() {
         }
         className={styles.panelOverlay}
         data-direction={panelDirection}
-        data-state={phase === "open" ? "open" : "closed"}
+        data-state={phase}
         hidden={phase === "closed"}
       >
         <div className={styles.panelContent}>
