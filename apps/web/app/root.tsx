@@ -47,10 +47,13 @@ export function ErrorBoundary() {
   }
 
   return (
-    <div style={{ display: "flex", minHeight: "100vh", alignItems: "center", justifyContent: "center", backgroundColor: "#0b0f19", color: "#e2e8f0", fontFamily: "system-ui, sans-serif" }}>
-      <div style={{ textAlign: "center", padding: "2rem" }}>
-        <h1 style={{ fontSize: "1.75rem", marginBottom: "0.5rem" }}>{title}</h1>
-        <p style={{ color: "#94a3b8" }}>{message}</p>
+    <div className="errorContainer">
+      <div className="errorCard">
+        <h1 className="errorTitle">{title}</h1>
+        <p className="errorMessage">{message}</p>
+        <a href="/fr" className="errorLink">
+          Retour à l'accueil
+        </a>
       </div>
     </div>
   );
