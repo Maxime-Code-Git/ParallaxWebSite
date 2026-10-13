@@ -1,0 +1,718 @@
+import { useState, useEffect } from "react";
+import type { ActionFunctionArgs, LoaderFunctionArgs, HeadersArgs } from "react-router";
+import { Form, Link, useActionData, useLoaderData, useNavigation } from "react-router";
+import {
+  requireValidAdminSession,
+  createAdminHeaders,
+  composeAdminHeaders,
+} from "../../lib/admin-auth.server";
+import { validateOrigin } from "../../lib/security.server";
+import {
+  getRawSiteContent,
+  saveHomeContent,
+  RevisionConflictError,
+  ValidationError,
+} from "../../lib/site-content.server";
+import {
+  ALLOWED_IMAGE_MAP,
+  type HomeContent,
+  type AllowedImageId,
+} from "../../lib/site-content.shared";
+import styles from "./adminForms.module.css";
+
+export function meta() {
+  return [
+    { title: "Administration - Accueil | Parallax" },
+    { name: "robots", content: "noindex, nofollow" },
+  ];
+}
+
+export function headers(args: HeadersArgs): Headers {
+  return composeAdminHeaders(args);
+}
+
+export async function loader({ request }: LoaderFunctionArgs) {
+  const session = await requireValidAdminSession(request);
+  const { content, isCorrupted } = getRawSiteContent();
+
+  const csrfToken = session.get("csrfToken") || "";
+
+  return Response.json(
+    {
+      csrfToken,
+      home: content.home,
+      revision: content.revision,
+      isCorrupted,
+    },
+    { headers: createAdminHeaders() }
+  );
+}
+
+export async function action({ request }: ActionFunctionArgs) {
+  const headers = createAdminHeaders();
+  if (request.method !== "POST") {
+    return new Response(null, { status: 405, headers: { ...headers, Allow: "POST" } });
+  }
+
+  const session = await requireValidAdminSession(request);
+  if (!validateOrigin(request)) {
+    return Response.json({ error: "Forbidden" }, { status: 403, headers });
+  }
+
+  const contentType = request.headers.get("Content-Type") || "";
+  const mimeType = contentType.split(";")[0]?.trim().toLowerCase();
+  if (mimeType !== "application/x-www-form-urlencoded") {
+    return Response.json({ error: "Unsupported Media Type" }, { status: 415, headers });
+  }
+
+  if (!request.body) {
+    return Response.json({ error: "Empty body" }, { status: 400, headers });
+  }
+
+  const MAX_BODY_SIZE = 500 * 1024;
+  let totalBytes = 0;
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) {
+        totalBytes += value.byteLength;
+        if (totalBytes > MAX_BODY_SIZE) {
+          await reader.cancel("Payload too large");
+          return Response.json({ error: "Payload too large" }, { status: 413, headers });
+        }
+        chunks.push(value);
+      }
+    }
+  } catch {
+    return Response.json({ error: "Invalid body stream" }, { status: 400, headers });
+  }
+
+  const rawBody = Buffer.concat(chunks).toString("utf-8");
+  const formData = new URLSearchParams(rawBody);
+
+  const csrfToken = String(formData.get("csrfToken") || "");
+  if (!csrfToken || csrfToken !== session.get("csrfToken")) {
+    return Response.json({ error: "Jeton CSRF invalide." }, { status: 403, headers });
+  }
+
+  const revision = String(formData.get("revision") || "");
+  if (!/^[0-9a-f]{32}$/i.test(revision)) {
+    return Response.json({ error: "Format de révision invalide." }, { status: 400, headers });
+  }
+
+  const homeDataStr = String(formData.get("homeData") || "");
+  let parsedHome: HomeContent;
+  try {
+    parsedHome = JSON.parse(homeDataStr);
+  } catch {
+    return Response.json({ error: "Données JSON invalides." }, { status: 422, headers });
+  }
+
+  try {
+    const newRevision = saveHomeContent(parsedHome, revision);
+    return Response.json({ success: true, newRevision }, { headers });
+  } catch (err) {
+    if (err instanceof RevisionConflictError) {
+      const { content: currentSiteContent } = getRawSiteContent();
+      return Response.json(
+        {
+          error: "Conflit de révision : le contenu a été mis à jour par un autre enregistrement. Vos saisies ont été conservées.",
+          conflict: true,
+          latestRevision: currentSiteContent.revision,
+        },
+        { status: 409, headers }
+      );
+    }
+    if (err instanceof ValidationError) {
+      return Response.json({ error: err.message }, { status: 422, headers });
+    }
+    return Response.json({ error: "Erreur lors de l'enregistrement." }, { status: 500, headers });
+  }
+}
+
+type ActionData = {
+  success?: boolean;
+  error?: string;
+  conflict?: boolean;
+  newRevision?: string;
+  latestRevision?: string;
+};
+
+export default function AdminHomePage() {
+  const { csrfToken, home: initialHome, revision: initialRevision, isCorrupted } =
+    useLoaderData<typeof loader>();
+  const actionData = useActionData<ActionData>();
+  const navigation = useNavigation();
+  const isSaving = navigation.state === "submitting";
+
+  const [activeTab, setActiveTab] = useState<"fr" | "en">("fr");
+  const [formData, setFormData] = useState<HomeContent>(initialHome);
+  const [currentRevision, setCurrentRevision] = useState<string>(initialRevision);
+
+  useEffect(() => {
+    if (actionData?.newRevision) {
+      setCurrentRevision(actionData.newRevision);
+    } else if (actionData?.latestRevision) {
+      // In conflict, update current revision so user can save again without reloading
+      setCurrentRevision(actionData.latestRevision);
+    }
+  }, [actionData]);
+
+  const updateLocalized = (
+    path: (string | number)[],
+    val: string,
+    lang: "fr" | "en" = activeTab
+  ) => {
+    setFormData((prev) => {
+      const clone = JSON.parse(JSON.stringify(prev));
+      let cur = clone;
+      for (let i = 0; i < path.length - 1; i++) {
+        cur = cur[path[i]];
+      }
+      const last = path[path.length - 1];
+      if (typeof cur[last] === "object" && cur[last] !== null && "fr" in cur[last]) {
+        cur[last][lang] = val;
+      } else {
+        cur[last] = val;
+      }
+      return clone;
+    });
+  };
+
+  const allowedImageOptions = Object.keys(ALLOWED_IMAGE_MAP) as AllowedImageId[];
+
+  return (
+    <div className={styles.container}>
+      <header className={styles.header}>
+        <div className={styles.headerLeft}>
+          <Link to="/admin/dashboard" className={styles.backLink}>
+            ← Retour au tableau de bord
+          </Link>
+          <h1 className={styles.pageHeading}>Édition de l'Accueil</h1>
+        </div>
+      </header>
+
+      <main className={styles.mainContent}>
+        <div className={styles.topBar}>
+          <div className={styles.revisionTag}>Révision serveur : {currentRevision}</div>
+          <div className={styles.langTabs} role="tablist">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "fr"}
+              className={`${styles.langTab} ${activeTab === "fr" ? styles.langTabActive : ""}`}
+              onClick={() => setActiveTab("fr")}
+            >
+              Français (FR)
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "en"}
+              className={`${styles.langTab} ${activeTab === "en" ? styles.langTabActive : ""}`}
+              onClick={() => setActiveTab("en")}
+            >
+              English (EN)
+            </button>
+          </div>
+        </div>
+
+        {isCorrupted && (
+          <div className={styles.alertError} role="alert">
+            Attention : le fichier de contenu éditorial était illisible ou corrompu. Les valeurs par défaut ont été rechargées.
+          </div>
+        )}
+
+        {actionData?.error && (
+          <div className={styles.alertError} role="alert">
+            {actionData.error}
+          </div>
+        )}
+
+        {actionData?.success && (
+          <div className={styles.alertSuccess} role="status">
+            Modifications de la page d'accueil enregistrées avec succès !
+          </div>
+        )}
+
+        <Form method="post">
+          <input type="hidden" name="csrfToken" value={csrfToken} />
+          <input type="hidden" name="revision" value={currentRevision} />
+          <input type="hidden" name="homeData" value={JSON.stringify(formData)} />
+
+          {/* Section SEO */}
+          <section className={styles.sectionCard}>
+            <h2 className={styles.sectionTitle}>Référencement & Métadonnées (SEO)</h2>
+            <p className={styles.sectionSubtitle}>
+              Titre et description affichés dans les résultats de recherche ({activeTab.toUpperCase()}).
+            </p>
+            <div className={styles.fieldGroup}>
+              <label className={styles.label} htmlFor="seo-title">
+                Titre de page (SEO)
+              </label>
+              <input
+                id="seo-title"
+                type="text"
+                className={styles.input}
+                value={formData.seo.title[activeTab]}
+                onChange={(e) => updateLocalized(["seo", "title"], e.target.value)}
+              />
+            </div>
+            <div className={styles.fieldGroup}>
+              <label className={styles.label} htmlFor="seo-desc">
+                Description (SEO)
+              </label>
+              <textarea
+                id="seo-desc"
+                className={styles.textarea}
+                value={formData.seo.description[activeTab]}
+                onChange={(e) => updateLocalized(["seo", "description"], e.target.value)}
+              />
+            </div>
+          </section>
+
+          {/* Section Hero */}
+          <section className={styles.sectionCard}>
+            <h2 className={styles.sectionTitle}>Bandeau principal (Hero)</h2>
+            <p className={styles.sectionSubtitle}>
+              Accroches principales visibles dès l'ouverture ({activeTab.toUpperCase()}).
+            </p>
+            <div className={styles.fieldGroup}>
+              <label className={styles.label} htmlFor="hero-badge">
+                Sur-titre (badge)
+              </label>
+              <input
+                id="hero-badge"
+                type="text"
+                className={styles.input}
+                value={formData.hero.badge[activeTab]}
+                onChange={(e) => updateLocalized(["hero", "badge"], e.target.value)}
+              />
+            </div>
+            <div className={styles.fieldGroup}>
+              <label className={styles.label} htmlFor="hero-title">
+                Titre principal
+              </label>
+              <input
+                id="hero-title"
+                type="text"
+                className={styles.input}
+                value={formData.hero.title[activeTab]}
+                onChange={(e) => updateLocalized(["hero", "title"], e.target.value)}
+              />
+            </div>
+            <div className={styles.fieldGroup}>
+              <label className={styles.label} htmlFor="hero-sub">
+                Sous-titre (domaines de création)
+              </label>
+              <input
+                id="hero-sub"
+                type="text"
+                className={styles.input}
+                value={formData.hero.subtitle[activeTab]}
+                onChange={(e) => updateLocalized(["hero", "subtitle"], e.target.value)}
+              />
+            </div>
+          </section>
+
+          {/* Section Showreel */}
+          <section className={styles.sectionCard}>
+            <h2 className={styles.sectionTitle}>Showreel</h2>
+            <p className={styles.sectionSubtitle}>
+              Visuel de couverture et configuration de la vidéo de présentation.
+            </p>
+            <div className={styles.fieldGroup}>
+              <label className={styles.label} htmlFor="showreel-title">
+                Libellé du showreel ({activeTab.toUpperCase()})
+              </label>
+              <input
+                id="showreel-title"
+                type="text"
+                className={styles.input}
+                value={formData.showreel.title[activeTab]}
+                onChange={(e) => updateLocalized(["showreel", "title"], e.target.value)}
+              />
+            </div>
+            <div className={styles.fieldGroup}>
+              <label className={styles.label} htmlFor="showreel-image">
+                Image de couverture (référence autorisée)
+              </label>
+              <div className={styles.imagePickerGroup}>
+                <img
+                  src={ALLOWED_IMAGE_MAP[formData.showreel.coverImageId]}
+                  alt="Aperçu showreel"
+                  className={styles.imagePreview}
+                />
+                <select
+                  id="showreel-image"
+                  className={styles.select}
+                  value={formData.showreel.coverImageId}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      showreel: {
+                        ...formData.showreel,
+                        coverImageId: e.target.value as AllowedImageId,
+                      },
+                    })
+                  }
+                >
+                  {allowedImageOptions.map((opt) => (
+                    <option key={opt} value={opt}>
+                      {opt} ({ALLOWED_IMAGE_MAP[opt]})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className={styles.fieldGroup}>
+              <label className={styles.label} htmlFor="showreel-alt">
+                Texte alternatif de l'image (alt {activeTab.toUpperCase()})
+              </label>
+              <input
+                id="showreel-alt"
+                type="text"
+                className={styles.input}
+                value={formData.showreel.coverImageAlt[activeTab]}
+                onChange={(e) => updateLocalized(["showreel", "coverImageAlt"], e.target.value)}
+              />
+            </div>
+            <div className={styles.fieldGroup}>
+              <label className={styles.label} htmlFor="showreel-url">
+                Lien vidéo externe (YouTube ou Vimeo - consentement requis au visionnage)
+              </label>
+              <input
+                id="showreel-url"
+                type="url"
+                placeholder="https://www.youtube.com/watch?v=... ou laisser vide"
+                className={styles.input}
+                value={formData.showreel.videoUrl}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    showreel: { ...formData.showreel, videoUrl: e.target.value },
+                  })
+                }
+              />
+            </div>
+          </section>
+
+          {/* Section Duo */}
+          <section className={styles.sectionCard}>
+            <h2 className={styles.sectionTitle}>Duo Maxime & Ludovic</h2>
+            <p className={styles.sectionSubtitle}>
+              Présentation du binôme sur la page d'accueil ({activeTab.toUpperCase()}).
+            </p>
+            <div className={styles.fieldGroup}>
+              <label className={styles.label} htmlFor="duo-title">
+                Titre
+              </label>
+              <input
+                id="duo-title"
+                type="text"
+                className={styles.input}
+                value={formData.duo.title[activeTab]}
+                onChange={(e) => updateLocalized(["duo", "title"], e.target.value)}
+              />
+            </div>
+            <div className={styles.fieldGroup}>
+              <label className={styles.label} htmlFor="duo-text">
+                Texte de présentation
+              </label>
+              <textarea
+                id="duo-text"
+                className={styles.textarea}
+                value={formData.duo.text[activeTab]}
+                onChange={(e) => updateLocalized(["duo", "text"], e.target.value)}
+              />
+            </div>
+            <div className={styles.fieldGroup}>
+              <label className={styles.label} htmlFor="duo-image">
+                Photo du duo (référence autorisée)
+              </label>
+              <div className={styles.imagePickerGroup}>
+                <img
+                  src={ALLOWED_IMAGE_MAP[formData.duo.imageId]}
+                  alt="Aperçu duo"
+                  className={styles.imagePreview}
+                />
+                <select
+                  id="duo-image"
+                  className={styles.select}
+                  value={formData.duo.imageId}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      duo: { ...formData.duo, imageId: e.target.value as AllowedImageId },
+                    })
+                  }
+                >
+                  {allowedImageOptions.map((opt) => (
+                    <option key={opt} value={opt}>
+                      {opt} ({ALLOWED_IMAGE_MAP[opt]})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className={styles.fieldGroup}>
+              <label className={styles.label} htmlFor="duo-alt">
+                Texte alternatif de l'image (alt {activeTab.toUpperCase()})
+              </label>
+              <input
+                id="duo-alt"
+                type="text"
+                className={styles.input}
+                value={formData.duo.imageAlt[activeTab]}
+                onChange={(e) => updateLocalized(["duo", "imageAlt"], e.target.value)}
+              />
+            </div>
+          </section>
+
+          {/* Section Savoir-faire */}
+          <section className={styles.sectionCard}>
+            <h2 className={styles.sectionTitle}>Savoir-faire</h2>
+            <p className={styles.sectionSubtitle}>
+              Listes des prestations photo et vidéo ({activeTab.toUpperCase()}).
+            </p>
+            <div className={styles.fieldGroup}>
+              <label className={styles.label} htmlFor="sf-title">
+                Titre de section
+              </label>
+              <input
+                id="sf-title"
+                type="text"
+                className={styles.input}
+                value={formData.savoirFaire.title[activeTab]}
+                onChange={(e) => updateLocalized(["savoirFaire", "title"], e.target.value)}
+              />
+            </div>
+            <div className={styles.row2}>
+              <div>
+                <div className={styles.fieldGroup}>
+                  <label className={styles.label} htmlFor="sf-photo-title">
+                    Titre catégorie Photo
+                  </label>
+                  <input
+                    id="sf-photo-title"
+                    type="text"
+                    className={styles.input}
+                    value={formData.savoirFaire.photoTitle[activeTab]}
+                    onChange={(e) => updateLocalized(["savoirFaire", "photoTitle"], e.target.value)}
+                  />
+                </div>
+                {formData.savoirFaire.photoItems.map((item, idx) => (
+                  <div key={idx} className={styles.fieldGroup}>
+                    <label className={styles.label} htmlFor={`sf-photo-${idx}`}>
+                      Élément photo {idx + 1}
+                    </label>
+                    <input
+                      id={`sf-photo-${idx}`}
+                      type="text"
+                      className={styles.input}
+                      value={item[activeTab]}
+                      onChange={(e) => {
+                        const newItems = [...formData.savoirFaire.photoItems];
+                        newItems[idx] = { ...newItems[idx], [activeTab]: e.target.value };
+                        setFormData({
+                          ...formData,
+                          savoirFaire: { ...formData.savoirFaire, photoItems: newItems },
+                        });
+                      }}
+                    />
+                  </div>
+                ))}
+              </div>
+              <div>
+                <div className={styles.fieldGroup}>
+                  <label className={styles.label} htmlFor="sf-video-title">
+                    Titre catégorie Vidéo
+                  </label>
+                  <input
+                    id="sf-video-title"
+                    type="text"
+                    className={styles.input}
+                    value={formData.savoirFaire.videoTitle[activeTab]}
+                    onChange={(e) => updateLocalized(["savoirFaire", "videoTitle"], e.target.value)}
+                  />
+                </div>
+                {formData.savoirFaire.videoItems.map((item, idx) => (
+                  <div key={idx} className={styles.fieldGroup}>
+                    <label className={styles.label} htmlFor={`sf-video-${idx}`}>
+                      Élément vidéo {idx + 1}
+                    </label>
+                    <input
+                      id={`sf-video-${idx}`}
+                      type="text"
+                      className={styles.input}
+                      value={item[activeTab]}
+                      onChange={(e) => {
+                        const newItems = [...formData.savoirFaire.videoItems];
+                        newItems[idx] = { ...newItems[idx], [activeTab]: e.target.value };
+                        setFormData({
+                          ...formData,
+                          savoirFaire: { ...formData.savoirFaire, videoItems: newItems },
+                        });
+                      }}
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+
+          {/* Section Contact */}
+          <section className={styles.sectionCard}>
+            <h2 className={styles.sectionTitle}>Coordonnées et Réseaux</h2>
+            <p className={styles.sectionSubtitle}>
+              Email de contact et liens vers les profils officiels.
+            </p>
+            <div className={styles.fieldGroup}>
+              <label className={styles.label} htmlFor="contact-title">
+                Titre de contact ({activeTab.toUpperCase()})
+              </label>
+              <input
+                id="contact-title"
+                type="text"
+                className={styles.input}
+                value={formData.contact.title[activeTab]}
+                onChange={(e) => updateLocalized(["contact", "title"], e.target.value)}
+              />
+            </div>
+            <div className={styles.fieldGroup}>
+              <label className={styles.label} htmlFor="contact-email">
+                Adresse email (laisser vide si non validée)
+              </label>
+              <input
+                id="contact-email"
+                type="email"
+                placeholder="Exemple : contact@parallax.studio"
+                className={styles.input}
+                value={formData.contact.email}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    contact: { ...formData.contact, email: e.target.value },
+                  })
+                }
+              />
+            </div>
+            <div className={styles.row2}>
+              <div className={styles.fieldGroup}>
+                <label className={styles.label} htmlFor="contact-insta">
+                  URL Instagram
+                </label>
+                <input
+                  id="contact-insta"
+                  type="url"
+                  className={styles.input}
+                  value={formData.contact.instagramUrl}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      contact: { ...formData.contact, instagramUrl: e.target.value },
+                    })
+                  }
+                />
+              </div>
+              <div className={styles.fieldGroup}>
+                <label className={styles.label} htmlFor="contact-yt">
+                  URL YouTube
+                </label>
+                <input
+                  id="contact-yt"
+                  type="url"
+                  className={styles.input}
+                  value={formData.contact.youtubeUrl}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      contact: { ...formData.contact, youtubeUrl: e.target.value },
+                    })
+                  }
+                />
+              </div>
+            </div>
+          </section>
+
+          {/* Section SEMPRA */}
+          <section className={styles.sectionCard}>
+            <h2 className={styles.sectionTitle}>Bloc SEMPRA (mariage)</h2>
+            <p className={styles.sectionSubtitle}>
+              Section de renvoi vers le studio mariage ({activeTab.toUpperCase()}).
+            </p>
+            <div className={styles.fieldGroup}>
+              <label className={styles.label} htmlFor="sp-badge">
+                Sur-titre SEMPRA
+              </label>
+              <input
+                id="sp-badge"
+                type="text"
+                className={styles.input}
+                value={formData.sempra.badge[activeTab]}
+                onChange={(e) => updateLocalized(["sempra", "badge"], e.target.value)}
+              />
+            </div>
+            <div className={styles.fieldGroup}>
+              <label className={styles.label} htmlFor="sp-title">
+                Accroche SEMPRA
+              </label>
+              <input
+                id="sp-title"
+                type="text"
+                className={styles.input}
+                value={formData.sempra.title[activeTab]}
+                onChange={(e) => updateLocalized(["sempra", "title"], e.target.value)}
+              />
+            </div>
+            <div className={styles.row2}>
+              <div className={styles.fieldGroup}>
+                <label className={styles.label} htmlFor="sp-btn-text">
+                  Texte du bouton CTA
+                </label>
+                <input
+                  id="sp-btn-text"
+                  type="text"
+                  className={styles.input}
+                  value={formData.sempra.buttonText[activeTab]}
+                  onChange={(e) => updateLocalized(["sempra", "buttonText"], e.target.value)}
+                />
+              </div>
+              <div className={styles.fieldGroup}>
+                <label className={styles.label} htmlFor="sp-btn-url">
+                  Lien de redirection CTA
+                </label>
+                <input
+                  id="sp-btn-url"
+                  type="text"
+                  className={styles.input}
+                  value={formData.sempra.buttonUrl}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      sempra: { ...formData.sempra, buttonUrl: e.target.value },
+                    })
+                  }
+                />
+              </div>
+            </div>
+          </section>
+
+          {/* Fixed bottom action bar */}
+          <div className={styles.actionBar}>
+            <span className={styles.labelHint}>
+              Modifications prêtes à être sauvegardées sur le serveur
+            </span>
+            <button type="submit" disabled={isSaving} className={styles.saveButton}>
+              {isSaving ? "Enregistrement en cours..." : "Enregistrer la page d'accueil"}
+            </button>
+          </div>
+        </Form>
+      </main>
+    </div>
+  );
+}

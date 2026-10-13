@@ -1,0 +1,241 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import os from "node:os";
+import path from "node:path";
+import fs from "node:fs";
+import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
+import { loader as rootRedirectLoader } from "../app/routes/root-redirect";
+import { loader as homeLoader } from "../app/routes/public/home";
+import { loader as studioLoader } from "../app/routes/public/studio";
+import { action as adminHomeAction, loader as adminHomeLoader } from "../app/routes/admin/home";
+import { action as adminStudioAction, loader as adminStudioLoader } from "../app/routes/admin/studio";
+import { getSession, commitSession } from "../app/lib/session.server";
+import { computeCredentialVersion } from "../app/lib/auth.server";
+import { getSiteContent } from "../app/lib/site-content.server";
+
+describe("Editorial Routes and Actions", () => {
+  let tempDir: string;
+  let testContentFile: string;
+  let testDbFile: string;
+  const originalEnv = process.env;
+
+  const makeLoaderArgs = (req: Request): LoaderFunctionArgs =>
+    ({
+      request: req,
+      params: {},
+      context: {} as never,
+    }) as unknown as LoaderFunctionArgs;
+
+  const makeActionArgs = (req: Request): ActionFunctionArgs =>
+    ({
+      request: req,
+      params: {},
+      context: {} as never,
+    }) as unknown as ActionFunctionArgs;
+
+  beforeEach(() => {
+    vi.resetModules();
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "parallax-routes-test-"));
+    testContentFile = path.join(tempDir, "site-content.json");
+    testDbFile = path.join(tempDir, "rate-limit.sqlite");
+
+    process.env = {
+      ...originalEnv,
+      NODE_ENV: "test",
+      PUBLIC_SITE_URL: "http://localhost:3000",
+      ADMIN_PASSWORD_HASH: "$argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHQ$c29tZWhhc2g",
+      ADMIN_SESSION_SECRET: "session-secret-min-32-chars-long-1!",
+      RATE_LIMIT_SECRET: "rate-limit-secret-min-32-chars-long-2!",
+      RATE_LIMIT_DB_PATH: testDbFile,
+      SITE_CONTENT_PATH: testContentFile,
+      TRUST_PROXY: "false",
+    };
+  });
+
+  afterEach(() => {
+    process.env = originalEnv;
+    fs.rmSync(tempDir, { recursive: true, force: true });
+    vi.restoreAllMocks();
+  });
+
+  async function createValidAdminCookie(csrfToken = "valid-csrf-token"): Promise<string> {
+    const session = await getSession();
+    session.set("adminId", "admin-1");
+    session.set("credentialVersion", computeCredentialVersion());
+    session.set("expiresAt", Date.now() + 3600_000);
+    session.set("csrfToken", csrfToken);
+    return commitSession(session);
+  }
+
+  it("root-redirect.tsx redirects to /fr with status 302", async () => {
+    const response = await rootRedirectLoader();
+    expect(response.status).toBe(302);
+    expect(response.headers.get("Location")).toBe("/fr");
+  });
+
+  it("public home loader returns French content for /fr and English for /en", async () => {
+    const reqFr = new Request("http://localhost:3000/fr");
+    const dataFr = await homeLoader(makeLoaderArgs(reqFr));
+    expect(dataFr.lang).toBe("fr");
+    expect(dataFr.home.hero.title.fr).toBe("Photo & vidéo.");
+
+    const reqEn = new Request("http://localhost:3000/en");
+    const dataEn = await homeLoader(makeLoaderArgs(reqEn));
+    expect(dataEn.lang).toBe("en");
+    expect(dataEn.home.hero.title.en).toBe("Photo & video.");
+  });
+
+  it("public studio loader returns French content for /fr/studio and English for /en/studio", async () => {
+    const reqFr = new Request("http://localhost:3000/fr/studio");
+    const dataFr = await studioLoader(makeLoaderArgs(reqFr));
+    expect(dataFr.lang).toBe("fr");
+    expect(dataFr.studio.hero.title.fr).toBe("Le studio");
+
+    const reqEn = new Request("http://localhost:3000/en/studio");
+    const dataEn = await studioLoader(makeLoaderArgs(reqEn));
+    expect(dataEn.lang).toBe("en");
+    expect(dataEn.studio.hero.title.en).toBe("The studio");
+  });
+
+  describe("admin/home.tsx", () => {
+    it("loader throws redirect to /admin when not authenticated", async () => {
+      const req = new Request("http://localhost:3000/admin/home");
+      await expect(adminHomeLoader(makeLoaderArgs(req))).rejects.toSatisfy(
+        (res: Response) => res.status === 303 && res.headers.get("Location") === "/admin"
+      );
+    });
+
+    it("action handles successful update and returns 200 with newRevision", async () => {
+      const cookie = await createValidAdminCookie("csrf-home-1");
+      const content = getSiteContent();
+
+      const updatedHome = {
+        ...content.home,
+        hero: {
+          ...content.home.hero,
+          title: { fr: "Nouveau titre", en: "New title" },
+        },
+      };
+
+      const body = new URLSearchParams({
+        csrfToken: "csrf-home-1",
+        revision: content.revision,
+        homeData: JSON.stringify(updatedHome),
+      }).toString();
+
+      const req = new Request("http://localhost:3000/admin/home", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: "http://localhost:3000",
+          Cookie: cookie,
+        },
+        body,
+      });
+
+      const response = await adminHomeAction(makeActionArgs(req));
+      expect(response.status).toBe(200);
+      const json = await response.json();
+      expect(json.success).toBe(true);
+      expect(json.newRevision).toMatch(/^[0-9a-f]{32}$/);
+    });
+
+    it("action returns 409 conflict when revision does not match", async () => {
+      const cookie = await createValidAdminCookie("csrf-home-2");
+      const content = getSiteContent();
+      const staleRevision = "abcdef0123456789abcdef0123456789";
+
+      const body = new URLSearchParams({
+        csrfToken: "csrf-home-2",
+        revision: staleRevision,
+        homeData: JSON.stringify(content.home),
+      }).toString();
+
+      const req = new Request("http://localhost:3000/admin/home", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: "http://localhost:3000",
+          Cookie: cookie,
+        },
+        body,
+      });
+
+      const response = await adminHomeAction(makeActionArgs(req));
+      expect(response.status).toBe(409);
+      const json = await response.json();
+      expect(json.conflict).toBe(true);
+      expect(json.error).toContain("Conflit de révision");
+    });
+  });
+
+  describe("admin/studio.tsx", () => {
+    it("loader throws redirect to /admin when not authenticated", async () => {
+      const req = new Request("http://localhost:3000/admin/studio");
+      await expect(adminStudioLoader(makeLoaderArgs(req))).rejects.toSatisfy(
+        (res: Response) => res.status === 303 && res.headers.get("Location") === "/admin"
+      );
+    });
+
+    it("action handles successful update and returns 200 with newRevision", async () => {
+      const cookie = await createValidAdminCookie("csrf-studio-1");
+      const content = getSiteContent();
+
+      const updatedStudio = {
+        ...content.studio,
+        hero: {
+          ...content.studio.hero,
+          title: { fr: "Nouveau Studio FR", en: "New Studio EN" },
+        },
+      };
+
+      const body = new URLSearchParams({
+        csrfToken: "csrf-studio-1",
+        revision: content.revision,
+        studioData: JSON.stringify(updatedStudio),
+      }).toString();
+
+      const req = new Request("http://localhost:3000/admin/studio", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: "http://localhost:3000",
+          Cookie: cookie,
+        },
+        body,
+      });
+
+      const response = await adminStudioAction(makeActionArgs(req));
+      expect(response.status).toBe(200);
+      const json = await response.json();
+      expect(json.success).toBe(true);
+      expect(json.newRevision).toMatch(/^[0-9a-f]{32}$/);
+    });
+
+    it("action returns 409 conflict when revision does not match on studio", async () => {
+      const cookie = await createValidAdminCookie("csrf-studio-2");
+      const content = getSiteContent();
+      const staleRevision = "00000000000000000000000000000000";
+
+      const body = new URLSearchParams({
+        csrfToken: "csrf-studio-2",
+        revision: staleRevision,
+        studioData: JSON.stringify(content.studio),
+      }).toString();
+
+      const req = new Request("http://localhost:3000/admin/studio", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: "http://localhost:3000",
+          Cookie: cookie,
+        },
+        body,
+      });
+
+      const response = await adminStudioAction(makeActionArgs(req));
+      expect(response.status).toBe(409);
+      const json = await response.json();
+      expect(json.conflict).toBe(true);
+    });
+  });
+});
