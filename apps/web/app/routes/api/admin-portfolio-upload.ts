@@ -2,6 +2,7 @@ import { type ActionFunctionArgs } from "react-router";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import crypto from "node:crypto";
 import { once } from "node:events";
 import busboy from "busboy";
 import { requireValidAdminSession } from "../../lib/admin-auth.server";
@@ -30,6 +31,7 @@ import {
   processPortfolioMediaImage,
   publishStagedPortfolioMedia,
   cleanupStagedPortfolioMedia,
+  cleanupPublishedPortfolioMedia,
   type ProcessedPortfolioMediaWithStaging,
 } from "../../lib/media-image.server";
 import {
@@ -106,11 +108,8 @@ async function parseSingleUpload(
   };
 
   const waitForFileWrite = async () => {
-    if (!fileWritePromise) return;
-    try {
+    if (fileWritePromise) {
       await fileWritePromise;
-    } catch {
-      // Ignored
     }
   };
 
@@ -118,15 +117,14 @@ async function parseSingleUpload(
     if (settled) return;
     settled = true;
     stopActiveWrite();
-    parser.destroy();
     rejectParser(error);
   };
 
-  parser.on("file", (_name, fileStream, info) => {
+  parser.on("file", (fieldName, fileStream, info) => {
     fileCount += 1;
-    if (fileCount > 1) {
+    if (fieldName !== "file" || fileCount !== 1) {
       fileStream.resume();
-      fail(new UploadRequestError("Un seul fichier peut être téléversé par requête.", 400));
+      fail(new UploadRequestError("L'import doit contenir exactement un fichier dans le champ 'file'.", 400));
       return;
     }
 
@@ -142,8 +140,12 @@ async function parseSingleUpload(
       return;
     }
 
-    uploadedFilePath = path.join(tempDirectory, "upload.tmp");
-    const writeStream = fs.createWriteStream(uploadedFilePath, { mode: 0o600 });
+    const tempPath = path.join(tempDirectory, `${crypto.randomUUID()}`);
+    uploadedFilePath = tempPath;
+    const writeStream = fs.createWriteStream(tempPath, {
+      flags: "wx",
+      mode: 0o600,
+    });
     activeWriteStream = writeStream;
 
     fileWritePromise = new Promise<void>((resolve, reject) => {
@@ -154,6 +156,12 @@ async function parseSingleUpload(
 
     fileStream.on("limit", () => {
       fail(new UploadRequestError("Le fichier dépasse la limite autorisée de 25 Mo.", 413));
+    });
+    fileStream.on("error", () => {
+      fail(new UploadRequestError("Erreur de flux lors de la réception du fichier.", 400));
+    });
+    writeStream.on("error", () => {
+      fail(new UploadRequestError("Erreur lors de l'écriture du fichier temporaire.", 500));
     });
 
     fileStream.pipe(writeStream);
@@ -206,7 +214,7 @@ async function parseSingleUpload(
     await reader.cancel().catch(() => undefined);
     parser.destroy();
     stopActiveWrite();
-    await waitForFileWrite();
+    await waitForFileWrite().catch(() => undefined);
     await parserDone.catch(() => undefined);
     throw error;
   } finally {
@@ -239,47 +247,61 @@ export async function action({ request }: ActionFunctionArgs) {
 
   // 1. Session & Origin
   const session = await requireValidAdminSession(request);
+
   if (!validateOrigin(request)) {
     return jsonError("Origine non autorisée.", 403);
   }
 
-  // 2. CSRF token check (constant-time)
-  const csrfToken = request.headers.get("x-csrf-token");
+  // 2. CSRF token check
+  const headerCsrf = request.headers.get("x-csrf-token");
   const sessionCsrf = session.get("csrfToken");
-  if (!csrfToken || !sessionCsrf || !constantTimeEqual(csrfToken, sessionCsrf)) {
+  if (!headerCsrf || !sessionCsrf || !constantTimeEqual(headerCsrf, sessionCsrf)) {
     return jsonError("Jeton CSRF invalide ou expiré.", 403);
   }
 
-  // 3. Portfolio upload parameters
-  const ownerType = request.headers.get("x-portfolio-owner-type") as PortfolioMediaOwnerType | null;
-  if (!ownerType || !PORTFOLIO_MEDIA_OWNER_TYPES.includes(ownerType)) {
-    return jsonError("Type de propriétaire portfolio invalide.", 400);
-  }
-
+  // 3. Metadata headers
+  const ownerType = request.headers.get("x-portfolio-owner-type") as PortfolioMediaOwnerType;
   const ownerId = request.headers.get("x-portfolio-owner-id");
-  if (!ownerId) {
-    return jsonError("Identifiant de propriétaire portfolio manquant.", 400);
-  }
-
-  if (ownerType === "section" && !PORTFOLIO_CATEGORIES.includes(ownerId as PortfolioCategory)) {
-    return jsonError("Rubrique de section invalide.", 400);
-  }
-  if (ownerType === "project" && !UUID_REGEX.test(ownerId)) {
-    return jsonError("Identifiant de projet invalide.", 400);
-  }
-
-  const mediaSlot = request.headers.get("x-portfolio-media-slot") as PortfolioMediaSlot | null;
-  if (!mediaSlot || !PORTFOLIO_MEDIA_SLOTS.includes(mediaSlot)) {
-    return jsonError("Emplacement de média portfolio invalide.", 400);
-  }
-
+  const mediaSlot = request.headers.get("x-portfolio-media-slot") as PortfolioMediaSlot;
   const previousRevision = request.headers.get("x-portfolio-revision");
-  if (!previousRevision || !/^[0-9a-f]{16,64}$/i.test(previousRevision)) {
-    return jsonError("Format de révision invalide.", 400);
+
+  if (!ownerType || !PORTFOLIO_MEDIA_OWNER_TYPES.includes(ownerType)) {
+    return jsonError("Type de propriétaire non autorisé.", 400);
+  }
+  if (!ownerId) {
+    return jsonError("Identifiant de propriétaire manquant.", 400);
+  }
+  if (!mediaSlot || !PORTFOLIO_MEDIA_SLOTS.includes(mediaSlot)) {
+    return jsonError("Emplacement de média non autorisé.", 400);
+  }
+  if (!previousRevision || typeof previousRevision !== "string") {
+    return jsonError("Révision du portfolio manquante.", 400);
+  }
+
+  // 4. Pre-Sharp Owner & Slot validation against active content
+  const { content: currentContent } = getRawPortfolioContent();
+
+  if (ownerType === "section") {
+    if (mediaSlot !== "cover" && mediaSlot !== "showreel_cover") {
+      return jsonError("Emplacement de média non autorisé pour une rubrique.", 400);
+    }
+    if (!PORTFOLIO_CATEGORIES.includes(ownerId as PortfolioCategory)) {
+      return jsonError("Rubrique inconnue.", 404);
+    }
+  } else if (ownerType === "project") {
+    if (mediaSlot !== "cover" && mediaSlot !== "video_cover" && mediaSlot !== "gallery") {
+      return jsonError("Emplacement de média non autorisé pour un projet.", 400);
+    }
+    if (!UUID_REGEX.test(ownerId)) {
+      return jsonError("Identifiant de projet invalide (UUID attendu).", 400);
+    }
+    const projectExists = currentContent.projects.some((p) => p.id === ownerId);
+    if (!projectExists) {
+      return jsonError("Projet introuvable.", 404);
+    }
   }
 
   // Check revision against current content before heavy operations
-  const { content: currentContent } = getRawPortfolioContent();
   if (currentContent.revision !== previousRevision) {
     return jsonError(
       "Un autre utilisateur ou onglet a modifié le portfolio. Veuillez recharger la page.",
@@ -288,7 +310,7 @@ export async function action({ request }: ActionFunctionArgs) {
     );
   }
 
-  // 4. Content-Type and Content-Length
+  // 5. Content-Type and Content-Length
   const contentType = request.headers.get("content-type") || "";
   if (!contentType.toLowerCase().startsWith("multipart/form-data")) {
     return jsonError("Type de contenu invalide. 'multipart/form-data' attendu.", 415);
@@ -305,16 +327,16 @@ export async function action({ request }: ActionFunctionArgs) {
     }
   }
 
-  // 5. Parse multipart body into secure temp directory
+  // 6. Parse multipart body into secure temp directory
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "parallax-portfolio-upload-"));
-  let tempFilePath: string | null = null;
   let processedResult: ProcessedPortfolioMediaWithStaging | null = null;
+  let publishedSuccessfully = false;
   const mediaBasePath = getPortfolioMediaPath();
 
   try {
-    tempFilePath = await parseSingleUpload(request, contentType, tempDir);
+    const tempFilePath = await parseSingleUpload(request, contentType, tempDir);
 
-    // 6. Process image via shared Sharp ConcurrencyLimiter (isolated in staging/<imageId>)
+    // 7. Process image via shared Sharp ConcurrencyLimiter (isolated in staging/<imageId>)
     try {
       processedResult = await processPortfolioMediaImage(
         tempFilePath,
@@ -344,7 +366,7 @@ export async function action({ request }: ActionFunctionArgs) {
       throw procErr;
     }
 
-    // 7. Verify revision again before publishing
+    // 8. Verify revision again before publishing
     const { content: freshContent } = getRawPortfolioContent();
     if (freshContent.revision !== previousRevision) {
       cleanupStagedPortfolioMedia(processedResult.imageId, mediaBasePath);
@@ -355,7 +377,7 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     }
 
-    // 8. Publish from staging to final directory
+    // 9. Publish from staging to final directory
     publishStagedPortfolioMedia(
       processedResult.imageId,
       ownerType,
@@ -363,8 +385,9 @@ export async function action({ request }: ActionFunctionArgs) {
       mediaSlot,
       mediaBasePath
     );
+    publishedSuccessfully = true;
 
-    // 9. Update content JSON atomically
+    // 10. Update content JSON atomically
     const metadataToStore: PortfolioMediaItem = {
       imageId: processedResult.imageId,
       ownerType: processedResult.ownerType,
@@ -393,8 +416,11 @@ export async function action({ request }: ActionFunctionArgs) {
       if (proj) {
         if (mediaSlot === "cover") {
           proj.coverImageId = processedResult.imageId;
-        } else if (mediaSlot === "video_cover" && proj.video) {
-          proj.video.coverImageId = processedResult.imageId;
+        } else if (mediaSlot === "video_cover") {
+          proj.draftVideoCoverImageId = processedResult.imageId;
+          if (proj.video) {
+            proj.video.coverImageId = processedResult.imageId;
+          }
         } else if (mediaSlot === "gallery") {
           if (!proj.galleryImageIds.includes(processedResult.imageId)) {
             proj.galleryImageIds.push(processedResult.imageId);
@@ -408,6 +434,8 @@ export async function action({ request }: ActionFunctionArgs) {
     try {
       saveResult = await savePortfolioContent(nextContent, previousRevision);
     } catch (saveErr) {
+      // Rollback newly published directory if save failed!
+      cleanupPublishedPortfolioMedia(ownerType, ownerId, mediaSlot, processedResult.imageId, mediaBasePath);
       if (saveErr instanceof RevisionConflictError) {
         return jsonError(saveErr.message, 409);
       }
@@ -417,7 +445,7 @@ export async function action({ request }: ActionFunctionArgs) {
       throw saveErr;
     }
 
-    // 10. Clean up unreferenced media in background
+    // 11. Clean up unreferenced media in background
     void cleanupUnreferencedPortfolioMedia().catch(() => undefined);
 
     return Response.json(
@@ -436,25 +464,23 @@ export async function action({ request }: ActionFunctionArgs) {
       }
     );
   } catch (err: unknown) {
-    if (processedResult?.stagingDir) {
-      cleanupStagedPortfolioMedia(processedResult.imageId, mediaBasePath);
+    if (processedResult?.imageId) {
+      if (publishedSuccessfully) {
+        cleanupPublishedPortfolioMedia(ownerType, ownerId, mediaSlot, processedResult.imageId, mediaBasePath);
+      } else {
+        cleanupStagedPortfolioMedia(processedResult.imageId, mediaBasePath);
+      }
     }
     if (err instanceof UploadRequestError) {
       return jsonError(err.message, err.status);
     }
-    if (err instanceof SafeImageError) {
-      return jsonError(err.message, 422);
-    }
-    if (err instanceof RevisionConflictError) {
-      return jsonError(err.message, 409);
-    }
-    return jsonError("Une erreur inattendue est survenue lors de l'enregistrement de l'image.", 500);
+    const message = err instanceof Error ? err.message : "Erreur interne lors du téléversement.";
+    return jsonError(message, 500);
   } finally {
     try {
-      if (tempFilePath && fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
-      if (fs.existsSync(tempDir)) fs.rmSync(tempDir, { recursive: true, force: true });
+      fs.rmSync(tempDir, { recursive: true, force: true });
     } catch {
-      // ignore
+      // Ignored
     }
   }
 }

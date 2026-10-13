@@ -325,3 +325,116 @@
     grid-template-columns: 1fr;
   }
 }
+
+.hiddenFileInput {
+  display: none;
+}
+
+.tabContentVisible {
+  display: block;
+}
+
+.tabContentHidden {
+  display: none;
+}
+
+.projectIdTag {
+  font-size: 13px;
+  color: #8A92A6;
+  font-family: monospace;
+}
+
+.metaSub {
+  font-size: 13px;
+  color: #8A92A6;
+  margin: 0 0 16px;
+}
+
+.metaSubSm {
+  font-size: 12px;
+  color: #8A92A6;
+  margin: 0 0 16px;
+}
+
+.formGroupMargin {
+  margin-top: 28px;
+}
+
+.galleryActionsBar {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.reorderBtnGroup {
+  display: flex;
+  gap: 4px;
+}
+
+.reorderBtn {
+  background: rgba(255, 255, 255, 0.1);
+  border: 0.5px solid rgba(255, 255, 255, 0.2);
+  color: #fff;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.reorderBtn:hover:not(:disabled) {
+  background: #1E9EFF;
+}
+
+.reorderBtn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.removeBtnText {
+  background: transparent;
+  border: none;
+  color: #ff4757;
+  font-size: 12px;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+}
+
+.saveRevisionHint {
+  font-size: 12px;
+  color: #8A92A6;
+}
+
+.statusBadgePublished {
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  background: rgba(46, 213, 115, 0.15);
+  color: #2ed573;
+}
+
+.statusBadgeDraft {
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  background: rgba(255, 171, 0, 0.15);
+  color: #ffab00;
+}
+
+.cancelLink {
+  color: #8A92A6;
+  text-decoration: none;
+  font-size: 14px;
+}
+
+.cancelLink:hover {
+  color: #F5F6F7;
+}
+
+.emptyNotice {
+  color: #8A92A6;
+  font-size: 14px;
+  margin: 0 0 12px;
+}

@@ -1,80 +1,89 @@
 import { useState } from "react";
 import {
-  type LoaderFunctionArgs,
   type ActionFunctionArgs,
-  type HeadersArgs,
-  type MetaFunction,
+  type LoaderFunctionArgs,
   Form,
   Link,
-  useLoaderData,
   useActionData,
+  useLoaderData,
   useNavigation,
 } from "react-router";
-import * as crypto from "node:crypto";
-import {
-  requireValidAdminSession,
-  createAdminHeaders,
-  composeAdminHeaders,
-} from "../../lib/admin-auth.server";
-import { validateOrigin } from "../../lib/security.server";
+import { requireValidAdminSession, createAdminHeaders } from "../../lib/admin-auth.server";
 import { constantTimeEqual } from "../../lib/auth.server";
-import { commitSession } from "../../lib/session.server";
+import { validateOrigin, readStrictFormUrlEncoded, ActionSecurityError } from "../../lib/security.server";
+import {
+  type PortfolioContent,
+  type PortfolioProject,
+  type PortfolioCategory,
+  PORTFOLIO_CATEGORIES,
+} from "../../lib/portfolio-content.shared";
 import {
   getRawPortfolioContent,
   savePortfolioContent,
   cleanupUnreferencedPortfolioMedia,
 } from "../../lib/portfolio-content.server";
-import {
-  type PortfolioCategory,
-  type PortfolioProject,
-  type PortfolioContent,
-  PORTFOLIO_CATEGORIES,
-} from "../../lib/portfolio-content.shared";
-import { ResponsivePortfolioImage } from "../../components/public/ResponsivePortfolioImage";
 import { RevisionConflictError, ValidationError } from "../../lib/site-content.server";
+import { ResponsivePortfolioImage } from "../../components/public/ResponsivePortfolioImage";
 import styles from "./portfolio.module.css";
 
-export const meta: MetaFunction = () => {
+interface LoaderData {
+  content: PortfolioContent;
+  csrfToken: string;
+}
+
+export function meta() {
   return [
-    { title: "Gestion du Portfolio | Administration Parallax" },
+    { title: "Portfolio | Administration Parallax" },
     { name: "robots", content: "noindex, nofollow" },
   ];
-};
-
-export function headers(args: HeadersArgs): Headers {
-  return composeAdminHeaders(args);
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const session = await requireValidAdminSession(request);
-  const responseHeaders = createAdminHeaders();
-
-  let csrfToken = session.get("csrfToken");
-  if (!csrfToken) {
-    csrfToken = crypto.randomUUID();
-    session.set("csrfToken", csrfToken);
-    responseHeaders.set("Set-Cookie", await commitSession(session));
-  }
+  const csrfToken = session.get("csrfToken");
 
   const { content } = getRawPortfolioContent();
-
   return Response.json(
-    {
-      content,
-      csrfToken,
-    },
-    { headers: responseHeaders }
+    { content, csrfToken },
+    { headers: createAdminHeaders() }
   );
 }
 
+const ALLOWED_PORTFOLIO_ACTIONS = [
+  "intent",
+  "csrfToken",
+  "revision",
+  "projectId",
+  "category",
+  "direction",
+] as const;
+
 export async function action({ request }: ActionFunctionArgs) {
+  if (request.method !== "POST") {
+    return new Response("Method Not Allowed", {
+      status: 405,
+      headers: { Allow: "POST", ...createAdminHeaders() },
+    });
+  }
+
   const session = await requireValidAdminSession(request);
 
   if (!validateOrigin(request)) {
     return Response.json({ error: "Origine non autorisée." }, { status: 403, headers: createAdminHeaders() });
   }
 
-  const formData = await request.formData();
+  let formData: URLSearchParams;
+  try {
+    formData = await readStrictFormUrlEncoded(request, 64 * 1024, ALLOWED_PORTFOLIO_ACTIONS);
+  } catch (err) {
+    if (err instanceof ActionSecurityError) {
+      const headers = createAdminHeaders();
+      if (err.status === 405) headers.set("Allow", "POST");
+      return Response.json({ error: err.message }, { status: err.status, headers });
+    }
+    return Response.json({ error: "Bad Request" }, { status: 400, headers: createAdminHeaders() });
+  }
+
   const csrfToken = formData.get("csrfToken");
   const sessionCsrf = session.get("csrfToken");
 
@@ -163,7 +172,19 @@ export async function action({ request }: ActionFunctionArgs) {
         return Response.json({ error: "Projet introuvable." }, { status: 404, headers: createAdminHeaders() });
       }
 
-      project.status = project.status === "published" ? "draft" : "published";
+      const newStatus = project.status === "published" ? "draft" : "published";
+
+      // If trying to publish, verify completeness before updating
+      if (newStatus === "published") {
+        if (!project.coverImageId) {
+          return Response.json(
+            { error: "Impossible de publier ce projet : une image de couverture est requise." },
+            { status: 422, headers: createAdminHeaders() }
+          );
+        }
+      }
+
+      project.status = newStatus;
       project.updatedAt = Date.now();
 
       const saveResult = await savePortfolioContent(nextContent, expectedRevision);
@@ -242,10 +263,16 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     }
 
-    return Response.json({ error: "Action non reconnue." }, { status: 400, headers: createAdminHeaders() });
+    return Response.json({ error: "Action inconnue." }, { status: 400, headers: createAdminHeaders() });
   } catch (err) {
     if (err instanceof RevisionConflictError) {
-      return Response.json({ error: err.message }, { status: 409, headers: createAdminHeaders() });
+      return Response.json(
+        {
+          error: "Conflit de révision : la page a été modifiée par un autre utilisateur. Veuillez recharger la page.",
+          currentRevision: content.revision,
+        },
+        { status: 409, headers: createAdminHeaders() }
+      );
     }
     if (err instanceof ValidationError) {
       return Response.json({ error: err.message }, { status: 422, headers: createAdminHeaders() });
@@ -257,19 +284,14 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 }
 
-interface LoaderData {
-  content: PortfolioContent;
-  csrfToken: string;
-}
-
 export default function AdminPortfolioPage() {
   const { content, csrfToken } = useLoaderData<LoaderData>();
   const actionData = useActionData<{ error?: string; success?: string; createdId?: string }>();
   const navigation = useNavigation();
   const isSubmitting = navigation.state === "submitting";
 
-  const [categoryFilter, setCategoryFilter] = useState<string>("all");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [categoryFilter, setCategoryFilter] = useState<"all" | PortfolioCategory>("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "published" | "draft" | "archived">("all");
   const [projectToDelete, setProjectToDelete] = useState<PortfolioProject | null>(null);
 
   const filteredProjects = content.projects
@@ -285,13 +307,13 @@ export default function AdminPortfolioPage() {
   return (
     <div className={styles.container}>
       <Link to="/admin/dashboard" className={styles.backLink}>
-        ← Retour au tableau de bord
+        ← Retour au Dashboard
       </Link>
 
       <div className={styles.header}>
         <div>
           <h1 className={styles.title}>Gestion du Portfolio</h1>
-          <p style={{ margin: "8px 0 0", color: "#8A92A6", fontSize: "15px" }}>
+          <p className={styles.headerSubtitle}>
             Administrez vos réalisations, rubriques, médias et mise en page du portfolio.
           </p>
         </div>
@@ -323,7 +345,7 @@ export default function AdminPortfolioPage() {
           {actionData.createdId && (
             <Link
               to={`/admin/portfolio/${actionData.createdId}`}
-              style={{ marginLeft: 12, color: "#2ed573", textDecoration: "underline" }}
+              className={styles.sectionEditActive}
             >
               Ouvrir le projet →
             </Link>
@@ -373,7 +395,7 @@ export default function AdminPortfolioPage() {
       {/* Filter controls */}
       <div className={styles.filtersBar}>
         <div className={styles.filterGroup}>
-          <span style={{ fontSize: 13, color: "#8A92A6", marginRight: 8 }}>Rubrique :</span>
+          <span className={styles.filterLabel}>Rubrique :</span>
           <button
             type="button"
             className={`${styles.filterBtn} ${categoryFilter === "all" ? styles.filterBtnActive : ""}`}
@@ -398,7 +420,7 @@ export default function AdminPortfolioPage() {
         </div>
 
         <div className={styles.filterGroup}>
-          <span style={{ fontSize: 13, color: "#8A92A6", marginRight: 8 }}>Statut :</span>
+          <span className={styles.filterLabel}>Statut :</span>
           <button
             type="button"
             className={`${styles.filterBtn} ${statusFilter === "all" ? styles.filterBtnActive : ""}`}
@@ -432,25 +454,25 @@ export default function AdminPortfolioPage() {
 
       {/* Projects Table */}
       {filteredProjects.length === 0 ? (
-        <div style={{ textAlign: "center", padding: "64px 0", color: "#8A92A6" }}>
+        <div className={styles.emptyTable}>
           Aucun projet ne correspond aux filtres sélectionnés.
         </div>
       ) : (
         <table className={styles.projectsTable}>
           <thead>
-            <tr style={{ color: "#8A92A6", fontSize: 12, textAlign: "left" }}>
-              <th style={{ padding: "0 20px 12px" }}>Aperçu</th>
-              <th style={{ padding: "0 20px 12px" }}>Titre & Slugs</th>
-              <th style={{ padding: "0 20px 12px" }}>Rubrique</th>
-              <th style={{ padding: "0 20px 12px" }}>Statut</th>
-              <th style={{ padding: "0 20px 12px" }}>Présentation</th>
-              <th style={{ padding: "0 20px 12px", textAlign: "right" }}>Actions</th>
+            <tr className={styles.tableHeaderRow}>
+              <th className={styles.tableTh}>Aperçu</th>
+              <th className={styles.tableTh}>Titre & Slugs</th>
+              <th className={styles.tableTh}>Rubrique</th>
+              <th className={styles.tableTh}>Statut</th>
+              <th className={styles.tableTh}>Présentation</th>
+              <th className={styles.tableThRight}>Actions</th>
             </tr>
           </thead>
           <tbody>
             {filteredProjects.map((p, idx) => (
               <tr key={p.id} className={styles.tableRow}>
-                <td className={styles.tableCell} style={{ width: 80 }}>
+                <td className={`${styles.tableCell} ${styles.tableCellThumbnail}`}>
                   {p.coverImageId ? (
                     <ResponsivePortfolioImage
                       imageId={p.coverImageId}
@@ -469,8 +491,8 @@ export default function AdminPortfolioPage() {
 
                 <td className={styles.tableCell}>
                   <div className={styles.projectTitleCell}>{p.title.fr}</div>
-                  <div style={{ fontSize: 13, color: "#8A92A6" }}>{p.title.en}</div>
-                  <div style={{ fontSize: 11, color: "#546076", marginTop: 4 }}>
+                  <div className={styles.projectTitleEn}>{p.title.en}</div>
+                  <div className={styles.projectSlugHint}>
                     FR: /{p.category === "documentary" ? "documentaire" : "publicite"}/{p.slugFr} | EN: /{p.category}/{p.slugEn}
                   </div>
                 </td>
@@ -493,11 +515,11 @@ export default function AdminPortfolioPage() {
 
                 <td className={styles.tableCell}>
                   {p.showcase ? (
-                    <span style={{ fontSize: 13, color: "#1E9EFF" }}>
+                    <span className={styles.showcaseBadgeYes}>
                       Oui ({p.side === "auto" ? "Alternance auto" : p.side === "left" ? "Gauche" : "Droite"})
                     </span>
                   ) : (
-                    <span style={{ fontSize: 13, color: "#8A92A6" }}>Non</span>
+                    <span className={styles.showcaseBadgeNo}>Non</span>
                   )}
                 </td>
 
@@ -505,7 +527,7 @@ export default function AdminPortfolioPage() {
                   <div className={styles.rowActions}>
                     {/* Reorder buttons */}
                     <div className={styles.orderControls}>
-                      <Form method="post" style={{ display: "inline" }}>
+                      <Form method="post" className={styles.inlineForm}>
                         <input type="hidden" name="csrfToken" value={csrfToken} />
                         <input type="hidden" name="revision" value={content.revision} />
                         <input type="hidden" name="intent" value="reorder" />
@@ -521,7 +543,7 @@ export default function AdminPortfolioPage() {
                         </button>
                       </Form>
 
-                      <Form method="post" style={{ display: "inline" }}>
+                      <Form method="post" className={styles.inlineForm}>
                         <input type="hidden" name="csrfToken" value={csrfToken} />
                         <input type="hidden" name="revision" value={content.revision} />
                         <input type="hidden" name="intent" value="reorder" />
@@ -543,7 +565,7 @@ export default function AdminPortfolioPage() {
                     </Link>
 
                     {/* Publish/unpublish */}
-                    <Form method="post" style={{ display: "inline" }}>
+                    <Form method="post" className={styles.inlineForm}>
                       <input type="hidden" name="csrfToken" value={csrfToken} />
                       <input type="hidden" name="revision" value={content.revision} />
                       <input type="hidden" name="intent" value="toggle_status" />
@@ -558,7 +580,7 @@ export default function AdminPortfolioPage() {
                     </Form>
 
                     {/* Archive toggle */}
-                    <Form method="post" style={{ display: "inline" }}>
+                    <Form method="post" className={styles.inlineForm}>
                       <input type="hidden" name="csrfToken" value={csrfToken} />
                       <input type="hidden" name="revision" value={content.revision} />
                       <input type="hidden" name="intent" value="toggle_archive" />
@@ -612,8 +634,7 @@ export default function AdminPortfolioPage() {
                 <input type="hidden" name="projectId" value={projectToDelete.id} />
                 <button
                   type="submit"
-                  className={`${styles.primaryBtn} ${styles.actionBtnDanger}`}
-                  style={{ background: "#ff4757", color: "#fff" }}
+                  className={`${styles.primaryBtn} ${styles.dangerConfirmBtn}`}
                 >
                   Confirmer la suppression
                 </button>

@@ -49,16 +49,20 @@ export function meta({ data }: { data?: LoaderData }) {
   if (!data) return [{ title: "Portfolio | Parallax" }];
   const { lang, content, panelState, siteUrl, alternateUrls } = data;
 
-  let pageTitle = `${content.overview.title[lang]} — Parallax`;
-  let pageDesc = content.overview.seo.description[lang];
+  let pageTitle = content.overview.seo.title[lang] || `${content.overview.title[lang]} — Parallax`;
+  let pageDesc = content.overview.seo.description[lang] || content.overview.intro[lang];
 
   if (panelState.activeProject) {
-    pageTitle = `${panelState.activeProject.title[lang]} — Parallax`;
-    pageDesc = panelState.activeProject.summary[lang];
+    pageTitle =
+      panelState.activeProject.seo.title[lang] ||
+      `${panelState.activeProject.title[lang]} — Parallax`;
+    pageDesc =
+      panelState.activeProject.seo.description[lang] ||
+      panelState.activeProject.summary[lang];
   } else if (panelState.activeCategory) {
     const sec = content.sections[panelState.activeCategory];
-    pageTitle = `${sec.title[lang]} — Parallax`;
-    pageDesc = sec.intro[lang];
+    pageTitle = sec.seo.title[lang] || `${sec.title[lang]} — Parallax`;
+    pageDesc = sec.seo.description[lang] || sec.intro[lang];
   }
 
   const base = siteUrl.replace(/\/$/, "");
@@ -75,7 +79,7 @@ export function meta({ data }: { data?: LoaderData }) {
     { tagName: "link", rel: "alternate", hrefLang: "x-default", href: frUrl },
     { name: "robots", content: "index, follow" },
   ];
-};
+}
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const url = new URL(request.url);
@@ -99,22 +103,30 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   } else if (isPubSection) {
     activeCategory = "advertising";
   } else if (params.rubrique || params.category) {
-    // Project detail requested
-    const rawCat = (params.rubrique || params.category || "").toLowerCase();
-    const cat: PortfolioCategory =
-      rawCat === "documentaire" || rawCat === "documentary" ? "documentary" : "advertising";
-    const slug = params.slugFr || params.slugEn;
-
-    if (slug) {
-      const found = publicProjects.find(
-        (p) => (lang === "fr" ? p.slugFr === slug : p.slugEn === slug) && p.category === cat
-      );
-      if (!found) {
-        throw new Response("Projet introuvable", { status: 404 });
-      }
-      activeProject = found;
-      activeCategory = cat;
+    let cat: PortfolioCategory | null = null;
+    if (lang === "fr") {
+      const raw = (params.rubrique || "").toLowerCase();
+      if (raw === "documentaire") cat = "documentary";
+      else if (raw === "publicite") cat = "advertising";
+      else throw new Response("Rubrique introuvable", { status: 404 });
+    } else {
+      const raw = (params.category || "").toLowerCase();
+      if (raw === "documentary") cat = "documentary";
+      else if (raw === "advertising") cat = "advertising";
+      else throw new Response("Section not found", { status: 404 });
     }
+
+    const slug = lang === "fr" ? params.slugFr : params.slugEn;
+    if (!slug) throw new Response("Slug manquant", { status: 404 });
+
+    const found = publicProjects.find(
+      (p) => (lang === "fr" ? p.slugFr === slug : p.slugEn === slug) && p.category === cat
+    );
+    if (!found) {
+      throw new Response("Projet introuvable", { status: 404 });
+    }
+    activeProject = found;
+    activeCategory = cat;
   }
 
   // Direction: read query parameter 'dir' or infer from category default
@@ -131,7 +143,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // Build showcase projects (featured or top 3)
   const showcaseProjects = publicProjects.filter((p) => p.showcase);
 
-  const alternateUrls = getPortfolioAlternateUrls(activeProject, activeCategory);
+  const alternateUrls = getPortfolioAlternateUrls(activeProject, activeCategory, direction);
 
   return Response.json(
     {
@@ -162,281 +174,312 @@ export default function PortfolioPage() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const [panelOpen, setPanelOpen] = useState(panelState.isOpen);
+  // Persistent panel lifecycle: "closed" | "open" | "closing"
+  const [phase, setPhase] = useState<"closed" | "open" | "closing">(
+    panelState.isOpen ? "open" : "closed"
+  );
   const [panelDirection, setPanelDirection] = useState<"left" | "right">(panelState.direction);
   const [showGallery, setShowGallery] = useState(false);
   const [activeVideoUrl, setActiveVideoUrl] = useState<string | null>(null);
 
+  // Cached content ref to keep content rendered during closing animation
+  const cachedContentRef = useRef<{
+    activeCategory: PortfolioCategory | null;
+    activeProject: PortfolioProject | null;
+  }>({
+    activeCategory: panelState.activeCategory,
+    activeProject: panelState.activeProject,
+  });
+
+  if (panelState.isOpen) {
+    cachedContentRef.current = {
+      activeCategory: panelState.activeCategory,
+      activeProject: panelState.activeProject,
+    };
+  }
+
   const panelRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLElement | null>(null);
+  const closeBtnRef = useRef<HTMLAnchorElement | null>(null);
+  const isClosingRef = useRef(false);
 
   useEffect(() => {
-    setPanelOpen(panelState.isOpen);
     if (panelState.isOpen) {
+      isClosingRef.current = false;
       setPanelDirection(panelState.direction);
       setShowGallery(false);
-      // Lock scroll on background
-      document.body.style.overflow = "hidden";
+      setPhase("open");
+      document.body.classList.add(styles.bodyScrollLocked);
       if (panelRef.current) {
         panelRef.current.scrollTop = 0;
       }
+      setTimeout(() => {
+        closeBtnRef.current?.focus();
+      }, 50);
     } else {
-      document.body.style.overflow = "";
-      if (triggerRef.current) {
-        triggerRef.current.focus();
+      if (phase === "open") {
+        setPhase("closing");
+        const timer = setTimeout(() => {
+          setPhase("closed");
+          document.body.classList.remove(styles.bodyScrollLocked);
+          if (triggerRef.current) {
+            triggerRef.current.focus();
+          }
+        }, 500);
+        return () => clearTimeout(timer);
+      } else {
+        setPhase("closed");
+        document.body.classList.remove(styles.bodyScrollLocked);
       }
     }
-    return () => {
-      document.body.style.overflow = "";
-    };
   }, [panelState.isOpen, panelState.direction, location.pathname]);
 
-  // Handle ESC key to close panel
+  // Handle ESC key (with priority to VideoModal)
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape" && panelOpen) {
+      if (e.key === "Escape" && phase === "open" && !activeVideoUrl) {
         handleClosePanel();
       }
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [panelOpen]);
+  }, [phase, activeVideoUrl, lang]);
+
+  // Focus trap within panelRef when open
+  useEffect(() => {
+    if (phase !== "open" || !panelRef.current) return;
+    const panelEl = panelRef.current;
+
+    function handleTab(e: KeyboardEvent) {
+      if (e.key !== "Tab") return;
+      if (activeVideoUrl) return;
+
+      const focusable = panelEl.querySelectorAll<HTMLElement>(
+        'a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'
+      );
+      if (focusable.length === 0) return;
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+
+      if (e.shiftKey) {
+        if (document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else {
+        if (document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    }
+
+    window.addEventListener("keydown", handleTab);
+    return () => window.removeEventListener("keydown", handleTab);
+  }, [phase, activeVideoUrl]);
 
   function handleClosePanel() {
-    setPanelOpen(false);
-    navigate(getPortfolioOverviewUrl(lang), { replace: false });
+    if (isClosingRef.current) return;
+    isClosingRef.current = true;
+    setPhase("closing");
+
+    setTimeout(() => {
+      setPhase("closed");
+      document.body.classList.remove(styles.bodyScrollLocked);
+      navigate(getPortfolioOverviewUrl(lang), { replace: false });
+      if (triggerRef.current) {
+        triggerRef.current.focus();
+      }
+    }, 500);
   }
 
-  // Fallback showcase items matching prototype if no custom projects exist
-  const defaultShowcaseRows = [
-    {
-      category: "documentary" as const,
-      categoryTitle: content.sections.documentary.title[lang],
-      summary: content.projects[0]?.summary[lang] || "Un court documentaire sur une boulangerie artisanale, du fournil à la vitrine.",
-      fallbackImg: "/img/img-fe32ce05c3.png",
-      alt: "Documentaire boulangerie",
-      side: "left" as const,
-      openDirection: "right" as const,
-      sectionUrl: getPortfolioSectionUrl("documentary", lang),
-    },
-    {
-      category: "advertising" as const,
-      categoryTitle: content.sections.advertising.title[lang],
-      summary: content.projects[1]?.summary[lang] || "Film publicitaire pour une marque de vélo, entre studio et grand air.",
-      fallbackImg: "/img/img-b431c99fa2.png",
-      alt: "Publicité vélo",
-      side: "right" as const,
-      openDirection: "left" as const,
-      sectionUrl: getPortfolioSectionUrl("advertising", lang),
-    },
-    {
-      category: "advertising" as const,
-      categoryTitle: content.sections.advertising.title[lang],
-      summary: content.projects[2]?.summary[lang] || "Nature morte en mouvement pour le lancement d'un produit.",
-      fallbackImg: "/img/img-5abab13d55.png",
-      alt: "Publicité produit",
-      side: "left" as const,
-      openDirection: "right" as const,
-      sectionUrl: getPortfolioSectionUrl("advertising", lang),
-    },
-  ];
+  // Active or cached category/project for panel display
+  const effectiveCategory = panelState.isOpen
+    ? panelState.activeCategory
+    : cachedContentRef.current.activeCategory;
+  const effectiveProject = panelState.isOpen
+    ? panelState.activeProject
+    : cachedContentRef.current.activeProject;
 
-  // If user has published projects in showcase, map them
-  const rowsToRender =
-    showcaseProjects.length > 0
-      ? showcaseProjects.map((p, idx) => {
-          const effectiveSide = calculateEffectiveSide(p.side, idx);
-          // Direction formula: imageSide === "left" ? "right" : "left"
-          const openDirection = effectiveSide === "left" ? ("right" as const) : ("left" as const);
-          return {
-            category: p.category,
-            categoryTitle: content.sections[p.category].title[lang],
-            summary: p.summary[lang],
-            project: p,
-            fallbackImg: idx === 0 ? "/img/img-fe32ce05c3.png" : idx === 1 ? "/img/img-b431c99fa2.png" : "/img/img-5abab13d55.png",
-            alt: p.coverAlt[lang] || p.title[lang],
-            side: effectiveSide,
-            openDirection,
-            sectionUrl: `${getPortfolioSectionUrl(p.category, lang)}?dir=${openDirection}`,
-          };
-        })
-      : defaultShowcaseRows;
+  const activeSec = effectiveCategory ? content.sections[effectiveCategory] : null;
 
-  // Active section data for panel
-  const activeSec = panelState.activeCategory
-    ? content.sections[panelState.activeCategory]
-    : null;
+  // Build showcase presentation rows from published projects
+  const rowsToRender = showcaseProjects.map((p, idx) => {
+    const effectiveSide = calculateEffectiveSide(p.side, idx);
+    const openDirection = effectiveSide === "left" ? ("right" as const) : ("left" as const);
+    return {
+      category: p.category,
+      categoryTitle: content.sections[p.category].title[lang],
+      summary: p.summary[lang],
+      project: p,
+      alt: p.coverAlt[lang] || p.title[lang],
+      side: effectiveSide,
+      openDirection,
+      sectionUrl: `${getPortfolioSectionUrl(p.category, lang)}?dir=${openDirection}`,
+    };
+  });
 
-  // Filter projects for the active category
-  const categoryProjects = panelState.activeCategory
+  // Projects in active section
+  const categoryProjects = effectiveCategory
     ? content.projects.filter(
-        (p) => p.category === panelState.activeCategory && p.status === "published" && !p.archived
+        (p) => p.category === effectiveCategory && p.status === "published" && !p.archived
       )
     : [];
 
-  // Collect all gallery images in this category for the "Voir plus de photos" masonry view
+  // Collect all gallery images in this category
   const categoryGalleryImages: { imageId: string; alt: string; projectId: string }[] = [];
   if (categoryProjects.length > 0) {
     for (const p of categoryProjects) {
       for (const gid of p.galleryImageIds) {
         categoryGalleryImages.push({
           imageId: gid,
-          alt: p.title[lang],
+          alt: p.coverAlt[lang] || p.title[lang],
           projectId: p.id,
         });
       }
     }
   }
 
-  // Static prototype fallback gallery photos if category has no uploaded gallery images
-  const defaultDocuGalleryThumbs = [
-    "/img/projets-e47f65d0c6.jpg",
-    "/img/projets-a9bf38c02a.jpg",
-    "/img/projets-f5fdea0b4c.jpg",
-    "/img/projets-4317a9aef7.jpg",
-    "/img/projets-51bd361c0c.jpg",
-    "/img/projets-d85c1edc7d.jpg",
-  ];
+  const dirParam = `?dir=${panelDirection}`;
 
   return (
-    <div className={styles.pageRoot}>
-      <Header
-        common={common}
-        lang={lang}
-        currentRoute="portfolio"
-        alternateUrls={alternateUrls}
-      />
+    <div className={styles.pageContainer}>
+      <Header common={common} lang={lang} currentRoute="portfolio" alternateUrls={alternateUrls} />
 
-      <main>
-        <section className={styles.heroSection}>
-          <h1 className={styles.heroTitle}>{content.overview.title[lang]}</h1>
-        </section>
-
-        <section className={styles.showcaseSection}>
-          {rowsToRender.map((row, index) => {
-            const isImageLeft = row.side === "left";
-            const rowClass = `${styles.showcaseRow} ${
-              isImageLeft ? styles.rowLayoutLeft : styles.rowLayoutRight
-            } ${index > 0 ? styles.rowOverlap : ""}`;
-
-            const imageComponent = (
-              <div className={styles.imageCol} key="img">
-                {"project" in row && row.project && row.project.coverImageId ? (
-                  <ResponsivePortfolioImage
-                    imageId={row.project.coverImageId}
-                    ownerType="project"
-                    ownerId={row.project.id}
-                    mediaSlot="cover"
-                    mediaMetadata={content.media[row.project.coverImageId]}
-                    fallbackSrc={row.fallbackImg}
-                    alt={row.alt}
-                    className={styles.showcaseImg}
-                  />
-                ) : (
-                  <img
-                    src={row.fallbackImg}
-                    alt={row.alt}
-                    className={styles.showcaseImg}
-                  />
-                )}
-              </div>
-            );
-
-            const textComponent = (
-              <div
-                className={isImageLeft ? styles.textColLeft : styles.textColRight}
-                key="text"
+      {/* Main Showcase Feed */}
+      <main className={styles.mainFeed} inert={phase !== "closed"}>
+        {rowsToRender.length > 0 ? (
+          rowsToRender.map((row, idx) => {
+            const isLeftImage = row.side === "left";
+            return (
+              <section
+                key={`${row.category}-${idx}`}
+                className={`${styles.showcaseRow} ${
+                  isLeftImage ? styles.rowLeftImage : styles.rowRightImage
+                }`}
               >
-                <div className={styles.textCard}>
-                  <div className={styles.categoryTag}>{row.categoryTitle}</div>
-                  <p className={styles.projectSummary}>{row.summary}</p>
+                {/* Image block */}
+                <div className={styles.imageCol}>
                   <Link
                     to={row.sectionUrl}
-                    className={`${styles.seeMoreBtn} ${
-                      isImageLeft ? styles.seeMoreBtnLeft : styles.seeMoreBtnRight
-                    }`}
+                    className={styles.imageLink}
                     onClick={(e) => {
                       triggerRef.current = e.currentTarget;
                     }}
+                    aria-label={`Ouvrir la rubrique ${row.categoryTitle}`}
                   >
-                    {!isImageLeft && (
-                      <span className={styles.circleIcon} aria-hidden="true">
-                        <svg
-                          width="18"
-                          height="18"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="#F5F6F7"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        >
-                          <path d="M19 12 H5" />
-                          <path d="M11 6 L5 12 L11 18" />
-                        </svg>
-                      </span>
-                    )}
-                    <span>{content.overview.seeMoreButton[lang]}</span>
-                    {isImageLeft && (
-                      <span className={styles.circleIcon} aria-hidden="true">
-                        <svg
-                          width="18"
-                          height="18"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="#F5F6F7"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        >
-                          <path d="M5 12 H19" />
-                          <path d="M13 6 L19 12 L13 18" />
-                        </svg>
-                      </span>
-                    )}
+                    <div className={styles.imageWrapper}>
+                      {row.project.coverImageId && (
+                        <ResponsivePortfolioImage
+                          imageId={row.project.coverImageId}
+                          ownerType="project"
+                          ownerId={row.project.id}
+                          mediaSlot="cover"
+                          mediaMetadata={content.media[row.project.coverImageId]}
+                          alt={row.alt}
+                          className={styles.showcaseImg}
+                          loading={idx === 0 ? "eager" : "lazy"}
+                        />
+                      )}
+                    </div>
                   </Link>
                 </div>
-              </div>
-            );
 
-            return (
-              <div className={rowClass} key={index}>
-                {isImageLeft ? [imageComponent, textComponent] : [textComponent, imageComponent]}
-              </div>
+                {/* Text Content block */}
+                <div className={styles.textCol}>
+                  <div className={styles.textContent}>
+                    <h2 className={styles.categoryTag}>{row.categoryTitle}</h2>
+                    <p className={styles.projectSummary}>{row.summary}</p>
+                    <Link
+                      to={row.sectionUrl}
+                      className={`${styles.seeMoreBtn} ${
+                        isLeftImage ? styles.seeMoreBtnLeft : styles.seeMoreBtnRight
+                      }`}
+                      onClick={(e) => {
+                        triggerRef.current = e.currentTarget;
+                      }}
+                    >
+                      {isLeftImage ? (
+                        <>
+                          <span className={styles.btnLabel}>
+                            {content.overview.seeMoreButton[lang]}
+                          </span>
+                          <span className={styles.circleIcon}>
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                              <path
+                                d="M5 12 H19 M12 5 L19 12 L12 19"
+                                stroke="#F5F6F7"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              />
+                            </svg>
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <span className={styles.circleIcon}>
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                              <path
+                                d="M19 12 H5 M12 5 L5 12 L12 19"
+                                stroke="#F5F6F7"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              />
+                            </svg>
+                          </span>
+                          <span className={styles.btnLabel}>
+                            {content.overview.seeMoreButton[lang]}
+                          </span>
+                        </>
+                      )}
+                    </Link>
+                  </div>
+                </div>
+              </section>
             );
-          })}
-        </section>
+          })
+        ) : (
+          <div className={styles.emptyOverview}>
+            <p>
+              {lang === "fr"
+                ? "Aucune réalisation en vitrine pour le moment."
+                : "No showcase projects available at this time."}
+            </p>
+          </div>
+        )}
       </main>
 
       <Footer common={common} lang={lang} />
 
-      {/* -------------------------------------------------------------
-       * Directional Panel Overlay
-       * ------------------------------------------------------------- */}
+      {/* Directional Sliding Panel Overlay */}
       <div
         ref={panelRef}
-        className={styles.panelOverlay}
-        data-direction={panelDirection}
-        data-state={panelOpen ? "open" : "closed"}
         role="dialog"
-        aria-modal={panelOpen}
+        aria-modal="true"
         aria-label={
-          panelState.activeProject
-            ? panelState.activeProject.title[lang]
+          effectiveProject
+            ? effectiveProject.title[lang]
             : activeSec
             ? activeSec.title[lang]
             : "Portfolio"
         }
+        className={styles.panelOverlay}
+        data-direction={panelDirection}
+        data-state={phase === "open" ? "open" : "closed"}
+        hidden={phase === "closed"}
       >
         <div className={styles.panelContent}>
           {/* Top navigation buttons */}
           <div className={styles.panelNavButtons}>
-            {panelState.activeProject ? (
+            {effectiveProject ? (
               <Link
-                to={getPortfolioSectionUrl(panelState.activeProject.category, lang)}
+                to={`${getPortfolioSectionUrl(effectiveProject.category, lang)}${dirParam}`}
                 className={styles.backBtn}
               >
-                <span className={styles.circleIcon} style={{ width: 34, height: 34 }}>
+                <span className={`${styles.circleIcon} ${styles.circleIconLarge}`}>
                   <svg
                     width="15"
                     height="15"
@@ -453,13 +496,17 @@ export default function PortfolioPage() {
                 </span>
                 <span>
                   {lang === "fr"
-                    ? `Retour à ${content.sections[panelState.activeProject.category].title[lang]}`
-                    : `Back to ${content.sections[panelState.activeProject.category].title[lang]}`}
+                    ? `Retour à ${content.sections[effectiveProject.category].title[lang]}`
+                    : `Back to ${content.sections[effectiveProject.category].title[lang]}`}
                 </span>
               </Link>
             ) : (
-              <Link to={getPortfolioOverviewUrl(lang)} className={styles.backBtn}>
-                <span className={styles.circleIcon} style={{ width: 34, height: 34 }}>
+              <button
+                type="button"
+                onClick={handleClosePanel}
+                className={styles.backBtn}
+              >
+                <span className={`${styles.circleIcon} ${styles.circleIconLarge}`}>
                   <svg
                     width="15"
                     height="15"
@@ -475,111 +522,118 @@ export default function PortfolioPage() {
                   </svg>
                 </span>
                 <span>{activeSec?.backButton[lang] || "Retour aux projets"}</span>
-              </Link>
+              </button>
             )}
 
-            <Link
-              to={getPortfolioOverviewUrl(lang)}
+            {/* Deterministic Close Button */}
+            <a
+              ref={closeBtnRef}
+              href={getPortfolioOverviewUrl(lang)}
+              onClick={(e) => {
+                e.preventDefault();
+                handleClosePanel();
+              }}
               className={styles.closeBtn}
               aria-label="Fermer le panneau"
             >
-              <svg
-                width="18"
-                height="18"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M18 6 L6 18" />
-                <path d="M6 6 L18 18" />
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                <path
+                  d="M18 6 L6 18 M6 6 L18 18"
+                  stroke="#F5F6F7"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
               </svg>
-            </Link>
+            </a>
           </div>
 
-          {/* VIEW 1: Project Detail (if activeProject is set) */}
-          {panelState.activeProject ? (
+          {effectiveProject ? (
+            /* VIEW 1: Project Detail View */
             <div className={styles.detailContainer}>
               <div className={styles.detailCategory}>
-                {content.sections[panelState.activeProject.category].title[lang]}
+                {content.sections[effectiveProject.category].title[lang]}
               </div>
-              <h2 className={styles.detailTitle}>
-                {panelState.activeProject.title[lang]}
-              </h2>
-              <p className={styles.detailSummary}>
-                {panelState.activeProject.summary[lang]}
-              </p>
+              <h1 className={styles.detailTitle}>{effectiveProject.title[lang]}</h1>
+              <p className={styles.detailSummary}>{effectiveProject.summary[lang]}</p>
 
-              {panelState.activeProject.coverImageId && (
+              {effectiveProject.coverImageId && (
                 <div className={styles.detailCoverWrap}>
                   <ResponsivePortfolioImage
-                    imageId={panelState.activeProject.coverImageId}
+                    imageId={effectiveProject.coverImageId}
                     ownerType="project"
-                    ownerId={panelState.activeProject.id}
+                    ownerId={effectiveProject.id}
                     mediaSlot="cover"
-                    mediaMetadata={content.media[panelState.activeProject.coverImageId]}
-                    alt={panelState.activeProject.coverAlt[lang] || panelState.activeProject.title[lang]}
+                    mediaMetadata={content.media[effectiveProject.coverImageId]}
+                    alt={effectiveProject.coverAlt[lang] || effectiveProject.title[lang]}
+                    className={styles.detailCoverImg}
+                    loading="eager"
                   />
                 </div>
               )}
 
-              {/* Video with play button if configured */}
-              {panelState.activeProject.video && (
-                <div className={styles.showreelCard} style={{ marginBottom: 48 }}>
-                  {panelState.activeProject.video.coverImageId ? (
-                    <ResponsivePortfolioImage
-                      imageId={panelState.activeProject.video.coverImageId}
-                      ownerType="project"
-                      ownerId={panelState.activeProject.id}
-                      mediaSlot="video_cover"
-                      mediaMetadata={content.media[panelState.activeProject.video.coverImageId]}
-                      alt="Vidéo du projet"
-                    />
-                  ) : null}
-                  <button
-                    type="button"
-                    className={styles.playBtn}
-                    onClick={() => setActiveVideoUrl(panelState.activeProject!.video!.url)}
-                    aria-label="Lire la vidéo"
-                  >
-                    <svg width="24" height="26" viewBox="0 0 26 28" fill="none">
-                      <path d="M4 3 L23 14 L4 25 Z" fill="#F5F6F7" />
-                    </svg>
-                  </button>
+              {/* Typed Editorial Paragraphs */}
+              <div className={styles.detailBody}>
+                {effectiveProject.description.map((block, bIdx) => (
+                  <p key={bIdx} className={styles.detailParagraph}>
+                    {block.text[lang]}
+                  </p>
+                ))}
+              </div>
+
+              {/* Video Player Section */}
+              {effectiveProject.video?.url && (
+                <div className={styles.detailVideoSection}>
+                  <div className={styles.showreelCard}>
+                    {effectiveProject.video.coverImageId ? (
+                      <ResponsivePortfolioImage
+                        imageId={effectiveProject.video.coverImageId}
+                        ownerType="project"
+                        ownerId={effectiveProject.id}
+                        mediaSlot="video_cover"
+                        mediaMetadata={content.media[effectiveProject.video.coverImageId]}
+                        alt={effectiveProject.title[lang]}
+                      />
+                    ) : effectiveProject.coverImageId ? (
+                      <ResponsivePortfolioImage
+                        imageId={effectiveProject.coverImageId}
+                        ownerType="project"
+                        ownerId={effectiveProject.id}
+                        mediaSlot="cover"
+                        mediaMetadata={content.media[effectiveProject.coverImageId]}
+                        alt={effectiveProject.title[lang]}
+                      />
+                    ) : null}
+                    <button
+                      type="button"
+                      className={styles.playBtn}
+                      onClick={() => setActiveVideoUrl(effectiveProject.video!.url)}
+                      aria-label="Lire la vidéo"
+                    >
+                      <svg width="26" height="28" viewBox="0 0 26 28" fill="none">
+                        <path d="M4 3 L23 14 L4 25 Z" fill="#F5F6F7" />
+                      </svg>
+                    </button>
+                  </div>
                 </div>
               )}
 
-              {/* Typed Description Paragraphs */}
-              {panelState.activeProject.description.length > 0 && (
-                <div className={styles.detailBody}>
-                  {panelState.activeProject.description.map((block, bIdx) =>
-                    block.type === "heading" ? (
-                      <h3 key={bIdx}>{block.text[lang]}</h3>
-                    ) : (
-                      <p key={bIdx}>{block.text[lang]}</p>
-                    )
-                  )}
-                </div>
-              )}
-
-              {/* Project Photo Gallery */}
-              {panelState.activeProject.galleryImageIds.length > 0 && (
-                <div>
-                  <h3 className={styles.detailGalleryTitle}>
+              {/* Gallery Photos */}
+              {effectiveProject.galleryImageIds.length > 0 && (
+                <div className={styles.detailGallerySection}>
+                  <h3 className={styles.galleryTitle}>
                     {lang === "fr" ? "Galerie photos" : "Photo gallery"}
                   </h3>
-                  <div className={styles.detailGalleryGrid}>
-                    {panelState.activeProject.galleryImageIds.map((gid) => (
-                      <div key={gid} className={styles.detailGalleryItem}>
+                  <div className={styles.detailPhotoGrid}>
+                    {effectiveProject.galleryImageIds.map((gid) => (
+                      <div key={gid} className={styles.photoGridItem}>
                         <ResponsivePortfolioImage
                           imageId={gid}
                           ownerType="project"
-                          ownerId={panelState.activeProject!.id}
+                          ownerId={effectiveProject.id}
                           mediaSlot="gallery"
                           mediaMetadata={content.media[gid]}
-                          alt={panelState.activeProject!.title[lang]}
+                          alt={effectiveProject.title[lang]}
                         />
                       </div>
                     ))}
@@ -592,14 +646,11 @@ export default function PortfolioPage() {
             <div>
               {/* Category Header Hero */}
               <div
-                className={styles.sectionHero}
-                style={{
-                  backgroundImage: activeSec.coverImageId
-                    ? undefined
-                    : activeSec.category === "documentary"
-                    ? "url(/img/projets-141c16b0a2.jpg)"
-                    : undefined,
-                }}
+                className={`${styles.sectionHero} ${
+                  activeSec.category === "documentary" && !activeSec.coverImageId
+                    ? styles.sectionHeroDocu
+                    : styles.sectionHeroPub
+                }`}
               >
                 {activeSec.coverImageId && (
                   <ResponsivePortfolioImage
@@ -626,7 +677,7 @@ export default function PortfolioPage() {
               {/* Category switch tabs */}
               <div className={styles.filterTabs}>
                 <Link
-                  to={getPortfolioSectionUrl("documentary", lang)}
+                  to={`${getPortfolioSectionUrl("documentary", lang)}${dirParam}`}
                   className={`${styles.filterTab} ${
                     activeSec.category === "documentary" ? styles.filterTabActive : ""
                   }`}
@@ -634,7 +685,7 @@ export default function PortfolioPage() {
                   {content.sections.documentary.title[lang]}
                 </Link>
                 <Link
-                  to={getPortfolioSectionUrl("advertising", lang)}
+                  to={`${getPortfolioSectionUrl("advertising", lang)}${dirParam}`}
                   className={`${styles.filterTab} ${
                     activeSec.category === "advertising" ? styles.filterTabActive : ""
                   }`}
@@ -650,29 +701,24 @@ export default function PortfolioPage() {
                     const isEven = pIdx % 2 === 0;
                     return (
                       <Link
-                        to={getPortfolioProjectUrl(p, lang)}
+                        to={`${getPortfolioProjectUrl(p, lang)}${dirParam}`}
                         key={p.id}
                         className={styles.projectCardLink}
                       >
                         <div
-                          className={styles.projectRow}
-                          style={{
-                            flexDirection: isEven ? "row" : "row-reverse",
-                          }}
+                          className={`${styles.projectRow} ${
+                            isEven ? styles.projectRowEven : styles.projectRowOdd
+                          }`}
                         >
                           <div
-                            style={{
-                              flex: "none",
-                              width: isEven ? 560 : 480,
-                              maxWidth: "100%",
-                            }}
+                            className={isEven ? styles.projectBoxEven : styles.projectBoxOdd}
                           >
                             <div
                               className={`${styles.imageBox} ${
                                 isEven ? styles.aspect32 : styles.aspect45
                               }`}
                             >
-                              {p.coverImageId ? (
+                              {p.coverImageId && (
                                 <ResponsivePortfolioImage
                                   imageId={p.coverImageId}
                                   ownerType="project"
@@ -681,34 +727,20 @@ export default function PortfolioPage() {
                                   mediaMetadata={content.media[p.coverImageId]}
                                   alt={p.coverAlt[lang] || p.title[lang]}
                                 />
-                              ) : (
-                                <img
-                                  src={
-                                    defaultDocuGalleryThumbs[
-                                      pIdx % defaultDocuGalleryThumbs.length
-                                    ]
-                                  }
-                                  alt={p.title[lang]}
-                                />
                               )}
                             </div>
                           </div>
 
                           <div
-                            style={{
-                              flex: 1,
-                              textAlign: isEven ? "left" : "right",
-                            }}
+                            className={isEven ? styles.projectTextEven : styles.projectTextOdd}
                           >
                             <div className={styles.projectInfoTitle}>
                               {p.title[lang]}
                             </div>
                             <p
-                              className={styles.projectInfoDesc}
-                              style={{
-                                marginLeft: isEven ? 0 : "auto",
-                                marginRight: isEven ? "auto" : 0,
-                              }}
+                              className={`${styles.projectInfoDesc} ${
+                                isEven ? styles.projectDescEven : styles.projectDescOdd
+                              }`}
                             >
                               {p.summary[lang]}
                             </p>
@@ -720,112 +752,101 @@ export default function PortfolioPage() {
                 ) : (
                   <p className={styles.emptyState}>
                     {lang === "fr"
-                      ? "Aucun projet publié dans cette rubrique pour le moment."
+                      ? "Aucune réalisation publiée dans cette rubrique pour le moment."
                       : "No published projects in this category yet."}
                   </p>
                 )}
               </div>
 
-              {/* "Voir plus de photos" Masonry Gallery */}
-              <div className={styles.galleryToggleWrap}>
-                <button
-                  type="button"
-                  className={styles.togglePhotosBtn}
-                  onClick={() => setShowGallery(!showGallery)}
-                >
-                  <span>
-                    {showGallery
-                      ? activeSec.lessPhotosButton[lang]
-                      : activeSec.morePhotosButton[lang]}
-                  </span>
-                  <span
-                    className={styles.chevronIcon}
-                    style={{
-                      transform: showGallery ? "rotate(180deg)" : "rotate(0deg)",
-                    }}
-                    aria-hidden="true"
-                  >
-                    <svg
-                      width="18"
-                      height="18"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="#F5F6F7"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
+              {/* "Voir plus de photos" Masonry Gallery - only if gallery images exist! */}
+              {categoryGalleryImages.length > 0 && (
+                <>
+                  <div className={styles.galleryToggleWrap}>
+                    <button
+                      type="button"
+                      className={styles.togglePhotosBtn}
+                      onClick={() => setShowGallery(!showGallery)}
                     >
-                      <path d="M6 9 L12 15 L18 9" />
-                    </svg>
-                  </span>
-                </button>
-              </div>
+                      <span>
+                        {showGallery
+                          ? activeSec.lessPhotosButton[lang]
+                          : activeSec.morePhotosButton[lang]}
+                      </span>
+                      <span
+                        className={`${styles.chevronIcon} ${
+                          showGallery ? styles.chevronOpen : styles.chevronClosed
+                        }`}
+                        aria-hidden="true"
+                      >
+                        <svg
+                          width="18"
+                          height="18"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                        >
+                          <path d="M6 9 L12 15 L18 9" />
+                        </svg>
+                      </span>
+                    </button>
+                  </div>
 
-              {showGallery && (
-                <div className={styles.masonryGrid}>
-                  {categoryGalleryImages.length > 0
-                    ? categoryGalleryImages.map((item, gIdx) => (
-                        <div key={gIdx} className={styles.masonryItem}>
+                  {showGallery && (
+                    <div className={styles.masonryGrid}>
+                      {categoryGalleryImages.map((imgItem, idx) => (
+                        <div key={`${imgItem.imageId}-${idx}`} className={styles.masonryItem}>
                           <div className={styles.masonryThumb}>
                             <ResponsivePortfolioImage
-                              imageId={item.imageId}
+                              imageId={imgItem.imageId}
                               ownerType="project"
-                              ownerId={item.projectId}
+                              ownerId={imgItem.projectId}
                               mediaSlot="gallery"
-                              mediaMetadata={content.media[item.imageId]}
-                              alt={item.alt}
+                              mediaMetadata={content.media[imgItem.imageId]}
+                              alt={imgItem.alt}
                             />
                           </div>
                         </div>
-                      ))
-                    : defaultDocuGalleryThumbs.map((src, sIdx) => (
-                        <div key={sIdx} className={styles.masonryItem}>
-                          <div className={styles.masonryThumb}>
-                            <img src={src} alt="Galerie exemple" />
-                          </div>
-                        </div>
                       ))}
-                </div>
+                    </div>
+                  )}
+                </>
               )}
 
-              {/* Showreel Section */}
-              <div className={styles.showreelSection}>
-                <div className={styles.showreelDivider}>
-                  <h3 className={styles.showreelHeader}>{activeSec.showreelTitle[lang]}</h3>
-                  <div className={styles.showreelCard}>
-                    {activeSec.showreelCoverImageId ? (
-                      <ResponsivePortfolioImage
-                        imageId={activeSec.showreelCoverImageId}
-                        ownerType="section"
-                        ownerId={activeSec.category}
-                        mediaSlot="showreel_cover"
-                        mediaMetadata={content.media[activeSec.showreelCoverImageId]}
-                        alt={activeSec.showreelTitle[lang]}
-                      />
-                    ) : (
-                      <img
-                        src="/img/projets-f654378a4c.jpg"
-                        alt={activeSec.showreelTitle[lang]}
-                      />
-                    )}
-                    <button
-                      type="button"
-                      className={styles.playBtn}
-                      onClick={() =>
-                        setActiveVideoUrl(
-                          activeSec.showreelVideo?.url ||
-                            "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-                        )
-                      }
-                      aria-label="Lire le showreel"
-                    >
-                      <svg width="26" height="28" viewBox="0 0 26 28" fill="none">
-                        <path d="M4 3 L23 14 L4 25 Z" fill="#F5F6F7" />
-                      </svg>
-                    </button>
+              {/* Showreel Section - only if showreel video is configured! */}
+              {activeSec.showreelVideo?.url && (
+                <div className={styles.showreelSection}>
+                  <div className={styles.showreelDivider}>
+                    <h3 className={styles.showreelHeader}>
+                      {activeSec.showreelTitle[lang]}
+                    </h3>
+                    <div className={`${styles.showreelCard} ${styles.showreelCardMargin}`}>
+                      {activeSec.showreelCoverImageId && (
+                        <ResponsivePortfolioImage
+                          imageId={activeSec.showreelCoverImageId}
+                          ownerType="section"
+                          ownerId={activeSec.category}
+                          mediaSlot="showreel_cover"
+                          mediaMetadata={content.media[activeSec.showreelCoverImageId]}
+                          alt={activeSec.showreelTitle[lang]}
+                        />
+                      )}
+                      <button
+                        type="button"
+                        className={styles.playBtn}
+                        onClick={() =>
+                          setActiveVideoUrl(activeSec.showreelVideo!.url)
+                        }
+                        aria-label="Lire le showreel"
+                      >
+                        <svg width="26" height="28" viewBox="0 0 26 28" fill="none">
+                          <path d="M4 3 L23 14 L4 25 Z" fill="#F5F6F7" />
+                        </svg>
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
+              )}
             </div>
           ) : null}
         </div>

@@ -38,7 +38,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   try {
     const { content } = getRawPortfolioContent();
     const mediaItem = content.media[imageId];
-    if (!mediaItem) {
+    if (
+      !mediaItem ||
+      mediaItem.ownerType !== ownerType ||
+      mediaItem.ownerId !== ownerId ||
+      mediaItem.mediaSlot !== slot
+    ) {
       return new Response(null, { status: 404 });
     }
 

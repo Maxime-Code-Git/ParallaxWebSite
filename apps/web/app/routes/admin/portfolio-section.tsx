@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import {
   type LoaderFunctionArgs,
   type ActionFunctionArgs,
@@ -34,6 +34,7 @@ import {
 import { parseVideoUrl } from "../../lib/video";
 import { ResponsivePortfolioImage } from "../../components/public/ResponsivePortfolioImage";
 import { RevisionConflictError, ValidationError } from "../../lib/site-content.server";
+import { readStrictFormUrlEncoded, ActionSecurityError } from "../../lib/security.server";
 import styles from "./portfolio-edit.module.css";
 
 export const meta: MetaFunction = () => {
@@ -46,6 +47,32 @@ export const meta: MetaFunction = () => {
 export function headers(args: HeadersArgs): Headers {
   return composeAdminHeaders(args);
 }
+
+const ALLOWED_SECTION_FIELDS = [
+  "csrfToken",
+  "revision",
+  "coverImageId",
+  "showreelCoverImageId",
+  "title_fr",
+  "title_en",
+  "intro_fr",
+  "intro_en",
+  "showreelTitle_fr",
+  "showreelTitle_en",
+  "showreelUrl",
+  "morePhotosButton_fr",
+  "morePhotosButton_en",
+  "lessPhotosButton_fr",
+  "lessPhotosButton_en",
+  "backButton_fr",
+  "backButton_en",
+  "seo_title_fr",
+  "seo_title_en",
+  "seo_desc_fr",
+  "seo_desc_en",
+  "coverAlt_fr",
+  "coverAlt_en",
+] as const;
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const session = await requireValidAdminSession(request);
@@ -80,6 +107,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 }
 
 export async function action({ request, params }: ActionFunctionArgs) {
+  if (request.method !== "POST") {
+    return new Response("Method Not Allowed", {
+      status: 405,
+      headers: { Allow: "POST", ...createAdminHeaders() },
+    });
+  }
+
   const session = await requireValidAdminSession(request);
 
   if (!validateOrigin(request)) {
@@ -91,7 +125,18 @@ export async function action({ request, params }: ActionFunctionArgs) {
     return Response.json({ error: "Rubrique introuvable." }, { status: 404, headers: createAdminHeaders() });
   }
 
-  const formData = await request.formData();
+  let formData: URLSearchParams;
+  try {
+    formData = await readStrictFormUrlEncoded(request, 100 * 1024, ALLOWED_SECTION_FIELDS);
+  } catch (err) {
+    if (err instanceof ActionSecurityError) {
+      const respHeaders = createAdminHeaders();
+      if (err.status === 405) respHeaders.set("Allow", "POST");
+      return Response.json({ error: err.message }, { status: err.status, headers: respHeaders });
+    }
+    return Response.json({ error: "Bad Request" }, { status: 400, headers: createAdminHeaders() });
+  }
+
   const csrfToken = formData.get("csrfToken");
   const sessionCsrf = session.get("csrfToken");
 
@@ -194,7 +239,10 @@ export async function action({ request, params }: ActionFunctionArgs) {
     if (err instanceof ValidationError) {
       return Response.json({ error: err.message }, { status: 422, headers: createAdminHeaders() });
     }
-    throw err;
+    return Response.json(
+      { error: "Une erreur inattendue est survenue lors de l'enregistrement." },
+      { status: 500, headers: createAdminHeaders() }
+    );
   }
 }
 
@@ -221,8 +269,46 @@ export default function AdminPortfolioSectionPage() {
 
   const [activeLang, setActiveLang] = useState<"fr" | "en">("fr");
   const [currentRevision, setCurrentRevision] = useState(contentRevision);
-  const [mediaMap, setMediaMap] = useState<Record<string, PortfolioMediaItem>>(initialMedia);
+  const revisionRef = useRef(contentRevision);
 
+  const updateRevision = (rev: string) => {
+    revisionRef.current = rev;
+    setCurrentRevision(rev);
+  };
+
+  // Synchronize revision only when new actionData arrives (never during render)
+  const lastActionRef = useRef<unknown>(null);
+  useEffect(() => {
+    if (actionData && actionData !== lastActionRef.current) {
+      lastActionRef.current = actionData;
+      if (actionData.newRevision) {
+        updateRevision(actionData.newRevision);
+      }
+    }
+  }, [actionData]);
+
+  // Form states initialized to preserve unsaved user input across uploads
+  const [titleFr, setTitleFr] = useState(section.title.fr);
+  const [titleEn, setTitleEn] = useState(section.title.en);
+  const [introFr, setIntroFr] = useState(section.intro.fr);
+  const [introEn, setIntroEn] = useState(section.intro.en);
+  const [showreelTitleFr, setShowreelTitleFr] = useState(section.showreelTitle.fr);
+  const [showreelTitleEn, setShowreelTitleEn] = useState(section.showreelTitle.en);
+  const [showreelUrl, setShowreelUrl] = useState(section.showreelVideo?.url || "");
+  const [morePhotosButtonFr, setMorePhotosButtonFr] = useState(section.morePhotosButton.fr);
+  const [morePhotosButtonEn, setMorePhotosButtonEn] = useState(section.morePhotosButton.en);
+  const [lessPhotosButtonFr, setLessPhotosButtonFr] = useState(section.lessPhotosButton.fr);
+  const [lessPhotosButtonEn, setLessPhotosButtonEn] = useState(section.lessPhotosButton.en);
+  const [backButtonFr, setBackButtonFr] = useState(section.backButton.fr);
+  const [backButtonEn, setBackButtonEn] = useState(section.backButton.en);
+  const [seoTitleFr, setSeoTitleFr] = useState(section.seo.title.fr);
+  const [seoTitleEn, setSeoTitleEn] = useState(section.seo.title.en);
+  const [seoDescFr, setSeoDescFr] = useState(section.seo.description.fr);
+  const [seoDescEn, setSeoDescEn] = useState(section.seo.description.en);
+  const [coverAltFr, setCoverAltFr] = useState(section.coverAlt.fr);
+  const [coverAltEn, setCoverAltEn] = useState(section.coverAlt.en);
+
+  const [mediaMap, setMediaMap] = useState<Record<string, PortfolioMediaItem>>(initialMedia);
   const [coverImageId, setCoverImageId] = useState<string | null>(section.coverImageId);
   const [showreelCoverImageId, setShowreelCoverImageId] = useState<string | null>(
     section.showreelCoverImageId
@@ -235,8 +321,6 @@ export default function AdminPortfolioSectionPage() {
 
   const coverInputRef = useRef<HTMLInputElement>(null);
   const showreelCoverInputRef = useRef<HTMLInputElement>(null);
-
-  const effectiveRevision = actionData?.newRevision || currentRevision;
 
   const categoryName = category === "documentary" ? "Documentaire" : "Publicité";
 
@@ -261,7 +345,7 @@ export default function AdminPortfolioSectionPage() {
           "x-portfolio-owner-type": "section",
           "x-portfolio-owner-id": category,
           "x-portfolio-media-slot": slot,
-          "x-portfolio-revision": effectiveRevision,
+          "x-portfolio-revision": revisionRef.current,
         },
         body: formData,
       });
@@ -288,7 +372,7 @@ export default function AdminPortfolioSectionPage() {
         newRevision: string;
       };
 
-      setCurrentRevision(data.newRevision);
+      updateRevision(data.newRevision);
       setMediaMap((prev) => ({ ...prev, [data.imageId]: data.metadata }));
       onSuccessId(data.imageId);
       setUploadNotice("Image importée et enregistrée immédiatement.");
@@ -308,7 +392,7 @@ export default function AdminPortfolioSectionPage() {
       <div className={styles.header}>
         <div>
           <h1 className={styles.title}>Rubrique {categoryName}</h1>
-          <p style={{ color: "#8A92A6", margin: "6px 0 0", fontSize: 14 }}>
+          <p className={styles.metaSub}>
             Textes d'introduction, visuel de bannière, showreel vidéo et boutons de la rubrique.
           </p>
         </div>
@@ -357,7 +441,7 @@ export default function AdminPortfolioSectionPage() {
 
       <Form method="post">
         <input type="hidden" name="csrfToken" value={csrfToken} />
-        <input type="hidden" name="revision" value={effectiveRevision} />
+        <input type="hidden" name="revision" value={currentRevision} />
         <input type="hidden" name="coverImageId" value={coverImageId || ""} />
         <input type="hidden" name="showreelCoverImageId" value={showreelCoverImageId || ""} />
 
@@ -368,7 +452,7 @@ export default function AdminPortfolioSectionPage() {
             <div className={styles.card}>
               <h2 className={styles.cardTitle}>Textes de présentation</h2>
 
-              <div style={{ display: activeLang === "fr" ? "block" : "none" }}>
+              <div className={activeLang === "fr" ? styles.tabContentVisible : styles.tabContentHidden}>
                 <div className={styles.formGroup}>
                   <label htmlFor="title_fr" className={styles.label}>
                     Titre de la rubrique (FR) *
@@ -378,7 +462,8 @@ export default function AdminPortfolioSectionPage() {
                     name="title_fr"
                     type="text"
                     required
-                    defaultValue={section.title.fr}
+                    value={titleFr}
+                    onChange={(e) => setTitleFr(e.target.value)}
                     className={styles.input}
                   />
                 </div>
@@ -391,7 +476,8 @@ export default function AdminPortfolioSectionPage() {
                     id="intro_fr"
                     name="intro_fr"
                     rows={4}
-                    defaultValue={section.intro.fr}
+                    value={introFr}
+                    onChange={(e) => setIntroFr(e.target.value)}
                     className={styles.textarea}
                   />
                   <div className={styles.helperText}>
@@ -400,7 +486,7 @@ export default function AdminPortfolioSectionPage() {
                 </div>
               </div>
 
-              <div style={{ display: activeLang === "en" ? "block" : "none" }}>
+              <div className={activeLang === "en" ? styles.tabContentVisible : styles.tabContentHidden}>
                 <div className={styles.formGroup}>
                   <label htmlFor="title_en" className={styles.label}>
                     Titre de la rubrique (EN) *
@@ -410,7 +496,8 @@ export default function AdminPortfolioSectionPage() {
                     name="title_en"
                     type="text"
                     required
-                    defaultValue={section.title.en}
+                    value={titleEn}
+                    onChange={(e) => setTitleEn(e.target.value)}
                     className={styles.input}
                   />
                 </div>
@@ -423,7 +510,8 @@ export default function AdminPortfolioSectionPage() {
                     id="intro_en"
                     name="intro_en"
                     rows={4}
-                    defaultValue={section.intro.en}
+                    value={introEn}
+                    onChange={(e) => setIntroEn(e.target.value)}
                     className={styles.textarea}
                   />
                 </div>
@@ -434,7 +522,7 @@ export default function AdminPortfolioSectionPage() {
             <div className={styles.card}>
               <h2 className={styles.cardTitle}>Showreel Vidéo de la Rubrique</h2>
 
-              <div style={{ display: activeLang === "fr" ? "block" : "none" }}>
+              <div className={activeLang === "fr" ? styles.tabContentVisible : styles.tabContentHidden}>
                 <div className={styles.formGroup}>
                   <label htmlFor="showreelTitle_fr" className={styles.label}>
                     Titre du showreel (FR)
@@ -443,13 +531,14 @@ export default function AdminPortfolioSectionPage() {
                     id="showreelTitle_fr"
                     name="showreelTitle_fr"
                     type="text"
-                    defaultValue={section.showreelTitle.fr}
+                    value={showreelTitleFr}
+                    onChange={(e) => setShowreelTitleFr(e.target.value)}
                     className={styles.input}
                   />
                 </div>
               </div>
 
-              <div style={{ display: activeLang === "en" ? "block" : "none" }}>
+              <div className={activeLang === "en" ? styles.tabContentVisible : styles.tabContentHidden}>
                 <div className={styles.formGroup}>
                   <label htmlFor="showreelTitle_en" className={styles.label}>
                     Titre du showreel (EN)
@@ -458,7 +547,8 @@ export default function AdminPortfolioSectionPage() {
                     id="showreelTitle_en"
                     name="showreelTitle_en"
                     type="text"
-                    defaultValue={section.showreelTitle.en}
+                    value={showreelTitleEn}
+                    onChange={(e) => setShowreelTitleEn(e.target.value)}
                     className={styles.input}
                   />
                 </div>
@@ -473,7 +563,8 @@ export default function AdminPortfolioSectionPage() {
                   name="showreelUrl"
                   type="url"
                   placeholder="https://www.youtube.com/watch?v=... ou https://vimeo.com/..."
-                  defaultValue={section.showreelVideo?.url || ""}
+                  value={showreelUrl}
+                  onChange={(e) => setShowreelUrl(e.target.value)}
                   className={styles.input}
                 />
                 <div className={styles.helperText}>
@@ -517,7 +608,7 @@ export default function AdminPortfolioSectionPage() {
                     </div>
                   ) : (
                     <div>
-                      <p style={{ color: "#8A92A6", fontSize: 14, margin: "0 0 12px" }}>
+                      <p className={styles.emptyNotice}>
                         Aucune affiche personnalisée définie pour ce showreel.
                       </p>
                       <button
@@ -535,7 +626,7 @@ export default function AdminPortfolioSectionPage() {
                     ref={showreelCoverInputRef}
                     type="file"
                     accept="image/jpeg,image/png,image/webp"
-                    style={{ display: "none" }}
+                    className={styles.hiddenFileInput}
                     onChange={(e) => {
                       const file = e.target.files?.[0];
                       if (file) {
@@ -554,7 +645,7 @@ export default function AdminPortfolioSectionPage() {
             <div className={styles.card}>
               <h2 className={styles.cardTitle}>Libellés des boutons de navigation</h2>
 
-              <div style={{ display: activeLang === "fr" ? "block" : "none" }}>
+              <div className={activeLang === "fr" ? styles.tabContentVisible : styles.tabContentHidden}>
                 <div className={styles.formGroup}>
                   <label htmlFor="morePhotosButton_fr" className={styles.label}>
                     Bouton « Voir plus de photos » (FR)
@@ -563,7 +654,8 @@ export default function AdminPortfolioSectionPage() {
                     id="morePhotosButton_fr"
                     name="morePhotosButton_fr"
                     type="text"
-                    defaultValue={section.morePhotosButton.fr}
+                    value={morePhotosButtonFr}
+                    onChange={(e) => setMorePhotosButtonFr(e.target.value)}
                     className={styles.input}
                   />
                 </div>
@@ -576,7 +668,8 @@ export default function AdminPortfolioSectionPage() {
                     id="lessPhotosButton_fr"
                     name="lessPhotosButton_fr"
                     type="text"
-                    defaultValue={section.lessPhotosButton.fr}
+                    value={lessPhotosButtonFr}
+                    onChange={(e) => setLessPhotosButtonFr(e.target.value)}
                     className={styles.input}
                   />
                 </div>
@@ -589,13 +682,14 @@ export default function AdminPortfolioSectionPage() {
                     id="backButton_fr"
                     name="backButton_fr"
                     type="text"
-                    defaultValue={section.backButton.fr}
+                    value={backButtonFr}
+                    onChange={(e) => setBackButtonFr(e.target.value)}
                     className={styles.input}
                   />
                 </div>
               </div>
 
-              <div style={{ display: activeLang === "en" ? "block" : "none" }}>
+              <div className={activeLang === "en" ? styles.tabContentVisible : styles.tabContentHidden}>
                 <div className={styles.formGroup}>
                   <label htmlFor="morePhotosButton_en" className={styles.label}>
                     Bouton « Voir plus de photos » (EN)
@@ -604,7 +698,8 @@ export default function AdminPortfolioSectionPage() {
                     id="morePhotosButton_en"
                     name="morePhotosButton_en"
                     type="text"
-                    defaultValue={section.morePhotosButton.en}
+                    value={morePhotosButtonEn}
+                    onChange={(e) => setMorePhotosButtonEn(e.target.value)}
                     className={styles.input}
                   />
                 </div>
@@ -617,7 +712,8 @@ export default function AdminPortfolioSectionPage() {
                     id="lessPhotosButton_en"
                     name="lessPhotosButton_en"
                     type="text"
-                    defaultValue={section.lessPhotosButton.en}
+                    value={lessPhotosButtonEn}
+                    onChange={(e) => setLessPhotosButtonEn(e.target.value)}
                     className={styles.input}
                   />
                 </div>
@@ -630,7 +726,8 @@ export default function AdminPortfolioSectionPage() {
                     id="backButton_en"
                     name="backButton_en"
                     type="text"
-                    defaultValue={section.backButton.en}
+                    value={backButtonEn}
+                    onChange={(e) => setBackButtonEn(e.target.value)}
                     className={styles.input}
                   />
                 </div>
@@ -641,7 +738,7 @@ export default function AdminPortfolioSectionPage() {
             <div className={styles.card}>
               <h2 className={styles.cardTitle}>Référencement naturel (SEO)</h2>
 
-              <div style={{ display: activeLang === "fr" ? "block" : "none" }}>
+              <div className={activeLang === "fr" ? styles.tabContentVisible : styles.tabContentHidden}>
                 <div className={styles.formGroup}>
                   <label htmlFor="seo_title_fr" className={styles.label}>
                     Balise Title (FR)
@@ -650,7 +747,8 @@ export default function AdminPortfolioSectionPage() {
                     id="seo_title_fr"
                     name="seo_title_fr"
                     type="text"
-                    defaultValue={section.seo.title.fr}
+                    value={seoTitleFr}
+                    onChange={(e) => setSeoTitleFr(e.target.value)}
                     className={styles.input}
                   />
                 </div>
@@ -663,13 +761,14 @@ export default function AdminPortfolioSectionPage() {
                     id="seo_desc_fr"
                     name="seo_desc_fr"
                     rows={3}
-                    defaultValue={section.seo.description.fr}
+                    value={seoDescFr}
+                    onChange={(e) => setSeoDescFr(e.target.value)}
                     className={styles.textarea}
                   />
                 </div>
               </div>
 
-              <div style={{ display: activeLang === "en" ? "block" : "none" }}>
+              <div className={activeLang === "en" ? styles.tabContentVisible : styles.tabContentHidden}>
                 <div className={styles.formGroup}>
                   <label htmlFor="seo_title_en" className={styles.label}>
                     Balise Title (EN)
@@ -678,7 +777,8 @@ export default function AdminPortfolioSectionPage() {
                     id="seo_title_en"
                     name="seo_title_en"
                     type="text"
-                    defaultValue={section.seo.title.en}
+                    value={seoTitleEn}
+                    onChange={(e) => setSeoTitleEn(e.target.value)}
                     className={styles.input}
                   />
                 </div>
@@ -691,7 +791,8 @@ export default function AdminPortfolioSectionPage() {
                     id="seo_desc_en"
                     name="seo_desc_en"
                     rows={3}
-                    defaultValue={section.seo.description.en}
+                    value={seoDescEn}
+                    onChange={(e) => setSeoDescEn(e.target.value)}
                     className={styles.textarea}
                   />
                 </div>
@@ -715,7 +816,7 @@ export default function AdminPortfolioSectionPage() {
                         ownerId={category}
                         mediaSlot="cover"
                         mediaMetadata={mediaMap[coverImageId]}
-                        alt={section.coverAlt.fr}
+                        alt={coverAltFr}
                         isAdminPreview
                       />
                     </div>
@@ -739,7 +840,7 @@ export default function AdminPortfolioSectionPage() {
                   </div>
                 ) : (
                   <div>
-                    <p style={{ color: "#8A92A6", fontSize: 14, margin: "0 0 12px" }}>
+                    <p className={styles.emptyNotice}>
                       Aucune bannière configurée.
                     </p>
                     <button
@@ -757,7 +858,7 @@ export default function AdminPortfolioSectionPage() {
                   ref={coverInputRef}
                   type="file"
                   accept="image/jpeg,image/png,image/webp"
-                  style={{ display: "none" }}
+                  className={styles.hiddenFileInput}
                   onChange={(e) => {
                     const file = e.target.files?.[0];
                     if (file) {
@@ -769,7 +870,7 @@ export default function AdminPortfolioSectionPage() {
               </div>
 
               {/* Alt texts */}
-              <div style={{ display: activeLang === "fr" ? "block" : "none" }}>
+              <div className={activeLang === "fr" ? styles.tabContentVisible : styles.tabContentHidden}>
                 <div className={styles.formGroup}>
                   <label htmlFor="coverAlt_fr" className={styles.label}>
                     Texte alternatif (Alt FR)
@@ -778,13 +879,14 @@ export default function AdminPortfolioSectionPage() {
                     id="coverAlt_fr"
                     name="coverAlt_fr"
                     type="text"
-                    defaultValue={section.coverAlt.fr}
+                    value={coverAltFr}
+                    onChange={(e) => setCoverAltFr(e.target.value)}
                     className={styles.input}
                   />
                 </div>
               </div>
 
-              <div style={{ display: activeLang === "en" ? "block" : "none" }}>
+              <div className={activeLang === "en" ? styles.tabContentVisible : styles.tabContentHidden}>
                 <div className={styles.formGroup}>
                   <label htmlFor="coverAlt_en" className={styles.label}>
                     Texte alternatif (Alt EN)
@@ -793,7 +895,8 @@ export default function AdminPortfolioSectionPage() {
                     id="coverAlt_en"
                     name="coverAlt_en"
                     type="text"
-                    defaultValue={section.coverAlt.en}
+                    value={coverAltEn}
+                    onChange={(e) => setCoverAltEn(e.target.value)}
                     className={styles.input}
                   />
                 </div>
@@ -802,7 +905,7 @@ export default function AdminPortfolioSectionPage() {
 
             {/* Sticky Save Bar */}
             <div className={styles.saveBar}>
-              <div style={{ fontSize: 13, color: "#8A92A6" }}>
+              <div className={styles.saveRevisionHint}>
                 {isSubmitting ? "Enregistrement en cours..." : "Modifications non enregistrées"}
               </div>
               <button

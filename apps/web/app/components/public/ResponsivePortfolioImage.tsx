@@ -53,16 +53,19 @@ export function ResponsivePortfolioImage({
 
   const prefix = isAdminPreview ? "/admin/media/portfolio" : "/media/portfolio";
   const variants = mediaMetadata?.variants;
+  const effectiveOwnerType = mediaMetadata?.ownerType || ownerType;
+  const effectiveOwnerId = mediaMetadata?.ownerId || ownerId;
+  const effectiveSlot = mediaMetadata?.mediaSlot || mediaSlot;
 
   if (variants && variants.length > 0) {
     const sortedVariants = [...variants].sort((a, b) => a.width - b.width);
 
     const avifSrcSet = sortedVariants
-      .map((v) => `${prefix}/${ownerType}/${ownerId}/${mediaSlot}/${imageId}/${v.name}/avif ${v.width}w`)
+      .map((v) => `${prefix}/${effectiveOwnerType}/${effectiveOwnerId}/${effectiveSlot}/${imageId}/${v.name}/avif ${v.width}w`)
       .join(", ");
 
     const webpSrcSet = sortedVariants
-      .map((v) => `${prefix}/${ownerType}/${ownerId}/${mediaSlot}/${imageId}/${v.name}/webp ${v.width}w`)
+      .map((v) => `${prefix}/${effectiveOwnerType}/${effectiveOwnerId}/${effectiveSlot}/${imageId}/${v.name}/webp ${v.width}w`)
       .join(", ");
 
     const fallbackVariant =
@@ -70,7 +73,7 @@ export function ResponsivePortfolioImage({
       sortedVariants.find((v) => v.name === "640p") ||
       sortedVariants[0];
 
-    const fallbackImgUrl = `${prefix}/${ownerType}/${ownerId}/${mediaSlot}/${imageId}/${fallbackVariant.name}/webp`;
+    const fallbackImgUrl = `${prefix}/${effectiveOwnerType}/${effectiveOwnerId}/${effectiveSlot}/${imageId}/${fallbackVariant.name}/webp`;
 
     return (
       <picture>

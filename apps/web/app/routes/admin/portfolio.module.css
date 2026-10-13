@@ -389,3 +389,78 @@
     flex-wrap: wrap;
   }
 }
+
+.headerSubtitle {
+  margin: 8px 0 0;
+  color: #8A92A6;
+  font-size: 15px;
+}
+
+.sectionEditActive {
+  margin-left: 12px;
+  color: #2ed573;
+  text-decoration: underline;
+}
+
+.filterLabel {
+  font-size: 13px;
+  color: #8A92A6;
+  margin-right: 8px;
+}
+
+.emptyTable {
+  text-align: center;
+  padding: 64px 0;
+  color: #8A92A6;
+}
+
+.tableHeaderRow {
+  color: #8A92A6;
+  font-size: 12px;
+  text-align: left;
+}
+
+.tableTh {
+  padding: 0 20px 12px;
+  font-weight: 500;
+}
+
+.tableThRight {
+  padding: 0 20px 12px;
+  text-align: right;
+  font-weight: 500;
+}
+
+.tableCellThumbnail {
+  width: 80px;
+}
+
+.projectTitleEn {
+  font-size: 13px;
+  color: #8A92A6;
+}
+
+.projectSlugHint {
+  font-size: 11px;
+  color: #546076;
+  margin-top: 4px;
+}
+
+.showcaseBadgeYes {
+  font-size: 13px;
+  color: #1E9EFF;
+}
+
+.showcaseBadgeNo {
+  font-size: 13px;
+  color: #8A92A6;
+}
+
+.inlineForm {
+  display: inline;
+}
+
+.dangerConfirmBtn {
+  background: #ff4757;
+  color: #fff;
+}

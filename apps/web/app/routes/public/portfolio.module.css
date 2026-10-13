@@ -783,3 +783,78 @@
     padding: 24px 24px 8px;
   }
 }
+
+/* Scroll lock on document body without inline style */
+.bodyScrollLocked {
+  overflow: hidden !important;
+}
+
+.circleIconLarge {
+  width: 34px;
+  height: 34px;
+}
+
+.showreelCardMargin {
+  margin-bottom: 48px;
+}
+
+.projectRowEven {
+  flex-direction: row;
+}
+
+.projectRowOdd {
+  flex-direction: row-reverse;
+}
+
+.projectBoxEven {
+  flex: none;
+  width: 560px;
+  max-width: 100%;
+}
+
+.projectBoxOdd {
+  flex: none;
+  width: 480px;
+  max-width: 100%;
+}
+
+.projectTextEven {
+  flex: 1;
+  text-align: left;
+}
+
+.projectTextOdd {
+  flex: 1;
+  text-align: right;
+}
+
+.projectDescEven {
+  margin-left: 0;
+  margin-right: auto;
+}
+
+.projectDescOdd {
+  margin-left: auto;
+  margin-right: 0;
+}
+
+.chevronOpen {
+  transform: rotate(180deg);
+  transition: transform 0.2s ease;
+}
+
+.chevronClosed {
+  transform: rotate(0deg);
+  transition: transform 0.2s ease;
+}
+
+.sectionHeroDocu {
+  background-image: url(/img/projets-141c16b0a2.jpg);
+}
+
+.emptyOverview {
+  text-align: center;
+  padding: 120px 24px;
+  color: #8A92A6;
+  font-size: 17px;
+}

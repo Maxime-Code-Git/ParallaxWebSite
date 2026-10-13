@@ -801,6 +801,8 @@ export async function processPortfolioMediaImage(
           name: breakpoint.name,
           width: producedWidth,
           height: producedHeight,
+          avifSize: avifBuffer.length,
+          webpSize: webpBuffer.length,
           sizeBytesWebp: webpBuffer.length,
           sizeBytesAvif: avifBuffer.length,
         });
@@ -875,6 +877,19 @@ export function cleanupStagedPortfolioMedia(imageId: string, mediaBasePath: stri
   const resolvedMediaBasePath = path.resolve(mediaBasePath);
   const stagingDir = path.resolve(resolvedMediaBasePath, "staging", imageId);
   cleanupMediaDirectory(stagingDir, resolvedMediaBasePath);
+}
+
+export function cleanupPublishedPortfolioMedia(
+  ownerType: PortfolioMediaOwnerType,
+  ownerId: string,
+  mediaSlot: PortfolioMediaSlot,
+  imageId: string,
+  mediaBasePath: string
+): void {
+  const resolvedMediaBasePath = path.resolve(mediaBasePath);
+  const ownerRoot = `${ownerType}s`;
+  const finalMediaDir = path.resolve(resolvedMediaBasePath, ownerRoot, ownerId, mediaSlot, imageId);
+  cleanupMediaDirectory(finalMediaDir, resolvedMediaBasePath);
 }
 
 export async function openPortfolioVariant(

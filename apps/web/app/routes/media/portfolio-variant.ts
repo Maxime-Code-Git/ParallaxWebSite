@@ -30,9 +30,19 @@ export async function loader({ params }: LoaderFunctionArgs) {
     return new Response(null, { status: 404 });
   }
 
-  // 2. Ensure media is referenced by a PUBLISHED public project or a valid public section
+  // 2. Ensure media exists in registry, matches requested parameters, and is referenced by a PUBLISHED project or section
   try {
     const { content } = getRawPortfolioContent();
+    const meta = content.media[imageId];
+
+    if (
+      !meta ||
+      meta.ownerType !== ownerType ||
+      meta.ownerId !== ownerId ||
+      meta.mediaSlot !== slot
+    ) {
+      return new Response(null, { status: 404 });
+    }
 
     let isPubliclyReferenced = false;
 
@@ -40,16 +50,16 @@ export async function loader({ params }: LoaderFunctionArgs) {
       if (ownerId === "documentary") {
         const sec = content.sections.documentary;
         if (
-          (slot === "cover" && sec.coverImageId === imageId) ||
-          (slot === "showreel_cover" && sec.showreelCoverImageId === imageId)
+          sec.coverImageId === imageId ||
+          sec.showreelCoverImageId === imageId
         ) {
           isPubliclyReferenced = true;
         }
       } else if (ownerId === "advertising") {
         const sec = content.sections.advertising;
         if (
-          (slot === "cover" && sec.coverImageId === imageId) ||
-          (slot === "showreel_cover" && sec.showreelCoverImageId === imageId)
+          sec.coverImageId === imageId ||
+          sec.showreelCoverImageId === imageId
         ) {
           isPubliclyReferenced = true;
         }
@@ -58,9 +68,9 @@ export async function loader({ params }: LoaderFunctionArgs) {
       const project = content.projects.find((p) => p.id === ownerId);
       if (project && project.status === "published" && !project.archived) {
         if (
-          (slot === "cover" && project.coverImageId === imageId) ||
-          (slot === "video_cover" && project.video?.coverImageId === imageId) ||
-          (slot === "gallery" && project.galleryImageIds.includes(imageId))
+          project.coverImageId === imageId ||
+          project.video?.coverImageId === imageId ||
+          project.galleryImageIds.includes(imageId)
         ) {
           isPubliclyReferenced = true;
         }

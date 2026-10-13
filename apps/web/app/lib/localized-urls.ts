@@ -22,18 +22,20 @@ export function getPortfolioProjectUrl(project: PortfolioProject, lang: "fr" | "
 
 export function getPortfolioAlternateUrls(
   project?: PortfolioProject | null,
-  category?: PortfolioCategory | null
+  category?: PortfolioCategory | null,
+  direction?: "left" | "right" | null
 ): { fr: string; en: string } {
+  const dirSuffix = direction ? `?dir=${direction}` : "";
   if (project) {
     return {
-      fr: getPortfolioProjectUrl(project, "fr"),
-      en: getPortfolioProjectUrl(project, "en"),
+      fr: `${getPortfolioProjectUrl(project, "fr")}${dirSuffix}`,
+      en: `${getPortfolioProjectUrl(project, "en")}${dirSuffix}`,
     };
   }
   if (category) {
     return {
-      fr: getPortfolioSectionUrl(category, "fr"),
-      en: getPortfolioSectionUrl(category, "en"),
+      fr: `${getPortfolioSectionUrl(category, "fr")}${dirSuffix}`,
+      en: `${getPortfolioSectionUrl(category, "en")}${dirSuffix}`,
     };
   }
   return {

@@ -41,6 +41,10 @@ export function createDefaultPortfolioContent(): PortfolioContent {
         fr: "Portfolio",
         en: "Portfolio",
       },
+      intro: {
+        fr: "Découvrez nos réalisations documentaires et publicitaires, entre studio et terrain.",
+        en: "Discover our documentary and commercial projects, from studio to the field.",
+      },
       seo: {
         title: {
           fr: "Portfolio — Parallax | Réalisations photo et vidéo",
@@ -346,11 +350,52 @@ export function getPublicPortfolioContent(customPath?: string): {
     .filter((p) => p.status === "published" && !p.archived)
     .sort((a, b) => a.order - b.order);
 
+  // Collect ONLY media IDs referenced by public sections and published projects
+  const publicMediaIds = new Set<string>();
+  if (content.sections?.documentary?.coverImageId) {
+    publicMediaIds.add(content.sections.documentary.coverImageId);
+  }
+  if (content.sections?.documentary?.showreelCoverImageId) {
+    publicMediaIds.add(content.sections.documentary.showreelCoverImageId);
+  }
+  if (content.sections?.advertising?.coverImageId) {
+    publicMediaIds.add(content.sections.advertising.coverImageId);
+  }
+  if (content.sections?.advertising?.showreelCoverImageId) {
+    publicMediaIds.add(content.sections.advertising.showreelCoverImageId);
+  }
+
+  for (const p of publicProjects) {
+    if (p.coverImageId) publicMediaIds.add(p.coverImageId);
+    if (p.video?.coverImageId) publicMediaIds.add(p.video.coverImageId);
+    if (Array.isArray(p.galleryImageIds)) {
+      for (const gid of p.galleryImageIds) {
+        publicMediaIds.add(gid);
+      }
+    }
+  }
+
+  const publicMedia: Record<string, PortfolioMediaItem> = {};
+  if (content.media) {
+    for (const [id, item] of Object.entries(content.media)) {
+      if (publicMediaIds.has(id)) {
+        publicMedia[id] = item;
+      }
+    }
+  }
+
+  const publicContent: PortfolioContent = {
+    schemaVersion: 1,
+    revision: content.revision,
+    updatedAt: content.updatedAt,
+    overview: content.overview,
+    sections: content.sections,
+    projects: publicProjects,
+    media: publicMedia,
+  };
+
   return {
-    content: {
-      ...content,
-      projects: publicProjects,
-    },
+    content: publicContent,
     publicProjects,
   };
 }
@@ -379,6 +424,7 @@ export function prunePortfolioMediaRegistry(
 
   for (const project of content.projects) {
     if (project.coverImageId) activeIds.add(project.coverImageId);
+    if (project.draftVideoCoverImageId) activeIds.add(project.draftVideoCoverImageId);
     if (project.video?.coverImageId) activeIds.add(project.video.coverImageId);
     for (const gid of project.galleryImageIds) {
       activeIds.add(gid);
@@ -442,7 +488,7 @@ export async function savePortfolioContent(
  */
 export function getReferencedPortfolioMediaIds(
   content: PortfolioContent,
-  contentPath: string
+  contentPath: string = getPortfolioContentPath()
 ): { referencedIds: Set<string>; hasUnreadableBackup: boolean } {
   const referencedIds = new Set<string>();
   let hasUnreadableBackup = false;
@@ -456,6 +502,7 @@ export function getReferencedPortfolioMediaIds(
     if (Array.isArray(c.projects)) {
       for (const p of c.projects) {
         if (p.coverImageId) referencedIds.add(p.coverImageId);
+        if (p.draftVideoCoverImageId) referencedIds.add(p.draftVideoCoverImageId);
         if (p.video?.coverImageId) referencedIds.add(p.video.coverImageId);
         if (Array.isArray(p.galleryImageIds)) {
           for (const gid of p.galleryImageIds) referencedIds.add(gid);
