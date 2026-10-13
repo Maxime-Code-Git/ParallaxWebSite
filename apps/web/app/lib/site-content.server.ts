@@ -415,6 +415,45 @@ export function getSiteContent(): SiteContent {
   return getRawSiteContent().content;
 }
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function isUuid(id: string | null | undefined): boolean {
+  return typeof id === "string" && UUID_REGEX.test(id);
+}
+
+export function validateReferencedMediaConsistency(
+  imageId: string,
+  expectedLocation: AdminUploadLocation,
+  mediaRegistry: Record<string, UploadedMediaMetadata> | undefined,
+  context: string
+): void {
+  if (imageId in ALLOWED_IMAGE_MAP) {
+    return;
+  }
+  const lowerId = imageId.toLowerCase();
+  const meta = mediaRegistry?.[lowerId];
+  if (!meta) {
+    throw new ValidationError(
+      `${context}: L'identifiant média '${imageId}' est inconnu dans le registre.`
+    );
+  }
+  if (meta.imageId.toLowerCase() !== lowerId) {
+    throw new ValidationError(
+      `${context}: Discordance d'identifiant pour le média '${imageId}'.`
+    );
+  }
+  if (meta.location !== expectedLocation) {
+    throw new ValidationError(
+      `${context}: L'emplacement du média '${meta.location}' ne correspond pas à l'emplacement attendu '${expectedLocation}'.`
+    );
+  }
+  if (!Array.isArray(meta.variants) || meta.variants.length === 0) {
+    throw new ValidationError(
+      `${context}: Le média '${imageId}' ne possède aucune variante valide.`
+    );
+  }
+}
+
 export function saveHomeContent(newHome: HomeContent, previousRevision: string): string {
   const current = getRawSiteContent();
   if (current.isCorrupted) {
@@ -425,12 +464,50 @@ export function saveHomeContent(newHome: HomeContent, previousRevision: string):
   }
 
   const validatedHome = validateHomeContent(newHome);
+
+  // Validate consistency of referenced media
+  validateReferencedMediaConsistency(
+    validatedHome.showreel.coverImageId,
+    "showreel_cover",
+    current.content.media,
+    "home.showreel.coverImageId"
+  );
+  validateReferencedMediaConsistency(
+    validatedHome.duo.imageId,
+    "duo",
+    current.content.media,
+    "home.duo.imageId"
+  );
+
   const nextRevision = crypto.randomBytes(16).toString("hex");
+
+  // Prune media registry to retain only currently active locations
+  const activeMediaIds = new Set<string>();
+  if (isUuid(validatedHome.showreel.coverImageId)) {
+    activeMediaIds.add(validatedHome.showreel.coverImageId.toLowerCase());
+  }
+  if (isUuid(validatedHome.duo.imageId)) {
+    activeMediaIds.add(validatedHome.duo.imageId.toLowerCase());
+  }
+  for (const member of current.content.studio.team.members) {
+    if (isUuid(member.imageId)) {
+      activeMediaIds.add(member.imageId.toLowerCase());
+    }
+  }
+
+  const prunedMedia: Record<string, UploadedMediaMetadata> = {};
+  for (const id of activeMediaIds) {
+    if (current.content.media?.[id]) {
+      prunedMedia[id] = current.content.media[id];
+    }
+  }
+
   const nextContent: SiteContent = {
     ...current.content,
     revision: nextRevision,
     updatedAt: new Date().toISOString(),
     home: validatedHome,
+    media: prunedMedia,
   };
 
   const filePath = getSiteContentFilePath();
@@ -448,12 +525,48 @@ export function saveStudioContent(newStudio: StudioContent, previousRevision: st
   }
 
   const validatedStudio = validateStudioContent(newStudio);
+
+  // Validate consistency of referenced media for studio team members
+  for (const member of validatedStudio.team.members) {
+    const expectedLoc: AdminUploadLocation =
+      member.id === "ludovic" ? "portrait_ludovic" : "portrait_maxime";
+    validateReferencedMediaConsistency(
+      member.imageId,
+      expectedLoc,
+      current.content.media,
+      `studio.team.members[${member.id}].imageId`
+    );
+  }
+
   const nextRevision = crypto.randomBytes(16).toString("hex");
+
+  // Prune media registry to retain only currently active locations
+  const activeMediaIds = new Set<string>();
+  if (isUuid(current.content.home.showreel.coverImageId)) {
+    activeMediaIds.add(current.content.home.showreel.coverImageId.toLowerCase());
+  }
+  if (isUuid(current.content.home.duo.imageId)) {
+    activeMediaIds.add(current.content.home.duo.imageId.toLowerCase());
+  }
+  for (const member of validatedStudio.team.members) {
+    if (isUuid(member.imageId)) {
+      activeMediaIds.add(member.imageId.toLowerCase());
+    }
+  }
+
+  const prunedMedia: Record<string, UploadedMediaMetadata> = {};
+  for (const id of activeMediaIds) {
+    if (current.content.media?.[id]) {
+      prunedMedia[id] = current.content.media[id];
+    }
+  }
+
   const nextContent: SiteContent = {
     ...current.content,
     revision: nextRevision,
     updatedAt: new Date().toISOString(),
     studio: validatedStudio,
+    media: prunedMedia,
   };
 
   const filePath = getSiteContentFilePath();
@@ -478,10 +591,6 @@ export function saveSiteMediaUpdate(
   const nextContent: SiteContent = structuredClone(current.content);
   nextContent.revision = nextRevision;
   nextContent.updatedAt = new Date().toISOString();
-  if (!nextContent.media) {
-    nextContent.media = {};
-  }
-  nextContent.media[newMedia.imageId] = newMedia;
 
   if (location === "showreel_cover") {
     nextContent.home.showreel.coverImageId = newMedia.imageId;
@@ -502,6 +611,30 @@ export function saveSiteMediaUpdate(
   } else {
     throw new ValidationError(`Emplacement média non supporté: ${String(location)}`);
   }
+
+  // Prune media registry to retain only currently active locations
+  const activeMediaIds = new Set<string>();
+  if (isUuid(nextContent.home.showreel.coverImageId)) {
+    activeMediaIds.add(nextContent.home.showreel.coverImageId.toLowerCase());
+  }
+  if (isUuid(nextContent.home.duo.imageId)) {
+    activeMediaIds.add(nextContent.home.duo.imageId.toLowerCase());
+  }
+  for (const member of nextContent.studio.team.members) {
+    if (isUuid(member.imageId)) {
+      activeMediaIds.add(member.imageId.toLowerCase());
+    }
+  }
+
+  const prunedMedia: Record<string, UploadedMediaMetadata> = {};
+  for (const id of activeMediaIds) {
+    if (id === newMedia.imageId.toLowerCase()) {
+      prunedMedia[id] = newMedia;
+    } else if (current.content.media?.[id]) {
+      prunedMedia[id] = current.content.media[id];
+    }
+  }
+  nextContent.media = prunedMedia;
 
   const filePath = getSiteContentFilePath();
   atomicWriteJson(filePath, nextContent);
@@ -547,6 +680,28 @@ export function saveSiteMediaRevert(
     }
     member.imageId = defaultImageId;
   }
+
+  // Prune media registry to retain only currently active locations
+  const activeMediaIds = new Set<string>();
+  if (isUuid(nextContent.home.showreel.coverImageId)) {
+    activeMediaIds.add(nextContent.home.showreel.coverImageId.toLowerCase());
+  }
+  if (isUuid(nextContent.home.duo.imageId)) {
+    activeMediaIds.add(nextContent.home.duo.imageId.toLowerCase());
+  }
+  for (const member of nextContent.studio.team.members) {
+    if (isUuid(member.imageId)) {
+      activeMediaIds.add(member.imageId.toLowerCase());
+    }
+  }
+
+  const prunedMedia: Record<string, UploadedMediaMetadata> = {};
+  for (const id of activeMediaIds) {
+    if (current.content.media?.[id]) {
+      prunedMedia[id] = current.content.media[id];
+    }
+  }
+  nextContent.media = prunedMedia;
 
   const filePath = getSiteContentFilePath();
   atomicWriteJson(filePath, nextContent);

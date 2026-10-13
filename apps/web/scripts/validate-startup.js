@@ -7,9 +7,7 @@ export function runStartupValidation() {
   try {
     validateAdminConfig();
     validateContentConfig();
-    if (process.env.SITE_MEDIA_PATH) {
-      validateMediaConfig();
-    }
+    validateMediaConfig();
     console.log("Configuration de demarrage valide avec succes.");
     return true;
   } catch (err) {

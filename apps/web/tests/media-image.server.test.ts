@@ -6,8 +6,9 @@ import sharp from "sharp";
 import {
   validateImageFile,
   processSiteMediaImage,
+  publishStagedMedia,
   ConcurrencyLimiter,
-  SafeImageError,
+  ConcurrencyLimitError,
   cleanupMediaDirectory,
   getReferencedMediaIds,
 } from "../app/lib/media-image.server";
@@ -158,7 +159,7 @@ describe("media-image.server", () => {
   });
 
   describe("ConcurrencyLimiter", () => {
-    it("allows up to 2 concurrent tasks and rejects the 3rd with 503", async () => {
+    it("allows up to 2 concurrent tasks and rejects the 3rd with ConcurrencyLimitError", async () => {
       const limiter = new ConcurrencyLimiter(2);
       let resolveTask1: () => void;
       let resolveTask2: () => void;
@@ -176,8 +177,8 @@ describe("media-image.server", () => {
           })
       );
 
-      // 3rd concurrent task should be rejected immediately
-      await expect(limiter.run(async () => "task3")).rejects.toThrow(SafeImageError);
+      // 3rd concurrent task should be rejected immediately with ConcurrencyLimitError
+      await expect(limiter.run(async () => "task3")).rejects.toThrow(ConcurrencyLimitError);
 
       resolveTask1!();
       resolveTask2!();
@@ -193,7 +194,7 @@ describe("media-image.server", () => {
   });
 
   describe("processSiteMediaImage", () => {
-    it("generates WebP and AVIF variants with strict permissions and atomic write", async () => {
+    it("generates WebP and AVIF variants in staging with strict permissions and publishes atomically", async () => {
       const sourcePath = path.join(workDir, "portrait.jpg");
       await createTestImage("jpeg", 2000, 1200, sourcePath);
 
@@ -208,6 +209,8 @@ describe("media-image.server", () => {
       expect(meta.originalWidth).toBe(2000);
       expect(meta.originalHeight).toBe(1200);
       expect(meta.imageId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+      expect(meta.stagingDir).toBeDefined();
+      expect(fs.existsSync(meta.stagingDir)).toBe(true);
 
       // Variants check: 4 breakpoints (640p, 960p, 1440p, 1920p)
       expect(meta.variants).toHaveLength(4);
@@ -226,9 +229,13 @@ describe("media-image.server", () => {
       expect(v1440.width).toBe(1440);
       expect(v1920.width).toBe(1920);
 
+      // Publish from staging to site directory
+      publishStagedMedia(meta.imageId, meta.location, mediaDir);
+
       // Verify files exist in mediaDir/site/portrait_ludovic/<imageId>/<variant>
       const destDir = path.join(mediaDir, "site", "portrait_ludovic", meta.imageId);
       expect(fs.existsSync(destDir)).toBe(true);
+      expect(fs.existsSync(meta.stagingDir)).toBe(false);
 
       const webp640 = path.join(destDir, "640p", `${meta.imageId}-640p.webp`);
       const avif640 = path.join(destDir, "640p", `${meta.imageId}-640p.avif`);

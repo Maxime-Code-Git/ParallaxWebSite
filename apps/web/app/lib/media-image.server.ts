@@ -3,17 +3,28 @@ import path from "node:path";
 import crypto from "node:crypto";
 import sharp from "sharp";
 import { fileTypeFromBuffer } from "file-type";
-import type {
-  AdminUploadLocation,
-  MediaVariantInfo,
-  UploadedMediaMetadata,
-  SiteContent,
+import {
+  type AdminUploadLocation,
+  ADMIN_UPLOAD_LOCATIONS,
+  type MediaVariantInfo,
+  type UploadedMediaMetadata,
+  type SiteContent,
 } from "./site-content.shared";
+import { getBackups } from "./atomic-fs.server";
 
 export class SafeImageError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "SafeImageError";
+  }
+}
+
+export class ConcurrencyLimitError extends Error {
+  constructor(
+    message = "Trop de traitements d'images en cours simultanément. Veuillez réessayer dans quelques instants."
+  ) {
+    super(message);
+    this.name = "ConcurrencyLimitError";
   }
 }
 
@@ -38,9 +49,7 @@ export class ConcurrencyLimiter {
 
   async run<T>(fn: () => Promise<T>): Promise<T> {
     if (this.active >= this.max) {
-      throw new SafeImageError(
-        "Trop de traitements d'images en cours simultanément. Veuillez réessayer dans quelques instants."
-      );
+      throw new ConcurrencyLimitError();
     }
     this.active++;
     try {
@@ -56,6 +65,83 @@ export class ConcurrencyLimiter {
 }
 
 export const imageProcessingLimiter = new ConcurrencyLimiter(2);
+
+export function verifySecurePathChain(
+  basePath: string,
+  segments: string[],
+  expectedLeafType?: "file" | "directory"
+): string {
+  let canonicalBase: string;
+  try {
+    const resolvedBase = path.resolve(basePath);
+    const baseStat = fs.lstatSync(resolvedBase);
+    if (baseStat.isSymbolicLink() || !baseStat.isDirectory()) {
+      throw new SafeImageError("Répertoire de base invalide ou lien symbolique.");
+    }
+    canonicalBase = fs.realpathSync(resolvedBase);
+  } catch (err) {
+    if (err instanceof SafeImageError) throw err;
+    throw new SafeImageError("Répertoire de base inaccessible.");
+  }
+
+  for (const seg of segments) {
+    if (
+      !seg ||
+      seg === "." ||
+      seg === ".." ||
+      seg.includes("/") ||
+      seg.includes("\\") ||
+      seg.includes("\0")
+    ) {
+      throw new SafeImageError("Segment de chemin invalide.");
+    }
+  }
+
+  let current = canonicalBase;
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i];
+    current = path.join(current, seg);
+
+    let stat: fs.Stats;
+    try {
+      stat = fs.lstatSync(current);
+    } catch {
+      throw new SafeImageError("Composant de chemin introuvable.");
+    }
+
+    if (stat.isSymbolicLink()) {
+      throw new SafeImageError("Les liens symboliques sont strictement interdits.");
+    }
+
+    let realCurrent: string;
+    try {
+      realCurrent = fs.realpathSync(current);
+    } catch {
+      throw new SafeImageError("Composant de chemin inaccessible.");
+    }
+
+    const rel = path.relative(canonicalBase, realCurrent);
+    if (rel.startsWith("..") || path.isAbsolute(rel)) {
+      throw new SafeImageError("Confinement strict non respecté.");
+    }
+
+    const isLeaf = i === segments.length - 1;
+    if (!isLeaf) {
+      if (!stat.isDirectory()) {
+        throw new SafeImageError("Composant intermédiaire n'est pas un répertoire.");
+      }
+    } else if (expectedLeafType) {
+      if (expectedLeafType === "directory" && !stat.isDirectory()) {
+        throw new SafeImageError("Le chemin final n'est pas un répertoire.");
+      }
+      if (expectedLeafType === "file" && !stat.isFile()) {
+        throw new SafeImageError("Le chemin final n'est pas un fichier.");
+      }
+    }
+  }
+
+  return current;
+}
 
 export function validateConfinement(filePath: string, allowedDir: string): void {
   const resolvedAllowed = path.resolve(allowedDir);
@@ -87,35 +173,50 @@ export function validateConfinement(filePath: string, allowedDir: string): void 
 }
 
 export function ensureStrictDirectoryCreated(dirPath: string, allowedBasePath: string): void {
-  if (!fs.existsSync(dirPath)) {
-    try {
-      fs.mkdirSync(dirPath, { recursive: true, mode: 0o700 });
-    } catch (err: unknown) {
-      if (!(err instanceof Error) || (err as NodeJS.ErrnoException).code !== "EEXIST") {
-        throw new SafeImageError("Impossible de créer le répertoire sécurisé.");
-      }
-    }
+  const resolvedBase = path.resolve(allowedBasePath);
+  const baseStat = fs.lstatSync(resolvedBase);
+  if (baseStat.isSymbolicLink() || !baseStat.isDirectory()) {
+    throw new SafeImageError("Répertoire de base invalide ou lien symbolique.");
+  }
+  const canonicalBase = fs.realpathSync(resolvedBase);
+
+  const resolvedTarget = path.resolve(dirPath);
+  const lexicalRel = path.relative(resolvedBase, resolvedTarget);
+  if (lexicalRel.startsWith("..") || path.isAbsolute(lexicalRel)) {
+    throw new SafeImageError("Répertoire situé en dehors de la base autorisée.");
   }
 
-  try {
-    const stat = fs.lstatSync(dirPath);
+  const segments = lexicalRel.split(path.sep).filter(Boolean);
+  let current = canonicalBase;
+
+  for (const seg of segments) {
+    current = path.join(current, seg);
+    if (!fs.existsSync(current)) {
+      try {
+        fs.mkdirSync(current, { mode: 0o700 });
+      } catch (err: unknown) {
+        if (!(err instanceof Error) || (err as NodeJS.ErrnoException).code !== "EEXIST") {
+          throw new SafeImageError("Impossible de créer le répertoire sécurisé.");
+        }
+      }
+    }
+
+    const stat = fs.lstatSync(current);
     if (stat.isSymbolicLink() || !stat.isDirectory()) {
-      throw new SafeImageError("Répertoire de destination invalide ou lien symbolique.");
+      throw new SafeImageError("Répertoire invalide ou lien symbolique détecté.");
     }
-    const realBase = fs.realpathSync(allowedBasePath);
-    const realDir = fs.realpathSync(dirPath);
-    const rel = path.relative(realBase, realDir);
-    if (rel.startsWith("..") || path.isAbsolute(rel)) {
-      throw new SafeImageError("Répertoire situé en dehors de la base autorisée.");
+
+    const realCurrent = fs.realpathSync(current);
+    const realRel = path.relative(canonicalBase, realCurrent);
+    if (realRel.startsWith("..") || path.isAbsolute(realRel)) {
+      throw new SafeImageError("Confinement strict du répertoire non respecté.");
     }
+
     try {
-      fs.chmodSync(dirPath, 0o700);
+      fs.chmodSync(current, 0o700);
     } catch {
       // best-effort
     }
-  } catch (err) {
-    if (err instanceof SafeImageError) throw err;
-    throw new SafeImageError("Erreur lors de la vérification du répertoire de stockage.");
   }
 }
 
@@ -250,12 +351,16 @@ export async function validateImageFile(
   }
 }
 
+export interface ProcessedMediaWithStaging extends UploadedMediaMetadata {
+  stagingDir: string;
+}
+
 export async function processSiteMediaImage(
   tempFilePath: string,
   allowedTempDir: string,
   location: AdminUploadLocation,
   mediaBasePath: string
-): Promise<UploadedMediaMetadata> {
+): Promise<ProcessedMediaWithStaging> {
   return imageProcessingLimiter.run(async () => {
     const { width: originalWidth, height: originalHeight } = await validateImageFile(
       tempFilePath,
@@ -269,16 +374,15 @@ export async function processSiteMediaImage(
     const resolvedMediaBasePath = path.resolve(mediaBasePath);
     ensureStrictDirectoryCreated(resolvedMediaBasePath, path.resolve(resolvedMediaBasePath, ".."));
 
-    const siteDir = path.resolve(resolvedMediaBasePath, "site");
-    const locationDir = path.resolve(siteDir, location);
-    const mediaDir = path.resolve(locationDir, imageId);
+    // Write variants into a dedicated staging directory: staging/<imageId>
+    // This isolates in-progress uploads from being seen or purged by concurrent cleanups
+    const stagingBaseDir = path.resolve(resolvedMediaBasePath, "staging");
+    const stagingDir = path.resolve(stagingBaseDir, imageId);
 
     try {
-      for (const dir of [siteDir, locationDir, mediaDir]) {
-        if (!fs.existsSync(dir)) {
-          ensureStrictDirectoryCreated(dir, resolvedMediaBasePath);
-          createdDirs.push(dir);
-        }
+      for (const dir of [stagingBaseDir, stagingDir]) {
+        ensureStrictDirectoryCreated(dir, resolvedMediaBasePath);
+        createdDirs.push(dir);
       }
 
       const variants: MediaVariantInfo[] = [];
@@ -291,11 +395,9 @@ export async function processSiteMediaImage(
           }
         }
 
-        const variantDir = path.resolve(mediaDir, breakpoint.name);
-        if (!fs.existsSync(variantDir)) {
-          ensureStrictDirectoryCreated(variantDir, resolvedMediaBasePath);
-          createdDirs.push(variantDir);
-        }
+        const variantDir = path.resolve(stagingDir, breakpoint.name);
+        ensureStrictDirectoryCreated(variantDir, resolvedMediaBasePath);
+        createdDirs.push(variantDir);
 
         const variantFileId = `${imageId}-${breakpoint.name}`;
         const webpPath = path.resolve(variantDir, `${variantFileId}.webp`);
@@ -340,9 +442,10 @@ export async function processSiteMediaImage(
         originalHeight,
         variants,
         createdAt: new Date().toISOString(),
+        stagingDir,
       };
     } catch (err) {
-      // Rollback created files and directories
+      // Rollback created files and directories in staging
       for (const f of createdFiles.reverse()) {
         try {
           fs.unlinkSync(f);
@@ -365,26 +468,122 @@ export async function processSiteMediaImage(
   });
 }
 
-export function cleanupMediaDirectory(mediaDir: string): void {
-  if (fs.existsSync(mediaDir)) {
-    try {
-      fs.rmSync(mediaDir, { recursive: true, force: true });
-    } catch {
-      // best-effort cleanup
+export function publishStagedMedia(
+  imageId: string,
+  location: AdminUploadLocation,
+  mediaBasePath: string
+): string {
+  const resolvedMediaBasePath = path.resolve(mediaBasePath);
+  const stagingDir = path.resolve(resolvedMediaBasePath, "staging", imageId);
+
+  // Validate staging directory
+  verifySecurePathChain(resolvedMediaBasePath, ["staging", imageId], "directory");
+
+  const siteDir = path.resolve(resolvedMediaBasePath, "site");
+  const locationDir = path.resolve(siteDir, location);
+  const finalMediaDir = path.resolve(locationDir, imageId);
+
+  // Ensure site and location parent directories exist and are verified
+  ensureStrictDirectoryCreated(locationDir, resolvedMediaBasePath);
+
+  // If final media dir already exists somehow, clean it first
+  if (fs.existsSync(finalMediaDir)) {
+    cleanupMediaDirectory(finalMediaDir, resolvedMediaBasePath);
+  }
+
+  // Atomically rename stagingDir to finalMediaDir on the same filesystem
+  fs.renameSync(stagingDir, finalMediaDir);
+
+  // Verify final directory structure
+  verifySecurePathChain(resolvedMediaBasePath, ["site", location, imageId], "directory");
+
+  return finalMediaDir;
+}
+
+export function cleanupStagedMedia(imageId: string, mediaBasePath: string): void {
+  const resolvedMediaBasePath = path.resolve(mediaBasePath);
+  const stagingDir = path.resolve(resolvedMediaBasePath, "staging", imageId);
+  cleanupMediaDirectory(stagingDir, resolvedMediaBasePath);
+}
+
+export function cleanupMediaDirectory(mediaDir: string, allowedBasePath?: string): void {
+  try {
+    const resolvedMediaDir = path.resolve(mediaDir);
+    const effectiveAllowedBase = allowedBasePath
+      ? path.resolve(allowedBasePath)
+      : path.dirname(resolvedMediaDir);
+
+    if (!fs.existsSync(effectiveAllowedBase)) return;
+    const baseStat = fs.lstatSync(effectiveAllowedBase);
+    if (baseStat.isSymbolicLink() || !baseStat.isDirectory()) return;
+    const canonicalBase = fs.realpathSync(effectiveAllowedBase);
+
+    const lexicalRel = path.relative(effectiveAllowedBase, resolvedMediaDir);
+    if (!lexicalRel || lexicalRel.startsWith("..") || path.isAbsolute(lexicalRel)) {
+      return;
     }
+
+    // Verify intermediate path components have NO symlinks and stay confined
+    const segments = lexicalRel.split(path.sep).filter(Boolean);
+    let current = canonicalBase;
+    for (let i = 0; i < segments.length - 1; i++) {
+      current = path.join(current, segments[i]);
+      if (!fs.existsSync(current)) return;
+      const stat = fs.lstatSync(current);
+      if (stat.isSymbolicLink() || !stat.isDirectory()) return;
+      const real = fs.realpathSync(current);
+      const parentRel = path.relative(canonicalBase, real);
+      if (parentRel.startsWith("..") || path.isAbsolute(parentRel)) return;
+    }
+
+    // Now check the target itself
+    if (!fs.existsSync(resolvedMediaDir)) return;
+    const targetStat = fs.lstatSync(resolvedMediaDir);
+
+    // If target is a symlink, DO NOT traverse or delete target; only unlink the symlink itself
+    if (targetStat.isSymbolicLink()) {
+      fs.unlinkSync(resolvedMediaDir);
+      return;
+    }
+
+    if (!targetStat.isDirectory()) {
+      fs.unlinkSync(resolvedMediaDir);
+      return;
+    }
+
+    const realTarget = fs.realpathSync(resolvedMediaDir);
+    const targetRel = path.relative(canonicalBase, realTarget);
+    if (targetRel.startsWith("..") || path.isAbsolute(targetRel)) {
+      return;
+    }
+
+    fs.rmSync(resolvedMediaDir, { recursive: true, force: true });
+  } catch {
+    // Best-effort cleanup without throwing or leaking
   }
 }
 
-export function getReferencedMediaIds(siteContent: SiteContent, siteContentPath?: string): Set<string> {
-  const referenced = new Set<string>();
+export class ReferencedMediaIds extends Set<string> {
+  hasUnreadableBackup = false;
+  get referenced(): Set<string> {
+    return this;
+  }
+}
+
+export function getReferencedMediaIds(
+  siteContent: SiteContent,
+  siteContentPath?: string
+): ReferencedMediaIds {
+  const result = new ReferencedMediaIds();
+  const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
   const checkAndAdd = (id: string | null | undefined) => {
-    if (id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
-      referenced.add(id.toLowerCase());
+    if (id && UUID_REGEX.test(id)) {
+      result.add(id.toLowerCase());
     }
   };
 
-  const inspectContent = (content: SiteContent) => {
+  const inspectActiveLocations = (content: SiteContent) => {
     if (!content) return;
     if (content.home?.showreel?.coverImageId) {
       checkAndAdd(content.home.showreel.coverImageId);
@@ -397,57 +596,116 @@ export function getReferencedMediaIds(siteContent: SiteContent, siteContentPath?
         checkAndAdd(member.imageId);
       }
     }
-    if (content.media) {
-      for (const mediaId of Object.keys(content.media)) {
-        checkAndAdd(mediaId);
-      }
-    }
   };
 
-  inspectContent(siteContent);
+  // 1. Inspect currently active content locations
+  inspectActiveLocations(siteContent);
 
-  // Also check up to 5 backups of site-content.json to prevent purging restored references
-  if (siteContentPath) {
-    for (let i = 1; i <= 5; i++) {
-      const bakPath = `${siteContentPath}.bak.${i}`;
-      if (fs.existsSync(bakPath)) {
+  // 2. Read up to 5 real backups via getBackups(siteContentPath)
+  if (siteContentPath && fs.existsSync(siteContentPath)) {
+    try {
+      const backups = getBackups(siteContentPath);
+      const retainedBackups = backups.slice(0, 5);
+      const dir = path.dirname(siteContentPath);
+
+      for (const bakFile of retainedBackups) {
+        const bakPath = path.join(dir, bakFile);
         try {
           const raw = JSON.parse(fs.readFileSync(bakPath, "utf-8")) as SiteContent;
-          inspectContent(raw);
+          inspectActiveLocations(raw);
         } catch {
-          // ignore corrupted backup inspection
+          console.warn(`[getReferencedMediaIds] Sauvegarde illisible: ${bakFile}. Nettoyage différé.`);
+          result.hasUnreadableBackup = true;
         }
       }
+    } catch {
+      result.hasUnreadableBackup = true;
     }
   }
 
-  return referenced;
+  return result;
 }
 
 export function cleanupUnreferencedMedia(
   activeContent: SiteContent,
   mediaBasePath: string,
   siteContentPath?: string
-): void {
+): { cleaned: string[]; deferred?: boolean } {
   try {
-    const referenced = getReferencedMediaIds(activeContent, siteContentPath);
-    const siteDir = path.resolve(mediaBasePath, "site");
-    if (!fs.existsSync(siteDir)) return;
+    const refResult = getReferencedMediaIds(activeContent, siteContentPath);
+    if (refResult.hasUnreadableBackup) {
+      console.warn("[cleanupUnreferencedMedia] Sauvegarde illisible détectée. Nettoyage différé pour protéger les médias.");
+      return { cleaned: [], deferred: true };
+    }
 
-    for (const location of fs.readdirSync(siteDir)) {
-      const locationDir = path.resolve(siteDir, location);
-      if (!fs.statSync(locationDir).isDirectory()) continue;
+    const cleaned: string[] = [];
+    const resolvedMediaBasePath = path.resolve(mediaBasePath);
+    if (!fs.existsSync(resolvedMediaBasePath)) return { cleaned };
+
+    const baseStat = fs.lstatSync(resolvedMediaBasePath);
+    if (baseStat.isSymbolicLink() || !baseStat.isDirectory()) return { cleaned };
+    const canonicalBase = fs.realpathSync(resolvedMediaBasePath);
+
+    const siteDir = path.join(canonicalBase, "site");
+    if (!fs.existsSync(siteDir)) return { cleaned };
+    const siteStat = fs.lstatSync(siteDir);
+    if (siteStat.isSymbolicLink() || !siteStat.isDirectory()) return { cleaned };
+    const realSiteDir = fs.realpathSync(siteDir);
+    if (path.relative(canonicalBase, realSiteDir).startsWith("..")) return { cleaned };
+
+    // Inspect ONLY the 4 explicitly allowed locations
+    for (const location of ADMIN_UPLOAD_LOCATIONS) {
+      const locationDir = path.join(siteDir, location);
+      if (!fs.existsSync(locationDir)) continue;
+
+      const locStat = fs.lstatSync(locationDir);
+      if (locStat.isSymbolicLink() || !locStat.isDirectory()) {
+        // Refuse symlinks or non-directory items in site/
+        continue;
+      }
+      const realLocDir = fs.realpathSync(locationDir);
+      if (path.relative(canonicalBase, realLocDir).startsWith("..")) {
+        continue;
+      }
 
       for (const item of fs.readdirSync(locationDir)) {
         if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(item)) {
-          if (!referenced.has(item.toLowerCase())) {
-            const mediaDir = path.resolve(locationDir, item);
-            cleanupMediaDirectory(mediaDir);
+          const lowerId = item.toLowerCase();
+          if (!refResult.has(lowerId)) {
+            const mediaDir = path.join(locationDir, item);
+            cleanupMediaDirectory(mediaDir, canonicalBase);
+            cleaned.push(mediaDir);
           }
         }
       }
     }
+
+    // Clean up stale staging directories older than 1 hour if any remain
+    const stagingDir = path.join(canonicalBase, "staging");
+    if (fs.existsSync(stagingDir)) {
+      const stagingStat = fs.lstatSync(stagingDir);
+      if (!stagingStat.isSymbolicLink() && stagingStat.isDirectory()) {
+        const oneHourAgo = Date.now() - 3600_000;
+        for (const item of fs.readdirSync(stagingDir)) {
+          if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(item)) {
+            const dir = path.join(stagingDir, item);
+            try {
+              const stat = fs.statSync(dir);
+              if (stat.mtimeMs < oneHourAgo) {
+                cleanupMediaDirectory(dir, canonicalBase);
+              }
+            } catch {
+              // ignore
+            }
+          }
+        }
+      }
+    }
+
+    return { cleaned };
   } catch {
     // Non-critical background cleanup failure
+    return { cleaned: [] };
   }
 }
+

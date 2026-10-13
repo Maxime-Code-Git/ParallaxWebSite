@@ -15,9 +15,12 @@ import { constantTimeEqual } from "../../lib/auth.server";
 import {
   getRawSiteContent,
   saveStudioContent,
+  getSiteContentFilePath,
   RevisionConflictError,
   ValidationError,
 } from "../../lib/site-content.server";
+import { ENV } from "../../lib/env.server";
+import { cleanupUnreferencedMedia } from "../../lib/media-image.server";
 import {
   type StudioContent,
   type UploadedMediaMetadata,
@@ -102,6 +105,8 @@ export async function action({ request }: ActionFunctionArgs) {
 
   try {
     const newRevision = saveStudioContent(parsedStudio, revision);
+    const { content: latest } = getRawSiteContent();
+    cleanupUnreferencedMedia(latest, ENV.SITE_MEDIA_PATH, getSiteContentFilePath());
     return Response.json({ success: true, newRevision }, { headers });
   } catch (err) {
     if (err instanceof RevisionConflictError) {

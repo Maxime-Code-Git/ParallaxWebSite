@@ -174,6 +174,8 @@ describe("Environment Validation (env.server.ts)", () => {
       const validDir = fs.realpathSync(os.tmpdir());
       const validDbPath = path.join(validDir, `startup-test-${Date.now()}.sqlite`);
       const validContentPath = path.join(validDir, `startup-content-test-${Date.now()}.json`);
+      const validMediaPath = path.join(validDir, `startup-media-test-${Date.now()}`);
+      fs.mkdirSync(validMediaPath, { recursive: true, mode: 0o700 });
       await new Promise<void>((resolve, reject) => {
         execFile(
           "node",
@@ -188,6 +190,7 @@ describe("Environment Validation (env.server.ts)", () => {
               RATE_LIMIT_SECRET: "valid-ratelimit-secret-min-32-chars-long!",
               RATE_LIMIT_DB_PATH: validDbPath,
               SITE_CONTENT_PATH: validContentPath,
+              SITE_MEDIA_PATH: validMediaPath,
               TRUST_PROXY: "false",
             },
           },

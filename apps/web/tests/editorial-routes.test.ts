@@ -37,6 +37,8 @@ describe("Editorial Routes and Actions", () => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "parallax-routes-test-"));
     testContentFile = path.join(tempDir, "site-content.json");
     testDbFile = path.join(tempDir, "rate-limit.sqlite");
+    const testMediaDir = path.join(tempDir, "site-media");
+    fs.mkdirSync(testMediaDir, { mode: 0o700, recursive: true });
 
     process.env = {
       ...originalEnv,
@@ -47,6 +49,7 @@ describe("Editorial Routes and Actions", () => {
       RATE_LIMIT_SECRET: "rate-limit-secret-min-32-chars-long-2!",
       RATE_LIMIT_DB_PATH: testDbFile,
       SITE_CONTENT_PATH: testContentFile,
+      SITE_MEDIA_PATH: testMediaDir,
       TRUST_PROXY: "false",
     };
   });

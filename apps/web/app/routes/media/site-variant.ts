@@ -1,13 +1,13 @@
 import { type LoaderFunctionArgs } from "react-router";
 import { Readable } from "node:stream";
 import fs from "node:fs";
-import path from "node:path";
 import { ENV } from "../../lib/env.server";
 import {
   type AdminUploadLocation,
   ADMIN_UPLOAD_LOCATIONS,
 } from "../../lib/site-content.shared";
 import { getRawSiteContent } from "../../lib/site-content.server";
+import { verifySecurePathChain } from "../../lib/media-image.server";
 
 const ALLOWED_VARIANTS = new Set(["640p", "960p", "1440p", "1920p"]);
 const ALLOWED_EXTS = new Set(["webp", "avif"]);
@@ -103,19 +103,16 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     return new Response("Not Found", { status: 404 });
   }
 
-  const resolvedMediaBasePath = path.resolve(mediaBasePath);
-  const fileId = `${imageId}-${variant}`;
-  const filePath = path.resolve(
-    resolvedMediaBasePath,
-    "site",
-    location,
-    imageId,
-    variant,
-    `${fileId}.${ext}`
-  );
-
-  const rel = path.relative(resolvedMediaBasePath, filePath);
-  if (rel.startsWith("..") || path.isAbsolute(rel)) {
+  let filePath: string;
+  try {
+    const fileId = `${imageId}-${variant}`;
+    const filename = `${fileId}.${ext}`;
+    filePath = verifySecurePathChain(
+      mediaBasePath,
+      ["site", location, imageId, variant, filename],
+      "file"
+    );
+  } catch {
     return new Response("Not Found", { status: 404 });
   }
 

@@ -13,7 +13,7 @@ import { ENV } from "../../lib/env.server";
 import {
   type AdminUploadLocation,
   ADMIN_UPLOAD_LOCATIONS,
-  type UploadedMediaMetadata,
+  type SiteContent,
 } from "../../lib/site-content.shared";
 import {
   getRawSiteContent,
@@ -27,9 +27,13 @@ import {
 import {
   MAX_FILE_SIZE,
   SafeImageError,
+  ConcurrencyLimitError,
   processSiteMediaImage,
+  publishStagedMedia,
+  cleanupStagedMedia,
   cleanupMediaDirectory,
   cleanupUnreferencedMedia,
+  type ProcessedMediaWithStaging,
 } from "../../lib/media-image.server";
 
 const MULTIPART_OVERHEAD_MARGIN = 64 * 1024; // 64 KiB margin for boundary & part headers
@@ -304,7 +308,11 @@ export async function action({ request }: ActionFunctionArgs) {
 
   const contentLengthHeader = request.headers.get("Content-Length");
   if (contentLengthHeader !== null) {
-    const parsedLength = Number.parseInt(contentLengthHeader, 10);
+    const trimmed = contentLengthHeader.trim();
+    if (!/^\d+$/.test(trimmed)) {
+      return jsonError("En-tête Content-Length invalide.", 400);
+    }
+    const parsedLength = Number.parseInt(trimmed, 10);
     if (!Number.isSafeInteger(parsedLength) || parsedLength < 0) {
       return jsonError("En-tête Content-Length invalide.", 400);
     }
@@ -314,7 +322,8 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   let tempDirectory: string | null = null;
-  let processedMedia: UploadedMediaMetadata | null = null;
+  let processedMedia: ProcessedMediaWithStaging | null = null;
+  let isPublished = false;
 
   try {
     tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "parallax-media-upload-"));
@@ -326,6 +335,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
     const uploadedFilePath = await parseSingleUpload(request, contentType, tempDirectory);
 
+    // Process image into isolated staging directory
     processedMedia = await processSiteMediaImage(
       uploadedFilePath,
       tempDirectory,
@@ -333,8 +343,43 @@ export async function action({ request }: ActionFunctionArgs) {
       ENV.SITE_MEDIA_PATH
     );
 
-    // Atomically save to SiteContent JSON with revision check
-    const saveResult = saveSiteMediaUpdate(location, processedMedia, previousRevision);
+    // Final revision check right before publishing from staging
+    const latestBeforePublish = getRawSiteContent();
+    if (latestBeforePublish.isCorrupted) {
+      cleanupStagedMedia(processedMedia.imageId, ENV.SITE_MEDIA_PATH);
+      return jsonError("Fichier de contenu corrompu.", 500);
+    }
+    if (latestBeforePublish.content.revision.toLowerCase() !== previousRevision.toLowerCase()) {
+      cleanupStagedMedia(processedMedia.imageId, ENV.SITE_MEDIA_PATH);
+      return jsonError(
+        "Conflit de révision : le contenu a été mis à jour par un autre enregistrement. Vos saisies ont été conservées.",
+        409,
+        { conflict: true, latestRevision: latestBeforePublish.content.revision }
+      );
+    }
+
+    // Atomically move from staging to site/<location>/<imageId>
+    publishStagedMedia(processedMedia.imageId, location, ENV.SITE_MEDIA_PATH);
+    isPublished = true;
+
+    // Atomically save to SiteContent JSON with revision check (stripping internal stagingDir)
+    const cleanMetadata = {
+      imageId: processedMedia.imageId,
+      location: processedMedia.location,
+      originalWidth: processedMedia.originalWidth,
+      originalHeight: processedMedia.originalHeight,
+      variants: processedMedia.variants,
+      createdAt: processedMedia.createdAt,
+    };
+    let saveResult: { newRevision: string; content: SiteContent };
+    try {
+      saveResult = saveSiteMediaUpdate(location, cleanMetadata, previousRevision);
+    } catch (saveErr) {
+      // Rollback published directory if JSON save failed
+      const mediaDir = path.resolve(ENV.SITE_MEDIA_PATH, "site", location, processedMedia.imageId);
+      cleanupMediaDirectory(mediaDir, ENV.SITE_MEDIA_PATH);
+      throw saveErr;
+    }
 
     // Clean up unreferenced media in background
     cleanupUnreferencedMedia(saveResult.content, ENV.SITE_MEDIA_PATH, getSiteContentFilePath());
@@ -344,7 +389,7 @@ export async function action({ request }: ActionFunctionArgs) {
         success: true,
         newRevision: saveResult.newRevision,
         imageId: processedMedia.imageId,
-        mediaMetadata: processedMedia,
+        mediaMetadata: cleanMetadata,
       },
       {
         headers: {
@@ -355,10 +400,29 @@ export async function action({ request }: ActionFunctionArgs) {
       }
     );
   } catch (err: unknown) {
-    // If saving or processing failed, clean up the newly created media directory
+    // If saving or processing failed, clean up staging or published directory
     if (processedMedia) {
-      const mediaDir = path.resolve(ENV.SITE_MEDIA_PATH, "site", location, processedMedia.imageId);
-      cleanupMediaDirectory(mediaDir);
+      if (isPublished) {
+        const mediaDir = path.resolve(ENV.SITE_MEDIA_PATH, "site", location, processedMedia.imageId);
+        cleanupMediaDirectory(mediaDir, ENV.SITE_MEDIA_PATH);
+      } else {
+        cleanupStagedMedia(processedMedia.imageId, ENV.SITE_MEDIA_PATH);
+      }
+    }
+
+    if (err instanceof ConcurrencyLimitError) {
+      return Response.json(
+        { error: err.message },
+        {
+          status: 503,
+          headers: {
+            "Retry-After": "2",
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'",
+          },
+        }
+      );
     }
 
     if (err instanceof RevisionConflictError) {

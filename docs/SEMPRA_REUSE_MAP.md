@@ -13,6 +13,7 @@ Ce document inventorie formellement les briques techniques de référence du pro
 | **Headers de sécurité & CSP SSR** | `entry.server.tsx` | **Porté et adapté** | **Lot 1 & 1 bis** (`apps/web/app/entry.server.tsx`) |
 | **Outil de hachage CLI** | `scripts/admin-hash.js` | **Porté et adapté** | **Lot 1 & 1 bis** (`apps/web/scripts/admin-hash.js`) |
 | **Schéma éditorial & Persistance atomique** | `site-content.server.ts`, `atomic-fs.server.ts` | **Porté et adapté** | **Lot 2** (`apps/web/app/lib/site-content.server.ts`, `site-content.shared.ts`, `atomic-fs.server.ts`) |
+| **Pipeline d'import d'images de site (Lot 2 bis)** | `api.admin.home-image.ts`, `home-media.server.ts`, `portfolio-image.server.ts`, `media.home.*.tsx`, `ImageUploader.tsx` | **Porté et adapté** | **Lot 2 bis** (`apps/web/app/lib/media-image.server.ts`, `routes/media/site-variant.ts`, `routes/api/admin-media-upload.ts`, `ImageUploader.tsx`) |
 | **Portfolio & Médias publics** | `portfolio-content.server.ts`, `portfolio-media.server.ts` | **Différé** | Lot 3 (Portfolio & vitrine) |
 | **Galeries privées & Téléchargements ZIP** | `gallery-*.server.ts`, code unique | **Différé** | Lot 4 (Espace client & galeries) |
 | **Previews WebP / Sharp** | `gallery-preview.server.ts`, `portfolio-image.server.ts` | **Différé** | Lot 4 / Lot 3 |
@@ -127,6 +128,50 @@ Ce document inventorie formellement les briques techniques de référence du pro
 
 6. **Elements non verifies** :
    - Performance de lecture synchrone repetee lors de tres fortes charges concurrentes sans couche de memoire cache.
+
+---
+
+## 3 bis. Pipeline d'import d'images de site (Lot 2 bis)
+
+1. **Fichiers consultés (commit Sempra `89bfee31ae5d477f71c95e83a0d55305521f426f`)** :
+   - `apps/web/app/routes/api.admin.home-image.ts`
+   - `apps/web/app/lib/home-media.server.ts`
+   - `apps/web/app/lib/portfolio-image.server.ts`
+   - `apps/web/app/routes/media.home.$imageId.$variant.tsx`
+   - `apps/web/app/components/admin/ImageUploader.tsx`
+
+2. **Fonctions, types et comportements observés** :
+   - Réception multipart/form-data en streaming avec `busboy`, borne stricte de taille (25 Mo).
+   - Pipeline Sharp produisant des variantes WebP (qualité 82) et AVIF (qualité 65, effort 4) pour les points de rupture (640p, 960p, 1440p, 1920p).
+   - Auto-orientation EXIF via `sharp.rotate()`, espace sRGB, stripping de métadonnées pour protéger la vie privée.
+   - `ConcurrencyLimiter(2)` bornant à 2 les traitements Sharp simultanés pour préserver les ressources serveur.
+   - Route de diffusion des variantes avec calcul d'ETag, statut 304, et en-têtes de cache immuables (`Cache-Control: public, max-age=31536000, immutable`).
+
+3. **Choix** :
+   - **Porté et adapté au Lot 2 bis** (`apps/web/app/lib/media-image.server.ts`, `apps/web/app/routes/media/site-variant.ts`, `apps/web/app/routes/api/admin-media-upload.ts`, `apps/web/app/components/admin/ImageUploader.tsx`).
+
+4. **Adaptations et durcissements Parallax** :
+   - Suppression totale du moteur de filigrane (watermark) Sempra.
+   - Support des 4 emplacements éditoriaux actuels (`showreel_cover`, `duo`, `portrait_ludovic`, `portrait_maxime`).
+   - Rétablissement vers l'image de référence par défaut (`x-media-action: revert`).
+   - Validation décimale stricte de `Content-Length` (`/^\d+$/`) rejetant toute valeur partiellement numérique.
+   - Saturation du limiteur traduite par une exception dédiée `ConcurrencyLimitError` retournant HTTP 503 avec en-tête `Retry-After: 2`.
+   - Isolation en staging privé (`staging/<imageId>`) prévenant la suppression prématurée des fichiers en cours par un import concurrent terminant son nettoyage.
+   - Publication coordonnée avec vérification de révision avant `renameSync` atomique et rollback circonscrit aux seuls fichiers de l'import en cas de 409.
+   - Confinement strict des chemins via `verifySecurePathChain` examinant chaque composant (`site`, emplacement, UUID, variante, fichier) avec `lstatSync` sans suivre les liens symboliques, avec `O_NOFOLLOW` complémentaire et gestion d'erreurs en 404 sans fuite de chemins.
+   - Rétention bornée et rotation réelle : exploitation de `getBackups(siteContentPath)` de `atomic-fs.server.ts` préservant les variantes des 5 sauvegardes physiques, purge des anciennes métadonnées non rattachées et report sécurisé du nettoyage en cas de sauvegarde illisible.
+   - Validation de cohérence des références importées lors des sauvegardes de formulaire : UUID connu, correspondance clé/métadonnées, emplacement cohérent et variantes valides.
+
+5. **Tests Parallax utiles** :
+   - `apps/web/tests/media-image.server.test.ts`
+   - `apps/web/tests/admin-media-upload.test.ts`
+   - `apps/web/tests/site-variant.route.test.ts`
+   - `apps/web/tests/confinement-security.test.ts`
+   - `apps/web/tests/bounded-retention.test.ts`
+   - `apps/web/tests/concurrent-upload-isolation.test.ts`
+
+6. **Éléments non vérifiés** :
+   - Remplacement concurrent des dossiers sur le disque par un acteur local en temps réel (race condition d'OS local sans garantie absolue démontrée).
 
 ---
 
