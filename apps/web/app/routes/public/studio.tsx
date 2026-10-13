@@ -1,10 +1,10 @@
 import type { LoaderFunctionArgs } from "react-router";
 import { useLoaderData } from "react-router";
 import { getSiteContent } from "../../lib/site-content.server";
-import { resolveAllowedImage } from "../../lib/site-content.shared";
 import { Header } from "../../components/public/Header";
 import { Footer } from "../../components/public/Footer";
 import { ScrollToTop } from "../../components/public/ScrollToTop";
+import { ResponsiveSiteImage } from "../../components/public/ResponsiveSiteImage";
 import styles from "./studio.module.css";
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -18,6 +18,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     lang,
     common: siteContent.common,
     studio: siteContent.studio,
+    media: siteContent.media || {},
   };
 }
 
@@ -33,7 +34,7 @@ export function meta({ data }: { data?: Awaited<ReturnType<typeof loader>> }) {
 }
 
 export default function StudioPage() {
-  const { lang, common, studio } = useLoaderData<typeof loader>();
+  const { lang, common, studio, media } = useLoaderData<typeof loader>();
 
   return (
     <div className={styles.container}>
@@ -59,21 +60,26 @@ export default function StudioPage() {
         <h2 className={styles.sectionHeader}>{studio.team.title[lang]}</h2>
         <div className={styles.teamGrid}>
           {studio.team.members.map((member) => {
-            const memberImageUrl =
-              resolveAllowedImage(member.imageId) ||
-              (member.id === "ludovic" ? "/img/studio-d0f3184629.jpg" : "/img/studio-b4c530c5ae.jpg");
+            const defaultFallback =
+              member.id === "ludovic"
+                ? "/img/studio-d0f3184629.jpg"
+                : "/img/studio-b4c530c5ae.jpg";
+            const location =
+              member.id === "ludovic" ? "portrait_ludovic" : "portrait_maxime";
 
             return (
               <article key={member.id} className={styles.memberCard}>
                 <div className={styles.memberImageWrapper}>
-                  {memberImageUrl && (
-                    <img
-                      src={memberImageUrl}
-                      alt={member.imageAlt[lang]}
-                      className={styles.memberImage}
-                      loading="lazy"
-                    />
-                  )}
+                  <ResponsiveSiteImage
+                    imageId={member.imageId}
+                    location={location}
+                    mediaMetadata={media[member.imageId]}
+                    fallbackSrc={defaultFallback}
+                    alt={member.imageAlt[lang]}
+                    className={styles.memberImage}
+                    sizes="(max-width: 768px) 100vw, 400px"
+                    loading="lazy"
+                  />
                 </div>
                 <h3 className={styles.memberName}>{member.name}</h3>
                 <div className={styles.memberRole}>{member.role[lang]}</div>

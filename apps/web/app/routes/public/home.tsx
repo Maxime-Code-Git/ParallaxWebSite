@@ -2,11 +2,11 @@ import { useState } from "react";
 import type { LoaderFunctionArgs } from "react-router";
 import { useLoaderData } from "react-router";
 import { getSiteContent } from "../../lib/site-content.server";
-import { resolveAllowedImage } from "../../lib/site-content.shared";
 import { Header } from "../../components/public/Header";
 import { Footer } from "../../components/public/Footer";
 import { ScrollToTop } from "../../components/public/ScrollToTop";
 import { VideoModal } from "../../components/public/VideoModal";
+import { ResponsiveSiteImage } from "../../components/public/ResponsiveSiteImage";
 import styles from "./home.module.css";
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -20,6 +20,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     lang,
     common: siteContent.common,
     home: siteContent.home,
+    media: siteContent.media || {},
   };
 }
 
@@ -35,11 +36,8 @@ export function meta({ data }: { data?: Awaited<ReturnType<typeof loader>> }) {
 }
 
 export default function HomePage() {
-  const { lang, common, home } = useLoaderData<typeof loader>();
+  const { lang, common, home, media } = useLoaderData<typeof loader>();
   const [showreelOpen, setShowreelOpen] = useState(false);
-
-  const showreelCoverUrl = resolveAllowedImage(home.showreel.coverImageId) || "/img/index-36b7cd6c87.jpg";
-  const duoImageUrl = resolveAllowedImage(home.duo.imageId) || "/img/index-0ff090a6e4.jpg";
 
   return (
     <div className={styles.container}>
@@ -59,14 +57,16 @@ export default function HomePage() {
           role="region"
           aria-label={home.showreel.coverImageAlt[lang]}
         >
-          {showreelCoverUrl && (
-            <img
-              src={showreelCoverUrl}
-              alt={home.showreel.coverImageAlt[lang]}
-              className={styles.showreelCoverImg}
-              loading="lazy"
-            />
-          )}
+          <ResponsiveSiteImage
+            imageId={home.showreel.coverImageId}
+            location="showreel_cover"
+            mediaMetadata={media[home.showreel.coverImageId]}
+            fallbackSrc="/img/index-36b7cd6c87.jpg"
+            alt={home.showreel.coverImageAlt[lang]}
+            className={styles.showreelCoverImg}
+            sizes="(max-width: 768px) 100vw, 1440px"
+            loading="lazy"
+          />
           <div className={styles.showreelOverlay} />
           <button
             type="button"
@@ -91,14 +91,16 @@ export default function HomePage() {
       <section className={styles.duoSection}>
         <div className={styles.duoGrid}>
           <div className={styles.duoImageWrapper}>
-            {duoImageUrl && (
-              <img
-                src={duoImageUrl}
-                alt={home.duo.imageAlt[lang]}
-                className={styles.duoImage}
-                loading="lazy"
-              />
-            )}
+            <ResponsiveSiteImage
+              imageId={home.duo.imageId}
+              location="duo"
+              mediaMetadata={media[home.duo.imageId]}
+              fallbackSrc="/img/index-0ff090a6e4.jpg"
+              alt={home.duo.imageAlt[lang]}
+              className={styles.duoImage}
+              sizes="(max-width: 768px) 100vw, 800px"
+              loading="lazy"
+            />
           </div>
           <div className={styles.duoContent}>
             <h2 className={styles.duoTitle}>{home.duo.title[lang]}</h2>

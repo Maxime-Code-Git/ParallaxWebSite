@@ -178,6 +178,103 @@ function validateStoragePath(val: string | undefined, name: string): string {
   return val;
 }
 
+function validateStorageDirectoryPath(val: string | undefined, name: string): string {
+  if (!val) {
+    throw new Error(`CRITICAL: La variable d'environnement ${name} est obligatoire.`);
+  }
+  if (!path.isAbsolute(val)) {
+    throw new Error(`CRITICAL: La variable d'environnement ${name} doit etre un chemin absolu.`);
+  }
+
+  checkNoSymlinksInPath(val, name);
+
+  const resolved = path.resolve(val);
+  const repoRoot = getMonorepoRoot();
+  let realRepoRoot = repoRoot;
+  try {
+    realRepoRoot = fs.realpathSync(repoRoot);
+  } catch {
+    // Ignored
+  }
+
+  const relResolved = path.relative(repoRoot, resolved);
+  const relReal = path.relative(realRepoRoot, resolved);
+  if (
+    (!relResolved.startsWith("..") && !path.isAbsolute(relResolved)) ||
+    (!relReal.startsWith("..") && !path.isAbsolute(relReal))
+  ) {
+    throw new Error(`CRITICAL: ${name} ne doit pas se trouver dans le depot du projet.`);
+  }
+
+  let realPathToCheck: string;
+  let stat: fs.Stats | undefined;
+
+  try {
+    const lstat = fs.lstatSync(val);
+    if (lstat.isSymbolicLink()) {
+      throw new Error(`CRITICAL: ${name} ne doit pas etre un lien symbolique.`);
+    }
+    stat = fs.statSync(val);
+    realPathToCheck = fs.realpathSync(val);
+  } catch (err: unknown) {
+    if (err && typeof err === "object" && "code" in err && (err as { code: unknown }).code === "ENOENT") {
+      const parentDir = path.dirname(val);
+      try {
+        const parentLstat = fs.lstatSync(parentDir);
+        if (parentLstat.isSymbolicLink()) {
+          throw new Error(`CRITICAL: Le dossier parent de ${name} ne doit pas etre un lien symbolique.`, { cause: err });
+        }
+        const parentStat = fs.statSync(parentDir);
+        if (!parentStat.isDirectory()) {
+          throw new Error(`CRITICAL: Le parent de ${name} doit etre un dossier.`, { cause: err });
+        }
+        fs.accessSync(parentDir, fs.constants.W_OK);
+        fs.mkdirSync(val, { recursive: true, mode: 0o700 });
+        try {
+          fs.chmodSync(val, 0o700);
+        } catch {
+          // best-effort
+        }
+        stat = fs.statSync(val);
+        realPathToCheck = fs.realpathSync(val);
+      } catch (parentErr) {
+        if (parentErr instanceof Error && parentErr.message.startsWith("CRITICAL:")) {
+          throw parentErr;
+        }
+        throw new Error(`CRITICAL: Le dossier parent de ${name} n'existe pas ou n'est pas inscriptible.`, { cause: parentErr });
+      }
+    } else {
+      if (err instanceof Error && err.message.startsWith("CRITICAL:")) {
+        throw err;
+      }
+      throw new Error(`CRITICAL: ${name} ou son dossier parent n'est pas inscriptible ou n'existe pas.`, { cause: err });
+    }
+  }
+
+  if (stat) {
+    if (!stat.isDirectory()) {
+      throw new Error(`CRITICAL: ${name} doit etre un repertoire.`);
+    }
+    try {
+      fs.accessSync(val, fs.constants.W_OK);
+      try {
+        fs.chmodSync(val, 0o700);
+      } catch {
+        // best-effort
+      }
+    } catch (accessErr) {
+      throw new Error(`CRITICAL: ${name} n'est pas accessible en ecriture.`, { cause: accessErr });
+    }
+  }
+
+  const rel = path.relative(realRepoRoot, realPathToCheck);
+  if (!rel.startsWith("..") && !path.isAbsolute(rel)) {
+    throw new Error(`CRITICAL: ${name} ne doit pas se trouver dans le depot du projet.`);
+  }
+
+  return realPathToCheck;
+}
+
 export const ENV = {
   get PUBLIC_SITE_URL(): string {
     const isProd = process.env.NODE_ENV === "production";
@@ -259,6 +356,21 @@ export const ENV = {
     return validateStoragePath(val, "SITE_CONTENT_PATH");
   },
 
+  get SITE_MEDIA_PATH(): string {
+    const isTest = process.env.NODE_ENV === "test";
+    const val = process.env.SITE_MEDIA_PATH;
+
+    if (isTest) {
+      const p = validateTestPath(val, "SITE_MEDIA_PATH");
+      if (!fs.existsSync(p)) {
+        fs.mkdirSync(p, { recursive: true, mode: 0o700 });
+      }
+      return p;
+    }
+
+    return validateStorageDirectoryPath(val, "SITE_MEDIA_PATH");
+  },
+
   get TRUST_PROXY(): boolean {
     return process.env.TRUST_PROXY === "true";
   },
@@ -292,6 +404,10 @@ export function isLocalPreviewMode(): boolean {
 
 export function validateContentConfig(): string {
   return ENV.SITE_CONTENT_PATH;
+}
+
+export function validateMediaConfig(): string {
+  return ENV.SITE_MEDIA_PATH;
 }
 
 export interface AdminConfig {
@@ -355,6 +471,7 @@ export function validateServerStartup(): void {
       isLocalPreviewMode();
     }
     validateContentConfig();
+    validateMediaConfig();
     if (process.env.NODE_ENV === "production") {
       validateAdminConfig();
     }

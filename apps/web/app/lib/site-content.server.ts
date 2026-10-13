@@ -14,6 +14,11 @@ import {
   type SiteContent,
   type StudioContent,
   type StudioMember,
+  type AdminUploadLocation,
+  ADMIN_UPLOAD_LOCATIONS,
+  DEFAULT_LOCATION_IMAGES,
+  type MediaVariantInfo,
+  type UploadedMediaMetadata,
 } from "./site-content.shared";
 
 export class RevisionConflictError extends Error {
@@ -70,12 +75,86 @@ export function validateLocalizedString(val: unknown, context: string): Localize
 }
 
 export function validateAllowedImageId(val: unknown, context: string): AllowedImageId {
-  if (typeof val !== "string" || !(val in ALLOWED_IMAGE_MAP)) {
+  if (typeof val !== "string") {
+    throw new ValidationError(`${context} doit être une chaîne de caractères.`);
+  }
+  if (val in ALLOWED_IMAGE_MAP) {
+    return val;
+  }
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val)) {
+    return val.toLowerCase();
+  }
+  throw new ValidationError(
+    `${context} doit être un identifiant d'image valide (${Object.keys(ALLOWED_IMAGE_MAP).join(", ")}) ou un identifiant média UUID valide. Reçu: ${String(val)}`
+  );
+}
+
+export function validateMediaVariantInfo(val: unknown, context: string): MediaVariantInfo {
+  const obj = assertObject(val, context);
+  assertExactKeys(obj, ["name", "width", "height", "sizeBytesWebp", "sizeBytesAvif", "fileId"], context);
+  if (!["640p", "960p", "1440p", "1920p"].includes(obj.name as string)) {
+    throw new ValidationError(`${context}.name doit être une variante valide (640p, 960p, 1440p, 1920p).`);
+  }
+  if (typeof obj.width !== "number" || obj.width <= 0) {
+    throw new ValidationError(`${context}.width doit être un nombre positif.`);
+  }
+  if (typeof obj.height !== "number" || obj.height <= 0) {
+    throw new ValidationError(`${context}.height doit être un nombre positif.`);
+  }
+  if (typeof obj.sizeBytesWebp !== "number" || obj.sizeBytesWebp <= 0) {
+    throw new ValidationError(`${context}.sizeBytesWebp doit être un nombre positif.`);
+  }
+  if (typeof obj.sizeBytesAvif !== "number" || obj.sizeBytesAvif <= 0) {
+    throw new ValidationError(`${context}.sizeBytesAvif doit être un nombre positif.`);
+  }
+  if (typeof obj.fileId !== "string" || !obj.fileId.trim()) {
+    throw new ValidationError(`${context}.fileId doit être une chaîne non vide.`);
+  }
+  return {
+    name: obj.name as "640p" | "960p" | "1440p" | "1920p",
+    width: obj.width,
+    height: obj.height,
+    sizeBytesWebp: obj.sizeBytesWebp,
+    sizeBytesAvif: obj.sizeBytesAvif,
+    fileId: obj.fileId,
+  };
+}
+
+export function validateUploadedMediaMetadata(val: unknown, context: string): UploadedMediaMetadata {
+  const obj = assertObject(val, context);
+  assertExactKeys(obj, ["imageId", "location", "originalWidth", "originalHeight", "variants", "createdAt"], context);
+  if (
+    typeof obj.imageId !== "string" ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(obj.imageId)
+  ) {
+    throw new ValidationError(`${context}.imageId doit être un UUID valide.`);
+  }
+  if (!ADMIN_UPLOAD_LOCATIONS.includes(obj.location as AdminUploadLocation)) {
     throw new ValidationError(
-      `${context} doit être un identifiant d'image valide (${Object.keys(ALLOWED_IMAGE_MAP).join(", ")}). Reçu: ${String(val)}`
+      `${context}.location doit être un emplacement valide (${ADMIN_UPLOAD_LOCATIONS.join(", ")}).`
     );
   }
-  return val as AllowedImageId;
+  if (typeof obj.originalWidth !== "number" || obj.originalWidth <= 0) {
+    throw new ValidationError(`${context}.originalWidth doit être un nombre positif.`);
+  }
+  if (typeof obj.originalHeight !== "number" || obj.originalHeight <= 0) {
+    throw new ValidationError(`${context}.originalHeight doit être un nombre positif.`);
+  }
+  if (!Array.isArray(obj.variants) || obj.variants.length === 0) {
+    throw new ValidationError(`${context}.variants doit être une liste non vide.`);
+  }
+  const variants = obj.variants.map((v, i) => validateMediaVariantInfo(v, `${context}.variants[${i}]`));
+  if (typeof obj.createdAt !== "string") {
+    throw new ValidationError(`${context}.createdAt doit être une chaîne ISO.`);
+  }
+  return {
+    imageId: obj.imageId.toLowerCase(),
+    location: obj.location as AdminUploadLocation,
+    originalWidth: obj.originalWidth,
+    originalHeight: obj.originalHeight,
+    variants,
+    createdAt: obj.createdAt,
+  };
 }
 
 export function validateCommonContent(val: unknown): CommonContent {
@@ -274,7 +353,7 @@ export function validateStudioContent(val: unknown): StudioContent {
 
 export function validateSiteContent(val: unknown): SiteContent {
   const obj = assertObject(val, "siteContent");
-  assertExactKeys(obj, ["schemaVersion", "revision", "updatedAt", "common", "home", "studio"], "siteContent");
+  assertExactKeys(obj, ["schemaVersion", "revision", "updatedAt", "common", "home", "studio", "media"], "siteContent");
 
   if (obj.schemaVersion !== 1) {
     throw new ValidationError(`schemaVersion non supporté: ${String(obj.schemaVersion)}. Attendu: 1`);
@@ -286,6 +365,17 @@ export function validateSiteContent(val: unknown): SiteContent {
     throw new ValidationError("updatedAt doit être une chaîne ISO-8601.");
   }
 
+  const media: Record<string, UploadedMediaMetadata> = {};
+  if (obj.media !== undefined) {
+    const mediaObj = assertObject(obj.media, "siteContent.media");
+    for (const [k, v] of Object.entries(mediaObj)) {
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(k)) {
+        throw new ValidationError(`Clé de média invalide: '${k}'. Doit être un UUID.`);
+      }
+      media[k.toLowerCase()] = validateUploadedMediaMetadata(v, `siteContent.media['${k}']`);
+    }
+  }
+
   return {
     schemaVersion: 1,
     revision: obj.revision.toLowerCase(),
@@ -293,6 +383,7 @@ export function validateSiteContent(val: unknown): SiteContent {
     common: validateCommonContent(obj.common),
     home: validateHomeContent(obj.home),
     studio: validateStudioContent(obj.studio),
+    media,
   };
 }
 
@@ -368,4 +459,96 @@ export function saveStudioContent(newStudio: StudioContent, previousRevision: st
   const filePath = getSiteContentFilePath();
   atomicWriteJson(filePath, nextContent);
   return nextRevision;
+}
+
+export function saveSiteMediaUpdate(
+  location: AdminUploadLocation,
+  newMedia: UploadedMediaMetadata,
+  previousRevision: string
+): { newRevision: string; content: SiteContent } {
+  const current = getRawSiteContent();
+  if (current.isCorrupted) {
+    throw new CorruptedContentError();
+  }
+  if (current.content.revision !== previousRevision) {
+    throw new RevisionConflictError();
+  }
+
+  const nextRevision = crypto.randomBytes(16).toString("hex");
+  const nextContent: SiteContent = structuredClone(current.content);
+  nextContent.revision = nextRevision;
+  nextContent.updatedAt = new Date().toISOString();
+  if (!nextContent.media) {
+    nextContent.media = {};
+  }
+  nextContent.media[newMedia.imageId] = newMedia;
+
+  if (location === "showreel_cover") {
+    nextContent.home.showreel.coverImageId = newMedia.imageId;
+  } else if (location === "duo") {
+    nextContent.home.duo.imageId = newMedia.imageId;
+  } else if (location === "portrait_ludovic") {
+    const member = nextContent.studio.team.members.find((m) => m.id === "ludovic");
+    if (!member) {
+      throw new ValidationError("Membre studio 'ludovic' introuvable.");
+    }
+    member.imageId = newMedia.imageId;
+  } else if (location === "portrait_maxime") {
+    const member = nextContent.studio.team.members.find((m) => m.id === "maxime");
+    if (!member) {
+      throw new ValidationError("Membre studio 'maxime' introuvable.");
+    }
+    member.imageId = newMedia.imageId;
+  } else {
+    throw new ValidationError(`Emplacement média non supporté: ${String(location)}`);
+  }
+
+  const filePath = getSiteContentFilePath();
+  atomicWriteJson(filePath, nextContent);
+  return { newRevision: nextRevision, content: nextContent };
+}
+
+export function saveSiteMediaRevert(
+  location: AdminUploadLocation,
+  previousRevision: string
+): { newRevision: string; content: SiteContent; defaultImageId: string } {
+  const current = getRawSiteContent();
+  if (current.isCorrupted) {
+    throw new CorruptedContentError();
+  }
+  if (current.content.revision !== previousRevision) {
+    throw new RevisionConflictError();
+  }
+
+  const defaultImageId = DEFAULT_LOCATION_IMAGES[location];
+  if (!defaultImageId) {
+    throw new ValidationError(`Emplacement média non supporté: ${String(location)}`);
+  }
+
+  const nextRevision = crypto.randomBytes(16).toString("hex");
+  const nextContent: SiteContent = structuredClone(current.content);
+  nextContent.revision = nextRevision;
+  nextContent.updatedAt = new Date().toISOString();
+
+  if (location === "showreel_cover") {
+    nextContent.home.showreel.coverImageId = defaultImageId;
+  } else if (location === "duo") {
+    nextContent.home.duo.imageId = defaultImageId;
+  } else if (location === "portrait_ludovic") {
+    const member = nextContent.studio.team.members.find((m) => m.id === "ludovic");
+    if (!member) {
+      throw new ValidationError("Membre studio 'ludovic' introuvable.");
+    }
+    member.imageId = defaultImageId;
+  } else if (location === "portrait_maxime") {
+    const member = nextContent.studio.team.members.find((m) => m.id === "maxime");
+    if (!member) {
+      throw new ValidationError("Membre studio 'maxime' introuvable.");
+    }
+    member.imageId = defaultImageId;
+  }
+
+  const filePath = getSiteContentFilePath();
+  atomicWriteJson(filePath, nextContent);
+  return { newRevision: nextRevision, content: nextContent, defaultImageId };
 }

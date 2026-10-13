@@ -19,10 +19,10 @@ import {
   ValidationError,
 } from "../../lib/site-content.server";
 import {
-  ALLOWED_IMAGE_MAP,
   type StudioContent,
-  type AllowedImageId,
+  type UploadedMediaMetadata,
 } from "../../lib/site-content.shared";
+import { ImageUploader } from "../../components/admin/ImageUploader";
 import styles from "./adminForms.module.css";
 
 export function meta() {
@@ -48,6 +48,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       studio: content.studio,
       revision: content.revision,
       isCorrupted,
+      media: content.media || {},
     },
     { headers: createAdminHeaders() }
   );
@@ -130,7 +131,7 @@ type ActionData = {
 };
 
 export default function AdminStudioPage() {
-  const { csrfToken, studio: initialStudio, revision: initialRevision, isCorrupted } =
+  const { csrfToken, studio: initialStudio, revision: initialRevision, isCorrupted, media: initialMedia } =
     useLoaderData<typeof loader>();
   const actionData = useActionData<ActionData>();
   const navigation = useNavigation();
@@ -139,6 +140,8 @@ export default function AdminStudioPage() {
   const [activeTab, setActiveTab] = useState<"fr" | "en">("fr");
   const [formData, setFormData] = useState<StudioContent>(initialStudio);
   const [currentRevision, setCurrentRevision] = useState<string>(initialRevision);
+  const [media, setMedia] = useState<Record<string, UploadedMediaMetadata>>(initialMedia || {});
+  const [isGlobalUploading, setIsGlobalUploading] = useState(false);
 
   useEffect(() => {
     if (actionData?.newRevision) {
@@ -166,8 +169,6 @@ export default function AdminStudioPage() {
       return clone;
     });
   };
-
-  const allowedImageOptions = Object.keys(ALLOWED_IMAGE_MAP) as AllowedImageId[];
 
   return (
     <div className={styles.container}>
@@ -378,38 +379,41 @@ export default function AdminStudioPage() {
                 </div>
 
                 <div className={`${styles.fieldGroup} ${styles.memberFieldSpaced}`}>
-                  <label className={styles.label} htmlFor={`member-img-${idx}`}>
-                    Photo du membre (référence autorisée)
+                  <label className={styles.label}>
+                    Photo du membre
                   </label>
-                  <div className={styles.imagePickerGroup}>
-                    <img
-                      src={ALLOWED_IMAGE_MAP[member.imageId]}
-                      alt={`Aperçu ${member.name}`}
-                      className={styles.imagePreview}
-                    />
-                    <select
-                      id={`member-img-${idx}`}
-                      className={styles.select}
-                      value={member.imageId}
-                      onChange={(e) => {
-                        const newMembers = [...formData.team.members];
-                        newMembers[idx] = {
-                          ...newMembers[idx],
-                          imageId: e.target.value as AllowedImageId,
-                        };
-                        setFormData({
-                          ...formData,
-                          team: { ...formData.team, members: newMembers },
-                        });
-                      }}
-                    >
-                      {allowedImageOptions.map((opt) => (
-                        <option key={opt} value={opt}>
-                          {opt} ({ALLOWED_IMAGE_MAP[opt]})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                  <ImageUploader
+                    csrfToken={csrfToken}
+                    revision={currentRevision}
+                    location={member.id === "ludovic" ? "portrait_ludovic" : "portrait_maxime"}
+                    currentImageId={member.imageId}
+                    mediaMetadata={media[member.imageId]}
+                    alt={member.imageAlt[activeTab]}
+                    disabled={isCorrupted || isSaving}
+                    isGlobalUploading={isGlobalUploading}
+                    setIsGlobalUploading={setIsGlobalUploading}
+                    onSuccess={(newRevision, newId, metadata) => {
+                      setCurrentRevision(newRevision);
+                      const newMembers = [...formData.team.members];
+                      newMembers[idx] = { ...newMembers[idx], imageId: newId };
+                      setFormData((prev) => ({
+                        ...prev,
+                        team: { ...prev.team, members: newMembers },
+                      }));
+                      setMedia((prev) => ({ ...prev, [newId]: metadata }));
+                    }}
+                    onRevertSuccess={(newRevision, defaultId) => {
+                      setCurrentRevision(newRevision);
+                      const newMembers = [...formData.team.members];
+                      newMembers[idx] = { ...newMembers[idx], imageId: defaultId };
+                      setFormData((prev) => ({
+                        ...prev,
+                        team: { ...prev.team, members: newMembers },
+                      }));
+                    }}
+                    label={`Portrait de ${member.name}`}
+                    aspect="portrait"
+                  />
                 </div>
 
                 <div className={styles.fieldGroup}>
@@ -486,8 +490,16 @@ export default function AdminStudioPage() {
             <span className={styles.labelHint}>
               Modifications prêtes à être sauvegardées sur le serveur
             </span>
-            <button type="submit" disabled={isSaving} className={styles.saveButton}>
-              {isSaving ? "Enregistrement en cours..." : "Enregistrer la page Studio"}
+            <button
+              type="submit"
+              disabled={isSaving || isCorrupted || isGlobalUploading}
+              className={styles.saveButton}
+            >
+              {isSaving
+                ? "Enregistrement en cours..."
+                : isGlobalUploading
+                  ? "Import d'image en cours..."
+                  : "Enregistrer la page Studio"}
             </button>
           </div>
         </Form>

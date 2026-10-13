@@ -16,4 +16,8 @@ export default [
   route("admin/home", "routes/admin/home.tsx"),
   route("admin/studio", "routes/admin/studio.tsx"),
   route("admin/logout", "routes/admin/logout.tsx"),
+
+  // Media API & Public variants serving
+  route("api/admin/media-upload", "routes/api/admin-media-upload.ts"),
+  route("media/site/:location/:imageId/:variant/:ext", "routes/media/site-variant.ts"),
 ] satisfies RouteConfig;

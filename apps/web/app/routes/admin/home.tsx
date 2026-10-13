@@ -19,10 +19,10 @@ import {
   ValidationError,
 } from "../../lib/site-content.server";
 import {
-  ALLOWED_IMAGE_MAP,
   type HomeContent,
-  type AllowedImageId,
+  type UploadedMediaMetadata,
 } from "../../lib/site-content.shared";
+import { ImageUploader } from "../../components/admin/ImageUploader";
 import styles from "./adminForms.module.css";
 
 export function meta() {
@@ -48,6 +48,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       home: content.home,
       revision: content.revision,
       isCorrupted,
+      media: content.media || {},
     },
     { headers: createAdminHeaders() }
   );
@@ -130,7 +131,7 @@ type ActionData = {
 };
 
 export default function AdminHomePage() {
-  const { csrfToken, home: initialHome, revision: initialRevision, isCorrupted } =
+  const { csrfToken, home: initialHome, revision: initialRevision, isCorrupted, media: initialMedia } =
     useLoaderData<typeof loader>();
   const actionData = useActionData<ActionData>();
   const navigation = useNavigation();
@@ -139,6 +140,8 @@ export default function AdminHomePage() {
   const [activeTab, setActiveTab] = useState<"fr" | "en">("fr");
   const [formData, setFormData] = useState<HomeContent>(initialHome);
   const [currentRevision, setCurrentRevision] = useState<string>(initialRevision);
+  const [media, setMedia] = useState<Record<string, UploadedMediaMetadata>>(initialMedia || {});
+  const [isGlobalUploading, setIsGlobalUploading] = useState(false);
 
   useEffect(() => {
     if (actionData?.newRevision) {
@@ -166,8 +169,6 @@ export default function AdminHomePage() {
       return clone;
     });
   };
-
-  const allowedImageOptions = Object.keys(ALLOWED_IMAGE_MAP) as AllowedImageId[];
 
   return (
     <div className={styles.container}>
@@ -338,36 +339,37 @@ export default function AdminHomePage() {
               />
             </div>
             <div className={styles.fieldGroup}>
-              <label className={styles.label} htmlFor="showreel-image">
-                Image de couverture (référence autorisée)
+              <label className={styles.label}>
+                Image de couverture du showreel
               </label>
-              <div className={styles.imagePickerGroup}>
-                <img
-                  src={ALLOWED_IMAGE_MAP[formData.showreel.coverImageId]}
-                  alt="Aperçu showreel"
-                  className={styles.imagePreview}
-                />
-                <select
-                  id="showreel-image"
-                  className={styles.select}
-                  value={formData.showreel.coverImageId}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      showreel: {
-                        ...formData.showreel,
-                        coverImageId: e.target.value as AllowedImageId,
-                      },
-                    })
-                  }
-                >
-                  {allowedImageOptions.map((opt) => (
-                    <option key={opt} value={opt}>
-                      {opt} ({ALLOWED_IMAGE_MAP[opt]})
-                    </option>
-                  ))}
-                </select>
-              </div>
+              <ImageUploader
+                csrfToken={csrfToken}
+                revision={currentRevision}
+                location="showreel_cover"
+                currentImageId={formData.showreel.coverImageId}
+                mediaMetadata={media[formData.showreel.coverImageId]}
+                alt={formData.showreel.coverImageAlt[activeTab]}
+                disabled={isCorrupted || isSaving}
+                isGlobalUploading={isGlobalUploading}
+                setIsGlobalUploading={setIsGlobalUploading}
+                onSuccess={(newRevision, newId, metadata) => {
+                  setCurrentRevision(newRevision);
+                  setFormData((prev) => ({
+                    ...prev,
+                    showreel: { ...prev.showreel, coverImageId: newId },
+                  }));
+                  setMedia((prev) => ({ ...prev, [newId]: metadata }));
+                }}
+                onRevertSuccess={(newRevision, defaultId) => {
+                  setCurrentRevision(newRevision);
+                  setFormData((prev) => ({
+                    ...prev,
+                    showreel: { ...prev.showreel, coverImageId: defaultId },
+                  }));
+                }}
+                label="Couverture du showreel"
+                aspect="hero"
+              />
             </div>
             <div className={styles.fieldGroup}>
               <label className={styles.label} htmlFor="showreel-alt">
@@ -431,33 +433,37 @@ export default function AdminHomePage() {
               />
             </div>
             <div className={styles.fieldGroup}>
-              <label className={styles.label} htmlFor="duo-image">
-                Photo du duo (référence autorisée)
+              <label className={styles.label}>
+                Photo du duo Maxime & Ludovic
               </label>
-              <div className={styles.imagePickerGroup}>
-                <img
-                  src={ALLOWED_IMAGE_MAP[formData.duo.imageId]}
-                  alt="Aperçu duo"
-                  className={styles.imagePreview}
-                />
-                <select
-                  id="duo-image"
-                  className={styles.select}
-                  value={formData.duo.imageId}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      duo: { ...formData.duo, imageId: e.target.value as AllowedImageId },
-                    })
-                  }
-                >
-                  {allowedImageOptions.map((opt) => (
-                    <option key={opt} value={opt}>
-                      {opt} ({ALLOWED_IMAGE_MAP[opt]})
-                    </option>
-                  ))}
-                </select>
-              </div>
+              <ImageUploader
+                csrfToken={csrfToken}
+                revision={currentRevision}
+                location="duo"
+                currentImageId={formData.duo.imageId}
+                mediaMetadata={media[formData.duo.imageId]}
+                alt={formData.duo.imageAlt[activeTab]}
+                disabled={isCorrupted || isSaving}
+                isGlobalUploading={isGlobalUploading}
+                setIsGlobalUploading={setIsGlobalUploading}
+                onSuccess={(newRevision, newId, metadata) => {
+                  setCurrentRevision(newRevision);
+                  setFormData((prev) => ({
+                    ...prev,
+                    duo: { ...prev.duo, imageId: newId },
+                  }));
+                  setMedia((prev) => ({ ...prev, [newId]: metadata }));
+                }}
+                onRevertSuccess={(newRevision, defaultId) => {
+                  setCurrentRevision(newRevision);
+                  setFormData((prev) => ({
+                    ...prev,
+                    duo: { ...prev.duo, imageId: defaultId },
+                  }));
+                }}
+                label="Photo du duo Maxime & Ludovic"
+                aspect="standard"
+              />
             </div>
             <div className={styles.fieldGroup}>
               <label className={styles.label} htmlFor="duo-alt">
@@ -707,8 +713,16 @@ export default function AdminHomePage() {
             <span className={styles.labelHint}>
               Modifications prêtes à être sauvegardées sur le serveur
             </span>
-            <button type="submit" disabled={isSaving} className={styles.saveButton}>
-              {isSaving ? "Enregistrement en cours..." : "Enregistrer la page d'accueil"}
+            <button
+              type="submit"
+              disabled={isSaving || isCorrupted || isGlobalUploading}
+              className={styles.saveButton}
+            >
+              {isSaving
+                ? "Enregistrement en cours..."
+                : isGlobalUploading
+                  ? "Import d'image en cours..."
+                  : "Enregistrer la page d'accueil"}
             </button>
           </div>
         </Form>
