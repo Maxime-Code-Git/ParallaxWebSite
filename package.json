@@ -23,7 +23,8 @@
     "test": "npm run test --workspaces --if-present",
     "start": "HOST=127.0.0.1 npm run start --workspace=apps/web",
     "preview:local": "npm run preview:local --workspace=apps/web",
-    "admin:hash": "npm run admin:hash --workspace=apps/web"
+    "admin:hash": "npm run admin:hash --workspace=apps/web",
+    "gallery:setup": "node scripts/gallery-setup.js"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
