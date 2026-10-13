@@ -10,32 +10,65 @@ import {
 } from "../app/lib/auth.server";
 import { commitSession, getSession } from "../app/lib/session.server";
 
-vi.mock("../app/lib/env.server", () => ({
-  ENV: {
-    ADMIN_PASSWORD_HASH: "$argon2id$v=19$m=19456,t=2,p=1$placeholder",
-    ADMIN_SESSION_SECRET: "mock-session-secret-at-least-32-chars-long",
-    PUBLIC_SITE_URL: "http://localhost:3000",
-  },
-}));
+let mockHash: string | undefined = "$argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHQ$c29tZWhhc2g";
+let mockSecret: string | undefined = "mock-session-secret-at-least-32-chars-long";
+let mockRateLimitSecret: string | undefined = "mock-rate-limit-secret-32-chars-long!";
+let mockRateLimitDbPath: string | undefined = "/tmp/rate-limit.sqlite";
+
+vi.mock("../app/lib/env.server", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../app/lib/env.server")>();
+  return {
+    ...actual,
+    ENV: {
+      get ADMIN_PASSWORD_HASH(): string | undefined {
+        return mockHash;
+      },
+      get ADMIN_SESSION_SECRET(): string | undefined {
+        return mockSecret;
+      },
+      get RATE_LIMIT_SECRET(): string {
+        return mockRateLimitSecret ?? "mock-rate-limit-secret-32-chars-long!";
+      },
+      get RATE_LIMIT_DB_PATH(): string {
+        return mockRateLimitDbPath ?? "/tmp/rate-limit.sqlite";
+      },
+      get PUBLIC_SITE_URL(): string {
+        return "http://localhost:3000";
+      },
+      get TRUST_PROXY(): boolean {
+        return false;
+      },
+    },
+    validateAdminConfig: () => {
+      if (!mockHash || !mockSecret || mockSecret.length < 32 || !mockHash.startsWith("$argon2id$")) {
+        throw new Error("Invalid admin config mock");
+      }
+      return {
+        hash: mockHash,
+        sessionSecret: mockSecret,
+        rateLimitSecret: mockRateLimitSecret ?? "mock-rate-limit-secret-32-chars-long!",
+        rateLimitDbPath: mockRateLimitDbPath ?? "/tmp/rate-limit.sqlite",
+        siteUrl: "http://localhost:3000",
+        trustProxy: false,
+      };
+    },
+  };
+});
 
 describe("auth.server.ts", () => {
-  const originalEnv = process.env;
-
   beforeEach(() => {
-    vi.clearAllMocks();
-    process.env = { ...originalEnv };
+    mockHash = "$argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHQ$c29tZWhhc2g";
+    mockSecret = "mock-session-secret-at-least-32-chars-long";
+    mockRateLimitSecret = "mock-rate-limit-secret-32-chars-long!";
+    mockRateLimitDbPath = "/tmp/rate-limit.sqlite";
   });
 
   afterEach(() => {
-    process.env = originalEnv;
+    vi.restoreAllMocks();
   });
 
-  it("getAdminConfig throws 503 response if hash or secret is missing", async () => {
-    const { ENV } = await import("../app/lib/env.server");
-    const originalHash = ENV.ADMIN_PASSWORD_HASH;
-
-    // @ts-expect-error Mocking readonly property
-    ENV.ADMIN_PASSWORD_HASH = undefined;
+  it("getAdminConfig throws 503 response if hash or secret is missing", () => {
+    mockHash = undefined;
 
     try {
       getAdminConfig();
@@ -46,28 +79,18 @@ describe("auth.server.ts", () => {
       expect(res.status).toBe(503);
       expect(res.headers.get("Cache-Control")).toContain("no-store");
       expect(res.headers.get("X-Robots-Tag")).toBe("noindex, nofollow");
-    } finally {
-      // @ts-expect-error Restoring property
-      ENV.ADMIN_PASSWORD_HASH = originalHash;
     }
   });
 
-  it("computeCredentialVersion returns deterministic token and changes when secret changes", async () => {
+  it("computeCredentialVersion returns deterministic token and changes when secret changes", () => {
     const version1 = computeCredentialVersion();
     const version2 = computeCredentialVersion();
     expect(version1).toBe(version2);
     expect(version1.length).toBe(32);
 
-    const { ENV } = await import("../app/lib/env.server");
-    const originalSecret = ENV.ADMIN_SESSION_SECRET;
-
-    // @ts-expect-error Mocking property
-    ENV.ADMIN_SESSION_SECRET = "another-different-secret-32-chars-long!!";
+    mockSecret = "another-different-secret-32-chars-long!!";
     const version3 = computeCredentialVersion();
     expect(version3).not.toBe(version1);
-
-    // @ts-expect-error Restoring property
-    ENV.ADMIN_SESSION_SECRET = originalSecret;
   });
 
   it("constantTimeEqual accurately compares strings of equal and unequal length", () => {
@@ -91,17 +114,15 @@ describe("auth.server.ts", () => {
       parallelism: 1,
     });
 
-    const { ENV } = await import("../app/lib/env.server");
-    const originalHash = ENV.ADMIN_PASSWORD_HASH;
-
-    // @ts-expect-error Mocking property
-    ENV.ADMIN_PASSWORD_HASH = realHash;
+    mockHash = realHash;
 
     expect(await verifyAdminPassword(rawPassword)).toBe(true);
     expect(await verifyAdminPassword("WrongPassword123")).toBe(false);
+  });
 
-    // @ts-expect-error Restoring property
-    ENV.ADMIN_PASSWORD_HASH = originalHash;
+  it("verifyAdminPassword throws error on cryptographic failure rather than returning false", async () => {
+    mockHash = "$argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHQ$invalid_corrupted_hash";
+    await expect(verifyAdminPassword("SomePassword123")).rejects.toThrow();
   });
 
   it("requireAdminSession rejects unauthenticated, expired or credential-rotated session", async () => {

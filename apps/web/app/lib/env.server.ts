@@ -1,7 +1,9 @@
 import * as path from "node:path";
 import * as os from "node:os";
 import * as fs from "node:fs";
-import "../../../../scripts/env-loader.js";
+import { getMonorepoRoot } from "../../../../scripts/env-loader.js";
+
+export const ARGON2ID_HASH_REGEX = /^\$argon2id\$v=\d+\$m=\d+,t=\d+,p=\d+\$[A-Za-z0-9+/=]+\$[A-Za-z0-9+/=]+$/;
 
 export function requireEnvVar(name: string): string {
   const value = process.env[name];
@@ -11,22 +13,60 @@ export function requireEnvVar(name: string): string {
   return value;
 }
 
+function checkNoSymlinksInPath(filePath: string, name: string): void {
+  const resolved = path.resolve(filePath);
+  const parts = resolved.split(path.sep).filter(Boolean);
+
+  let startIndex = 0;
+  if (process.platform === "darwin" && parts.length > 0) {
+    if (["var", "tmp", "etc"].includes(parts[0])) {
+      startIndex = 1;
+    }
+  }
+
+  let currentPath = path.isAbsolute(resolved) ? path.sep : "";
+  for (let i = 0; i < parts.length; i++) {
+    currentPath = path.join(currentPath, parts[i]);
+    if (i >= startIndex) {
+      try {
+        const lstat = fs.lstatSync(currentPath);
+        if (lstat.isSymbolicLink()) {
+          throw new Error(`CRITICAL: Le composant ${currentPath} de ${name} ne doit pas etre un lien symbolique.`);
+        }
+      } catch (err: unknown) {
+        if (err && typeof err === "object" && "code" in err && (err as { code: unknown }).code === "ENOENT") {
+          break;
+        }
+        if (err instanceof Error && err.message.startsWith("CRITICAL:")) {
+          throw err;
+        }
+        throw new Error(`CRITICAL: Erreur d'acces a ${currentPath} pour ${name}: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
+      }
+    }
+  }
+}
+
 function validateTestPath(val: string | undefined, name: string): string {
   if (!val) {
     throw new Error(`CRITICAL: ${name} est requise en mode test.`);
   }
+  if (!path.isAbsolute(val)) {
+    throw new Error(`CRITICAL: ${name} doit etre un chemin absolu.`);
+  }
+
+  checkNoSymlinksInPath(val, name);
+
   const resolved = path.resolve(val);
   const tmp = fs.realpathSync(os.tmpdir());
   let realResolved = resolved;
   try {
     realResolved = fs.realpathSync(resolved);
   } catch {
-    // If resolved does not exist yet, resolve parent
     const parent = path.dirname(resolved);
     try {
       realResolved = path.join(fs.realpathSync(parent), path.basename(resolved));
     } catch {
-      // Keep resolved
+      // Use resolved as-is if parent doesn't exist yet
     }
   }
 
@@ -35,25 +75,48 @@ function validateTestPath(val: string | undefined, name: string): string {
     throw new Error(`CRITICAL: ${name} doit se trouver sous os.tmpdir() dans les tests.`);
   }
 
-  const forbiddenDirs = ["public", "build", "app"].map((d) => path.join(process.cwd(), d));
-  for (const fDir of forbiddenDirs) {
-    let realFDir = fDir;
-    try {
-      realFDir = fs.realpathSync(fDir);
-    } catch {
-      // Ignored
-    }
-    const rel = path.relative(realFDir, realResolved);
-    if (!rel.startsWith("..") && !path.isAbsolute(rel)) {
-      throw new Error(`CRITICAL: ${name} ne doit pas etre sous ${fDir} dans les tests.`);
-    }
+  const repoRoot = getMonorepoRoot();
+  let realRepoRoot = repoRoot;
+  try {
+    realRepoRoot = fs.realpathSync(repoRoot);
+  } catch {
+    // Ignored
   }
+
+  const relRepo = path.relative(realRepoRoot, realResolved);
+  if (!relRepo.startsWith("..") && !path.isAbsolute(relRepo)) {
+    throw new Error(`CRITICAL: ${name} ne doit pas se trouver dans le depot du projet.`);
+  }
+
   return resolved;
 }
 
-function validateProductionPath(val: string, name: string): string {
+function validateStoragePath(val: string | undefined, name: string): string {
+  if (!val) {
+    throw new Error(`CRITICAL: La variable d'environnement ${name} est obligatoire.`);
+  }
   if (!path.isAbsolute(val)) {
     throw new Error(`CRITICAL: La variable d'environnement ${name} doit etre un chemin absolu.`);
+  }
+
+  checkNoSymlinksInPath(val, name);
+
+  const resolved = path.resolve(val);
+  const repoRoot = getMonorepoRoot();
+  let realRepoRoot = repoRoot;
+  try {
+    realRepoRoot = fs.realpathSync(repoRoot);
+  } catch {
+    // Ignored
+  }
+
+  const relResolved = path.relative(repoRoot, resolved);
+  const relReal = path.relative(realRepoRoot, resolved);
+  if (
+    (!relResolved.startsWith("..") && !path.isAbsolute(relResolved)) ||
+    (!relReal.startsWith("..") && !path.isAbsolute(relReal))
+  ) {
+    throw new Error(`CRITICAL: ${name} ne doit pas se trouver dans le depot du projet.`);
   }
 
   let realPathToCheck: string;
@@ -70,7 +133,6 @@ function validateProductionPath(val: string, name: string): string {
     realPathToCheck = fs.realpathSync(val);
   } catch (err: unknown) {
     if (err && typeof err === "object" && "code" in err && (err as { code: unknown }).code === "ENOENT") {
-      // Does not exist yet, check parent
       const parentDir = path.dirname(val);
       try {
         const parentLstat = fs.lstatSync(parentDir);
@@ -108,19 +170,9 @@ function validateProductionPath(val: string, name: string): string {
     }
   }
 
-  // Ensure path is not inside public, build, or source directories
-  const forbiddenDirs = ["public", "build", "app"].map((d) => path.join(process.cwd(), d));
-  for (const fDir of forbiddenDirs) {
-    let realFDir = fDir;
-    try {
-      realFDir = fs.realpathSync(fDir);
-    } catch {
-      // Ignored
-    }
-    const rel = path.relative(realFDir, realPathToCheck);
-    if (!rel.startsWith("..") && !path.isAbsolute(rel)) {
-      throw new Error(`CRITICAL: ${name} ne doit pas etre sous les dossiers public ou build.`);
-    }
+  const rel = path.relative(realRepoRoot, realPathToCheck);
+  if (!rel.startsWith("..") && !path.isAbsolute(rel)) {
+    throw new Error(`CRITICAL: ${name} ne doit pas se trouver dans le depot du projet.`);
   }
 
   return val;
@@ -152,8 +204,8 @@ export const ENV = {
 
   get ADMIN_PASSWORD_HASH(): string | undefined {
     const val = process.env.ADMIN_PASSWORD_HASH;
-    if (val && !val.startsWith("$argon2id$")) {
-      throw new Error("CRITICAL: ADMIN_PASSWORD_HASH doit utiliser le format Argon2id ($argon2id$).");
+    if (val && !ARGON2ID_HASH_REGEX.test(val)) {
+      throw new Error("CRITICAL: ADMIN_PASSWORD_HASH doit utiliser le format standard Argon2id ($argon2id$v=...$m=...,t=...,p=...$salt$hash).");
     }
     return val;
   },
@@ -175,29 +227,76 @@ export const ENV = {
   },
 
   get RATE_LIMIT_DB_PATH(): string {
-    const isProd = process.env.NODE_ENV === "production";
     const isTest = process.env.NODE_ENV === "test";
     const val = process.env.RATE_LIMIT_DB_PATH;
-
-    if (isProd) {
-      if (!val) {
-        throw new Error("CRITICAL: RATE_LIMIT_DB_PATH est obligatoire en production.");
-      }
-      return validateProductionPath(val, "RATE_LIMIT_DB_PATH");
-    }
 
     if (isTest) {
       return validateTestPath(val, "RATE_LIMIT_DB_PATH");
     }
 
-    if (val) {
-      return validateProductionPath(val, "RATE_LIMIT_DB_PATH");
-    }
-
-    return path.resolve("./data/rate-limit.sqlite");
+    return validateStoragePath(val, "RATE_LIMIT_DB_PATH");
   },
 
   get TRUST_PROXY(): boolean {
     return process.env.TRUST_PROXY === "true";
   },
 };
+
+export interface AdminConfig {
+  hash: string;
+  sessionSecret: string;
+  rateLimitSecret: string;
+  rateLimitDbPath: string;
+  siteUrl: string;
+  trustProxy: boolean;
+}
+
+export function validateAdminConfig(): AdminConfig {
+  const siteUrl = ENV.PUBLIC_SITE_URL;
+
+  const hash = process.env.ADMIN_PASSWORD_HASH;
+  if (!hash || !ARGON2ID_HASH_REGEX.test(hash)) {
+    throw new Error("CRITICAL: ADMIN_PASSWORD_HASH est manquant ou ne respecte pas le format Argon2id standard.");
+  }
+
+  const sessionSecret = process.env.ADMIN_SESSION_SECRET;
+  if (!sessionSecret || sessionSecret.length < 32) {
+    throw new Error("CRITICAL: ADMIN_SESSION_SECRET est manquant ou comporte moins de 32 caracteres.");
+  }
+
+  const rateLimitSecret = process.env.RATE_LIMIT_SECRET;
+  if (!rateLimitSecret || rateLimitSecret.length < 32) {
+    throw new Error("CRITICAL: RATE_LIMIT_SECRET est manquant ou comporte moins de 32 caracteres.");
+  }
+
+  if (sessionSecret === rateLimitSecret) {
+    throw new Error("CRITICAL: ADMIN_SESSION_SECRET et RATE_LIMIT_SECRET doivent obligatoirement etre distincts.");
+  }
+
+  const rateLimitDbPath = ENV.RATE_LIMIT_DB_PATH;
+
+  const trustProxyRaw = process.env.TRUST_PROXY;
+  if (trustProxyRaw !== undefined && trustProxyRaw !== "true" && trustProxyRaw !== "false") {
+    throw new Error("CRITICAL: TRUST_PROXY doit valoir explicitement 'true' ou 'false' s'il est defini.");
+  }
+
+  return {
+    hash,
+    sessionSecret,
+    rateLimitSecret,
+    rateLimitDbPath,
+    siteUrl,
+    trustProxy: trustProxyRaw === "true",
+  };
+}
+
+let hasValidatedProduction = false;
+export function validateServerStartup(): void {
+  if (hasValidatedProduction) {
+    return;
+  }
+  if (process.env.NODE_ENV === "production" && !process.env.VITEST) {
+    validateAdminConfig();
+    hasValidatedProduction = true;
+  }
+}

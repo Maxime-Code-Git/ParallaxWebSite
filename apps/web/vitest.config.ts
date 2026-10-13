@@ -14,12 +14,20 @@ export default defineConfig({
         "../../packages/shared/src/index.ts"
       ),
       "~": path.resolve(__dirname, "app"),
+      react: path.resolve(__dirname, "node_modules/react"),
+      "react-dom": path.resolve(__dirname, "node_modules/react-dom"),
     },
+    dedupe: ["react", "react-dom", "react-router"],
   },
   test: {
     environment: "jsdom",
     globals: true,
     setupFiles: ["./tests/setup.ts"],
     include: ["tests/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}"],
+    server: {
+      deps: {
+        inline: ["react", "react-dom", "react-router"],
+      },
+    },
   },
 });

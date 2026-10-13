@@ -1,34 +1,34 @@
 import { verify } from "@node-rs/argon2";
 import * as crypto from "node:crypto";
-import { ENV } from "./env.server";
+import { validateAdminConfig } from "./env.server";
 import { getSession } from "./session.server";
 
 export const MAX_ADMIN_PASSWORD_LENGTH = 256;
 
 /**
  * Validates and retrieves the admin configuration safely.
- * Intended to be called ONLY on /admin routes.
- * Throws a 503 Response if configuration is missing or invalid.
+ * Intended to be called on /admin routes.
+ * Throws a 503 Response if configuration is missing, incomplete, or invalid.
  */
-export function getAdminConfig() {
-  const hash = ENV.ADMIN_PASSWORD_HASH;
-  const secret = ENV.ADMIN_SESSION_SECRET;
-
-  if (!hash || !hash.startsWith("$argon2id$") || !secret || secret.length < 32) {
+export function getAdminConfig(): { hash: string; secret: string } {
+  try {
+    const config = validateAdminConfig();
+    return { hash: config.hash, secret: config.sessionSecret };
+  } catch {
     throw new Response(
-      "Administration temporairement indisponible.\nLa configuration administrateur est incomplete.",
+      "Service d'administration temporairement indisponible.\nLa configuration administrateur est incomplete ou invalide.",
       {
         status: 503,
         headers: {
           "Content-Type": "text/plain; charset=utf-8",
-          "Cache-Control": "no-store, no-cache, must-revalidate",
+          "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+          "Pragma": "no-cache",
+          "Expires": "0",
           "X-Robots-Tag": "noindex, nofollow",
         },
       }
     );
   }
-
-  return { hash, secret };
 }
 
 /**
@@ -44,21 +44,23 @@ export function computeCredentialVersion(): string {
 
 /**
  * Verifies if the provided password matches the Argon2id hash securely.
+ * Rejects passwords exceeding 256 characters before Argon2 computation.
+ * Distinguishes bad password (returns false) from cryptographic/internal verification failure (throws).
  */
 export async function verifyAdminPassword(password: string): Promise<boolean> {
   if (typeof password !== "string" || !password) return false;
   if (password.length > MAX_ADMIN_PASSWORD_LENGTH) return false;
 
+  const { hash } = getAdminConfig();
   try {
-    const { hash } = getAdminConfig();
     return await verify(hash, password);
-  } catch {
-    return false; // Fail securely without leaking errors
+  } catch (err: unknown) {
+    throw new Error("Erreur cryptographique lors de la verification du mot de passe", { cause: err });
   }
 }
 
 /**
- * Helper to perform a constant-time string comparison to prevent timing attacks.
+ * Performs a constant-time string comparison to prevent timing attacks.
  */
 export function constantTimeEqual(a: string, b: string): boolean {
   try {
@@ -102,7 +104,6 @@ export async function requireAdminSession(request: Request) {
       return { isValid: false, session };
     }
   } catch {
-    // If computeCredentialVersion throws (e.g. config went invalid mid-session)
     return { isValid: false, session };
   }
 

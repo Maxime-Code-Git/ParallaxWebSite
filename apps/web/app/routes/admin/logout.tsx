@@ -2,6 +2,7 @@ import {
   redirect,
   type ActionFunctionArgs,
   type LoaderFunctionArgs,
+  type HeadersArgs,
 } from "react-router";
 import { requireAdminSession, constantTimeEqual } from "../../lib/auth.server";
 import { destroySession } from "../../lib/session.server";
@@ -19,6 +20,11 @@ export function meta() {
   ];
 }
 
+export function headers({ loaderHeaders, actionHeaders, errorHeaders }: HeadersArgs): Headers {
+  const baseHeaders = new Headers(errorHeaders ?? actionHeaders ?? loaderHeaders);
+  return createAdminHeaders(baseHeaders);
+}
+
 /**
  * GET /admin/logout is explicitly rejected with 405 Method Not Allowed.
  * No logout is performed on GET requests.
@@ -32,7 +38,8 @@ export async function loader(_args: LoaderFunctionArgs) {
 
 /**
  * POST /admin/logout processes protected logout:
- * Requires valid Origin, Content-Type, 8KB bounded body, and matching CSRF token.
+ * Requires valid Origin, Content-Type, 8KB bounded body, allowed fields (csrfToken only),
+ * an active valid authenticated admin session, and matching CSRF token.
  */
 export async function action({ request }: ActionFunctionArgs) {
   if (request.method !== "POST") {
@@ -50,10 +57,10 @@ export async function action({ request }: ActionFunctionArgs) {
     });
   }
 
-  // 2. Read strictly bounded body
+  // 2. Read strictly bounded body enforcing only csrfToken field
   let params: URLSearchParams;
   try {
-    params = await readStrictFormUrlEncoded(request, 8192);
+    params = await readStrictFormUrlEncoded(request, 8192, ["csrfToken"]);
   } catch (err: unknown) {
     if (err instanceof ActionSecurityError) {
       const headers = createAdminHeaders(new Headers(err.headers));
@@ -62,8 +69,18 @@ export async function action({ request }: ActionFunctionArgs) {
     return new Response("Bad Request", { status: 400, headers: createAdminHeaders() });
   }
 
-  // 3. Validate CSRF against session
-  const { session } = await requireAdminSession(request);
+  // 3. Require valid admin session prior to processing mutation
+  const { isValid, session } = await requireAdminSession(request);
+  if (!isValid) {
+    const headers = createAdminHeaders();
+    headers.set("Set-Cookie", await destroySession(session));
+    return new Response("Forbidden: Session invalide ou expiree", {
+      status: 403,
+      headers,
+    });
+  }
+
+  // 4. Validate CSRF against session
   const sessionCsrf = session.get("csrfToken") || "";
   const formCsrf = params.get("csrfToken") || "";
 
@@ -74,7 +91,7 @@ export async function action({ request }: ActionFunctionArgs) {
     });
   }
 
-  // 4. Destroy session and return 303 redirect
+  // 5. Destroy session and return 303 redirect
   const headers = createAdminHeaders();
   headers.set("Set-Cookie", await destroySession(session));
 

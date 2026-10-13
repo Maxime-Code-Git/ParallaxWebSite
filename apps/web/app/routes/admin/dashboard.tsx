@@ -1,5 +1,6 @@
 import {
   type LoaderFunctionArgs,
+  type HeadersArgs,
   Form,
   useLoaderData,
   useNavigation,
@@ -14,6 +15,11 @@ export function meta() {
     { title: "Tableau de bord | Administration Parallax" },
     { name: "robots", content: "noindex, nofollow" },
   ];
+}
+
+export function headers({ loaderHeaders, actionHeaders, errorHeaders }: HeadersArgs): Headers {
+  const baseHeaders = new Headers(errorHeaders ?? actionHeaders ?? loaderHeaders);
+  return createAdminHeaders(baseHeaders);
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -100,8 +106,7 @@ export default function AdminDashboardPage() {
           <h1 className={styles.brandTitle}>Administration Parallax</h1>
           <span className={styles.statusBadge}>Session active</span>
         </div>
-
-        <Form method="post" action="/admin/logout">
+        <Form method="post" action="/admin/logout" className={styles.logoutForm}>
           <input type="hidden" name="csrfToken" value={csrfToken} />
           <button
             type="submit"
@@ -113,23 +118,31 @@ export default function AdminDashboardPage() {
         </Form>
       </header>
 
-      <main className={styles.mainContent}>
-        <div className={styles.leadSection}>
-          <h2 className={styles.pageTitle}>Tableau de bord</h2>
-          <p className={styles.pageSubtitle}>
-            Socle d'administration initialise. Les modules de gestion editoriale et de galeries clients seront deployes au fil des lots suivants.
-          </p>
-        </div>
+      <main className={styles.main}>
+        <div className={styles.indicator} />
+        <h2 className={styles.sectionTitle}>Modules d'administration</h2>
+        <p className={styles.sectionDescription}>
+          Selectionnez un module pour administrer le contenu du site. Les fonctionnalites seront activees progressivement au fil des prochains lots.
+        </p>
 
         <div className={styles.grid}>
           {MODULES.map((mod) => (
-            <div key={mod.id} className={styles.card}>
-              <div>
-                <span className={styles.cardBadge}>{mod.status}</span>
+            <article key={mod.id} className={styles.card}>
+              <div className={styles.cardHeader}>
                 <h3 className={styles.cardTitle}>{mod.title}</h3>
-                <p className={styles.cardDescription}>{mod.description}</p>
+                <span className={styles.cardBadge}>{mod.status}</span>
               </div>
-            </div>
+              <p className={styles.cardDescription}>{mod.description}</p>
+              <div className={styles.cardFooter}>
+                <button
+                  type="button"
+                  disabled
+                  className={styles.cardActionDisabled}
+                >
+                  Indisponible dans ce lot
+                </button>
+              </div>
+            </article>
           ))}
         </div>
       </main>

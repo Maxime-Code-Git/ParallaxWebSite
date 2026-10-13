@@ -3,20 +3,31 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
+import { DatabaseSync } from "node:sqlite";
 import {
   checkRateLimit,
   resetRateLimit,
   closeRateLimitDatabase,
   RateLimitExceededError,
+  RateLimitStorageError,
 } from "../app/lib/rate-limit.server";
-import { ENV } from "../app/lib/env.server";
 
-vi.mock("../app/lib/env.server", () => ({
-  ENV: {
-    RATE_LIMIT_DB_PATH: "",
-    RATE_LIMIT_SECRET: "mock-rate-limit-secret-32-chars-long!",
-  },
-}));
+let mockDbPath = "";
+
+vi.mock("../app/lib/env.server", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../app/lib/env.server")>();
+  return {
+    ...actual,
+    ENV: {
+      get RATE_LIMIT_DB_PATH(): string {
+        return mockDbPath;
+      },
+      get RATE_LIMIT_SECRET(): string {
+        return "mock-rate-limit-secret-32-chars-long!";
+      },
+    },
+  };
+});
 
 describe("rate-limit.server.ts", () => {
   let tmpDir: string;
@@ -25,8 +36,7 @@ describe("rate-limit.server.ts", () => {
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "parallax-rate-limit-"));
     dbPath = path.join(tmpDir, "rate-limit.sqlite");
-    // @ts-expect-error Mocking for test
-    ENV.RATE_LIMIT_DB_PATH = dbPath;
+    mockDbPath = dbPath;
   });
 
   afterEach(() => {
@@ -52,7 +62,19 @@ describe("rate-limit.server.ts", () => {
     fs.symlinkSync(realDbPath, dbPath);
 
     expect(() => checkRateLimit("127.0.0.1", "admin")).toThrow(
-      "Le fichier de base rate-limit ne doit pas etre un lien symbolique"
+      "ne doit pas etre un lien symbolique"
+    );
+  });
+
+  it("refuses to initialize if an ancestor directory is a symlink", () => {
+    const realDir = path.join(tmpDir, "real_dir");
+    fs.mkdirSync(realDir, { mode: 0o700 });
+    const symlinkDir = path.join(tmpDir, "sym_dir");
+    fs.symlinkSync(realDir, symlinkDir);
+
+    mockDbPath = path.join(symlinkDir, "rate-limit.sqlite");
+    expect(() => checkRateLimit("127.0.0.1", "admin")).toThrow(
+      "ne doit pas etre un lien symbolique"
     );
   });
 
@@ -85,15 +107,47 @@ describe("rate-limit.server.ts", () => {
       checkRateLimit(testIp, "admin");
     }
 
-    // Close database connection
     closeRateLimitDatabase();
 
-    // Reopen and record 2 more attempts
     checkRateLimit(testIp, "admin");
     checkRateLimit(testIp, "admin");
 
-    // 6th attempt must fail
     expect(() => checkRateLimit(testIp, "admin")).toThrow(RateLimitExceededError);
+  });
+
+  it("verifies that raw client IP is NEVER stored in the database", () => {
+    const testIp = "203.0.113.42";
+    checkRateLimit(testIp, "admin");
+    closeRateLimitDatabase();
+
+    const rawDb = new DatabaseSync(dbPath);
+    const rows = rawDb.prepare("SELECT hash, timestamp FROM requests").all() as Array<{
+      hash: string;
+      timestamp: number;
+    }>;
+    rawDb.close();
+
+    expect(rows.length).toBe(1);
+    expect(rows[0].hash).toMatch(/^[a-f0-9]{64}$/);
+    expect(rows[0].hash).not.toContain(testIp);
+    expect(rows[0].hash).not.toContain("admin");
+  });
+
+  it("cleans up expired records outside the 15-minute sliding window", () => {
+    const testIp = "198.51.100.1";
+    checkRateLimit(testIp, "admin");
+    closeRateLimitDatabase();
+
+    // Manually age the recorded entry past 15 minutes (900_000 ms)
+    const rawDb = new DatabaseSync(dbPath);
+    const oldTimestamp = Date.now() - 16 * 60 * 1000;
+    rawDb.prepare("UPDATE requests SET timestamp = ?").run(oldTimestamp);
+    rawDb.close();
+
+    // Now record 4 more attempts: they must succeed because old one was purged
+    for (let i = 0; i < 4; i++) {
+      expect(() => checkRateLimit(testIp, "admin")).not.toThrow();
+    }
   });
 
   it("resetRateLimit successfully clears the rate limit counter", () => {
@@ -103,13 +157,31 @@ describe("rate-limit.server.ts", () => {
       checkRateLimit(testIp, "admin");
     }
 
-    // Rate limit is now exhausted
     expect(() => checkRateLimit(testIp, "admin")).toThrow(RateLimitExceededError);
 
-    // Reset rate limit (e.g. after successful login)
     resetRateLimit(testIp, "admin");
 
-    // Should immediately be allowed again
     expect(() => checkRateLimit(testIp, "admin")).not.toThrow();
+  });
+
+  it("throws RateLimitStorageError on database operational failures", () => {
+    // Point to a directory that cannot be created / accessed
+    mockDbPath = "/dev/null/impossible-path/db.sqlite";
+    expect(() => checkRateLimit("127.0.0.1", "admin")).toThrow(RateLimitStorageError);
+  });
+
+  it("protects auxiliary SQLite files (-wal, -shm) and rejects symlinks", () => {
+    // First initialize DB
+    checkRateLimit("127.0.0.1", "admin");
+    closeRateLimitDatabase();
+
+    const walPath = dbPath + "-wal";
+    const realAux = path.join(tmpDir, "real_aux");
+    fs.writeFileSync(realAux, "dummy");
+    fs.symlinkSync(realAux, walPath);
+
+    expect(() => checkRateLimit("127.0.0.1", "admin")).toThrow(
+      "Le fichier auxiliaire"
+    );
   });
 });

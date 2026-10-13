@@ -32,6 +32,19 @@ describe("session.server.ts", () => {
     expect(setCookie).toContain(`Max-Age=${SESSION_MAX_AGE_SECONDS}`);
   });
 
+  it("should set Secure flag when NODE_ENV is production", async () => {
+    const originalEnv = process.env.NODE_ENV;
+    try {
+      process.env.NODE_ENV = "production";
+      const session = await getSession();
+      session.set("csrfToken", "test-token");
+      const setCookie = await commitSession(session);
+      expect(setCookie).toContain("Secure");
+    } finally {
+      process.env.NODE_ENV = originalEnv;
+    }
+  });
+
   it("should store and retrieve session data accurately across cookie commits", async () => {
     const session = await getSession();
     session.set("adminId", "unique-admin-id");
@@ -55,12 +68,38 @@ describe("session.server.ts", () => {
     expect(retrievedSession.get("createdAt")).toBe(now);
   });
 
+  it("rejects tampered cookie signatures and returns empty session", async () => {
+    const session = await getSession();
+    session.set("adminId", "super-admin");
+    const setCookie = await commitSession(session);
+
+    const match = setCookie.match(/__parallax_admin_session=([^;]+)/);
+    expect(match).not.toBeNull();
+    const originalCookie = match![1];
+
+    // Alter the signature by changing characters
+    const tamperedCookie = originalCookie.slice(0, -4) + "XXXX";
+    const retrieved = await getSession(`__parallax_admin_session=${tamperedCookie}`);
+    expect(retrieved.has("adminId")).toBe(false);
+  });
+
+  it("supports anonymous session containing only csrfToken without adminId", async () => {
+    const session = await getSession();
+    session.set("csrfToken", "anon-csrf-token");
+    const setCookie = await commitSession(session);
+
+    const match = setCookie.match(/__parallax_admin_session=([^;]+)/);
+    const retrieved = await getSession(`__parallax_admin_session=${match![1]}`);
+    expect(retrieved.get("csrfToken")).toBe("anon-csrf-token");
+    expect(retrieved.has("adminId")).toBe(false);
+  });
+
   it("should output expired date when destroying a session", async () => {
     const session = await getSession();
     session.set("adminId", "admin-to-delete");
+    const setCookie = await destroySession(session);
 
-    const destroyed = await destroySession(session);
-    expect(destroyed).toContain("__parallax_admin_session=");
-    expect(destroyed).toContain("Expires=Thu, 01 Jan 1970 00:00:00 GMT");
+    expect(setCookie).toContain("__parallax_admin_session=");
+    expect(setCookie).toContain("Expires=Thu, 01 Jan 1970 00:00:00 GMT");
   });
 });

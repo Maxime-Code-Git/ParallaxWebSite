@@ -6,22 +6,30 @@ import {
   readStrictFormUrlEncoded,
   ActionSecurityError,
 } from "../app/lib/security.server";
-import { ENV } from "../app/lib/env.server";
 
-vi.mock("../app/lib/env.server", () => ({
-  ENV: {
-    PUBLIC_SITE_URL: "https://parallax.example.com",
-    TRUST_PROXY: true,
-  },
-}));
+let mockSiteUrl = "https://parallax.example.com";
+let mockTrustProxy = true;
+
+vi.mock("../app/lib/env.server", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../app/lib/env.server")>();
+  return {
+    ...actual,
+    ENV: {
+      get PUBLIC_SITE_URL(): string {
+        return mockSiteUrl;
+      },
+      get TRUST_PROXY(): boolean {
+        return mockTrustProxy;
+      },
+    },
+  };
+});
 
 describe("security.server.ts", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // @ts-expect-error Mocking property
-    ENV.PUBLIC_SITE_URL = "https://parallax.example.com";
-    // @ts-expect-error Mocking property
-    ENV.TRUST_PROXY = true;
+    mockSiteUrl = "https://parallax.example.com";
+    mockTrustProxy = true;
   });
 
   describe("validateOrigin", () => {
@@ -34,6 +42,44 @@ describe("security.server.ts", () => {
 
     it("rejects missing origin", () => {
       const req = new Request("https://parallax.example.com/admin");
+      expect(validateOrigin(req)).toBe(false);
+    });
+
+    it("rejects 'null' origin", () => {
+      const req = new Request("https://parallax.example.com/admin", {
+        headers: { Origin: "null" },
+      });
+      expect(validateOrigin(req)).toBe(false);
+    });
+
+    it("rejects origin with a pathname", () => {
+      const req = new Request("https://parallax.example.com/admin", {
+        headers: { Origin: "https://parallax.example.com/admin" },
+      });
+      expect(validateOrigin(req)).toBe(false);
+    });
+
+    it("rejects origin with credentials, query or fragment", () => {
+      const reqWithCreds = new Request("https://parallax.example.com/admin", {
+        headers: { Origin: "https://user:pass@parallax.example.com" },
+      });
+      expect(validateOrigin(reqWithCreds)).toBe(false);
+
+      const reqWithQuery = new Request("https://parallax.example.com/admin", {
+        headers: { Origin: "https://parallax.example.com?query=1" },
+      });
+      expect(validateOrigin(reqWithQuery)).toBe(false);
+
+      const reqWithHash = new Request("https://parallax.example.com/admin", {
+        headers: { Origin: "https://parallax.example.com#hash" },
+      });
+      expect(validateOrigin(reqWithHash)).toBe(false);
+    });
+
+    it("rejects multiple comma-separated origins", () => {
+      const req = new Request("https://parallax.example.com/admin", {
+        headers: { Origin: "https://parallax.example.com, https://other.example.com" },
+      });
       expect(validateOrigin(req)).toBe(false);
     });
 
@@ -98,8 +144,7 @@ describe("security.server.ts", () => {
     });
 
     it("ignores proxy headers when TRUST_PROXY is false and returns conservative 127.0.0.1", () => {
-      // @ts-expect-error Mocking property
-      ENV.TRUST_PROXY = false;
+      mockTrustProxy = false;
       const req = new Request("https://parallax.example.com", {
         headers: {
           "cf-connecting-ip": "1.2.3.4",
@@ -110,13 +155,13 @@ describe("security.server.ts", () => {
   });
 
   describe("readStrictFormUrlEncoded", () => {
-    it("accepts valid application/x-www-form-urlencoded body", async () => {
+    it("accepts valid application/x-www-form-urlencoded body with allowed fields", async () => {
       const req = new Request("https://parallax.example.com/admin", {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: "password=secret&csrfToken=token123",
       });
-      const params = await readStrictFormUrlEncoded(req);
+      const params = await readStrictFormUrlEncoded(req, 8192, ["password", "csrfToken"]);
       expect(params.get("password")).toBe("secret");
       expect(params.get("csrfToken")).toBe("token123");
     });
@@ -141,8 +186,20 @@ describe("security.server.ts", () => {
       });
     });
 
-    it("rejects invalid Content-Length with 400", async () => {
-      const req = new Request("https://parallax.example.com/admin", {
+    it("rejects invalid or empty Content-Length with 400", async () => {
+      const reqEmpty = new Request("https://parallax.example.com/admin", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "Content-Length": "",
+        },
+        body: "a=1",
+      });
+      await expect(readStrictFormUrlEncoded(reqEmpty)).rejects.toMatchObject({
+        status: 400,
+      });
+
+      const reqLetters = new Request("https://parallax.example.com/admin", {
         method: "POST",
         headers: {
           "Content-Type": "application/x-www-form-urlencoded",
@@ -150,7 +207,7 @@ describe("security.server.ts", () => {
         },
         body: "a=1",
       });
-      await expect(readStrictFormUrlEncoded(req)).rejects.toMatchObject({
+      await expect(readStrictFormUrlEncoded(reqLetters)).rejects.toMatchObject({
         status: 400,
       });
     });
@@ -178,7 +235,6 @@ describe("security.server.ts", () => {
         },
         body: bigPayload,
       });
-      // Delete Content-Length
       req.headers.delete("Content-Length");
 
       await expect(readStrictFormUrlEncoded(req, 8192)).rejects.toMatchObject({
@@ -193,8 +249,31 @@ describe("security.server.ts", () => {
         body: "password=pass1&password=pass2&csrfToken=tok",
       });
       await expect(readStrictFormUrlEncoded(req)).rejects.toThrowError(
-        new ActionSecurityError("Duplicate field not permitted", 400)
+        new ActionSecurityError("Duplicate field not permitted: password", 400)
       );
+    });
+
+    it("rejects unexpected fields when allowedFields is specified with 400", async () => {
+      const req = new Request("https://parallax.example.com/admin", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: "password=secret&csrfToken=token&extraField=malicious",
+      });
+      await expect(
+        readStrictFormUrlEncoded(req, 8192, ["password", "csrfToken"])
+      ).rejects.toThrowError(new ActionSecurityError("Unexpected field not permitted: extraField", 400));
+    });
+
+    it("rejects invalid UTF-8 encoding in payload with 400", async () => {
+      const invalidUtf8 = new Uint8Array([0xff, 0xfe, 0xfd]);
+      const req = new Request("https://parallax.example.com/admin", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: invalidUtf8,
+      });
+      await expect(readStrictFormUrlEncoded(req)).rejects.toMatchObject({
+        status: 400,
+      });
     });
   });
 });

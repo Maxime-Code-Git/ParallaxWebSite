@@ -1,97 +1,116 @@
 import { createInterface } from "node:readline";
 import * as argon2 from "@node-rs/argon2";
 
-if (process.argv.length > 2) {
-  console.error("Erreur : les arguments en ligne de commande sont strictement refuses par securite.");
-  process.exit(1);
-}
-
-if (!process.stdout.isTTY || !process.stdin.isTTY) {
-  console.error("Erreur : ce script necessite un terminal interactif (TTY).");
-  process.exit(1);
-}
-
-const rl = createInterface({
-  input: process.stdin,
-  output: process.stdout,
-});
-
-let isMuted = true;
-const defaultWrite = rl._writeToOutput.bind(rl);
-rl._writeToOutput = function customWrite(stringToWrite) {
-  if (isMuted) {
-    if (stringToWrite === "\r" || stringToWrite === "\n" || stringToWrite === "\r\n") {
-      process.stdout.write(stringToWrite);
-    } else {
-      process.stdout.write("*");
-    }
-  } else {
-    defaultWrite(stringToWrite);
-  }
+export const ARGON2_HASH_OPTIONS = {
+  algorithm: argon2.Algorithm.Argon2id,
+  memoryCost: 19456,
+  timeCost: 2,
+  parallelism: 1,
 };
 
-function askQuestion(query) {
+export function validatePasswordInput(password, confirmation) {
+  if (!password || typeof password !== "string") {
+    return { valid: false, error: "Le mot de passe est obligatoire." };
+  }
+  if (password.length < 12) {
+    return { valid: false, error: "Le mot de passe doit comporter au moins 12 caracteres." };
+  }
+  if (password.length > 256) {
+    return { valid: false, error: "Le mot de passe ne doit pas depasser 256 caracteres." };
+  }
+  if (password !== confirmation) {
+    return { valid: false, error: "Les mots de passe ne correspondent pas." };
+  }
+  return { valid: true };
+}
+
+export async function hashAdminPassword(password) {
+  return argon2.hash(password, ARGON2_HASH_OPTIONS);
+}
+
+function askMasked(rl, query) {
   return new Promise((resolve) => {
-    rl.question(query, (answer) => {
+    rl.muted = false;
+    process.stdout.write(query);
+    rl.muted = true;
+    rl.question("", (answer) => {
+      rl.muted = false;
+      process.stdout.write("\n");
       resolve(answer);
     });
   });
 }
 
-function restoreTerminal() {
-  isMuted = false;
-  rl.close();
-}
+export async function runCLI(input = process.stdin, output = process.stdout) {
+  if (process.argv.length > 2) {
+    console.error("Erreur : les arguments en ligne de commande sont strictement refuses par securite.");
+    process.exit(1);
+  }
 
-process.on("SIGINT", () => {
-  restoreTerminal();
-  console.log("\nOperation annulee.");
-  process.exit(130);
-});
+  if (!input.isTTY || !output.isTTY) {
+    console.error("Erreur : ce script necessite un terminal interactif (TTY).");
+    process.exit(1);
+  }
 
-async function run() {
+  const rl = createInterface({
+    input,
+    output,
+  });
+
+  rl.muted = false;
+  const originalWrite = rl._writeToOutput.bind(rl);
+  rl._writeToOutput = function customWrite(stringToWrite) {
+    if (rl.muted) {
+      if (stringToWrite === "\r" || stringToWrite === "\n" || stringToWrite === "\r\n") {
+        output.write(stringToWrite);
+      } else {
+        output.write("*");
+      }
+    } else {
+      originalWrite(stringToWrite);
+    }
+  };
+
+  const cleanup = () => {
+    rl.muted = false;
+    rl.close();
+  };
+
+  process.once("SIGINT", () => {
+    cleanup();
+    console.log("\nOperation annulee.");
+    process.exit(130);
+  });
+
   try {
-    const password = await askQuestion("Veuillez saisir le mot de passe administrateur : ");
-    console.log("");
+    const password = await askMasked(rl, "Veuillez saisir le mot de passe administrateur : ");
+    const confirmation = await askMasked(rl, "Veuillez confirmer le mot de passe : ");
 
-    if (!password) {
-      console.error("\nErreur : le mot de passe est obligatoire.");
-      restoreTerminal();
+    const validation = validatePasswordInput(password, confirmation);
+    if (!validation.valid) {
+      console.error(`\nErreur : ${validation.error}`);
+      cleanup();
       process.exit(1);
     }
 
-    if (password.length < 12) {
-      console.error("\nErreur : le mot de passe doit comporter au moins 12 caracteres.");
-      restoreTerminal();
-      process.exit(1);
-    }
+    cleanup();
 
-    const confirmation = await askQuestion("Veuillez confirmer le mot de passe : ");
-    console.log("");
-
-    if (password !== confirmation) {
-      console.error("\nErreur : les mots de passe ne correspondent pas.");
-      restoreTerminal();
-      process.exit(1);
-    }
-
-    restoreTerminal();
-
-    const hash = await argon2.hash(password, {
-      algorithm: argon2.Algorithm.Argon2id,
-      memoryCost: 19456,
-      timeCost: 2,
-      parallelism: 1,
-    });
+    const hash = await hashAdminPassword(password);
 
     console.log("\nADMIN_PASSWORD_HASH genere avec succes (Argon2id) :\n");
     console.log(hash);
     console.log("\nCopiez cette valeur dans votre fichier .env.local prive.");
   } catch {
-    restoreTerminal();
+    cleanup();
     console.error("\nUne erreur inattendue est survenue.");
     process.exit(1);
   }
 }
 
-run();
+import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
+
+// Only auto-run if executed directly as a script
+if (process.argv[1] && resolve(fileURLToPath(import.meta.url)) === resolve(process.argv[1])) {
+  runCLI();
+}

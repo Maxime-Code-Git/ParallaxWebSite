@@ -4,7 +4,9 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as fs from "node:fs";
 
-vi.mock("../../../scripts/env-loader.js", () => ({}));
+vi.mock("../../../scripts/env-loader.js", () => ({
+  getMonorepoRoot: () => path.resolve(__dirname, "../../.."),
+}));
 
 describe("Environment Validation (env.server.ts)", () => {
   const originalEnv = process.env;
@@ -45,13 +47,17 @@ describe("Environment Validation (env.server.ts)", () => {
     expect(ENV.PUBLIC_SITE_URL).toBe("https://parallax.studio");
   });
 
-  it("should validate ADMIN_PASSWORD_HASH format", async () => {
+  it("should validate standard Argon2id format for ADMIN_PASSWORD_HASH", async () => {
     process.env.ADMIN_PASSWORD_HASH = "$bcrypt$invalid";
     const { ENV } = await import("../app/lib/env.server");
     expect(() => ENV.ADMIN_PASSWORD_HASH).toThrow("Argon2id");
 
-    process.env.ADMIN_PASSWORD_HASH = "$argon2id$v=19$m=19456,t=2,p=1$valid";
-    expect(ENV.ADMIN_PASSWORD_HASH).toBe("$argon2id$v=19$m=19456,t=2,p=1$valid");
+    process.env.ADMIN_PASSWORD_HASH = "$argon2id$incomplete";
+    expect(() => ENV.ADMIN_PASSWORD_HASH).toThrow("Argon2id");
+
+    const validHash = "$argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHQ$c29tZWhhc2g";
+    process.env.ADMIN_PASSWORD_HASH = validHash;
+    expect(ENV.ADMIN_PASSWORD_HASH).toBe(validHash);
   });
 
   it("should validate ADMIN_SESSION_SECRET minimum length (32 chars)", async () => {
@@ -85,16 +91,15 @@ describe("Environment Validation (env.server.ts)", () => {
     expect(ENV.RATE_LIMIT_DB_PATH).toBe(validTestPath);
   });
 
-  it("should reject RATE_LIMIT_DB_PATH under forbidden directories (public/build)", async () => {
-    const tmpSub = fs.mkdtempSync(path.join(os.tmpdir(), "parallax-test-"));
-    process.env.RATE_LIMIT_DB_PATH = path.join(process.cwd(), "public", "rate-limit.sqlite");
+  it("should reject RATE_LIMIT_DB_PATH inside the repository in dev and prod", async () => {
+    const insideRepoPath = path.resolve(__dirname, "../../data/rate-limit.sqlite");
+    process.env.RATE_LIMIT_DB_PATH = insideRepoPath;
     process.env.NODE_ENV = "production";
     const { ENV } = await import("../app/lib/env.server");
-    expect(() => ENV.RATE_LIMIT_DB_PATH).toThrow("ne doit pas etre sous les dossiers public ou build");
-    fs.rmSync(tmpSub, { recursive: true, force: true });
+    expect(() => ENV.RATE_LIMIT_DB_PATH).toThrow("ne doit pas se trouver dans le depot");
   });
 
-  it("should reject symlink on RATE_LIMIT_DB_PATH", async () => {
+  it("should reject symlinks on the file or in ancestor components", async () => {
     const tmpSub = fs.mkdtempSync(path.join(os.tmpdir(), "parallax-test-sym-"));
     const realFile = path.join(tmpSub, "real.sqlite");
     fs.writeFileSync(realFile, "");
@@ -102,22 +107,37 @@ describe("Environment Validation (env.server.ts)", () => {
     fs.symlinkSync(realFile, symlinkFile);
 
     process.env.RATE_LIMIT_DB_PATH = symlinkFile;
-    process.env.NODE_ENV = "production";
+    process.env.NODE_ENV = "test";
     const { ENV } = await import("../app/lib/env.server");
+    expect(() => ENV.RATE_LIMIT_DB_PATH).toThrow("ne doit pas etre un lien symbolique");
+
+    // Ancestor symlink check
+    const realDir = path.join(tmpSub, "real_dir");
+    fs.mkdirSync(realDir);
+    const symlinkDir = path.join(tmpSub, "sym_dir");
+    fs.symlinkSync(realDir, symlinkDir);
+    process.env.RATE_LIMIT_DB_PATH = path.join(symlinkDir, "file.sqlite");
     expect(() => ENV.RATE_LIMIT_DB_PATH).toThrow("ne doit pas etre un lien symbolique");
 
     fs.rmSync(tmpSub, { recursive: true, force: true });
   });
 
-  it("should evaluate TRUST_PROXY boolean correctly", async () => {
-    process.env.TRUST_PROXY = "true";
-    const { ENV: env1 } = await import("../app/lib/env.server");
-    expect(env1.TRUST_PROXY).toBe(true);
+  it("validateAdminConfig validates complete configuration and distinct secrets", async () => {
+    const { validateAdminConfig } = await import("../app/lib/env.server");
 
-    process.env.TRUST_PROXY = "false";
-    expect(env1.TRUST_PROXY).toBe(false);
+    process.env.PUBLIC_SITE_URL = "http://localhost:3000";
+    process.env.ADMIN_PASSWORD_HASH = "$argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHQ$c29tZWhhc2g";
+    process.env.ADMIN_SESSION_SECRET = "session-secret-min-32-chars-long-1!";
+    process.env.RATE_LIMIT_SECRET = "session-secret-min-32-chars-long-1!"; // Identical!
+    process.env.RATE_LIMIT_DB_PATH = path.join(os.tmpdir(), "rate-limit.sqlite");
 
-    delete process.env.TRUST_PROXY;
-    expect(env1.TRUST_PROXY).toBe(false);
+    // Identical secrets must throw
+    expect(() => validateAdminConfig()).toThrow("doivent obligatoirement etre distincts");
+
+    // Distinct secrets must succeed
+    process.env.RATE_LIMIT_SECRET = "rate-limit-secret-min-32-chars-long-2!";
+    const config = validateAdminConfig();
+    expect(config.sessionSecret).not.toBe(config.rateLimitSecret);
+    expect(config.hash).toBe(process.env.ADMIN_PASSWORD_HASH);
   });
 });

@@ -2,6 +2,7 @@ import {
   redirect,
   type ActionFunctionArgs,
   type LoaderFunctionArgs,
+  type HeadersArgs,
   Form,
   useActionData,
   useLoaderData,
@@ -27,7 +28,6 @@ import {
 import {
   getSession,
   commitSession,
-  destroySession,
   SESSION_MAX_AGE_SECONDS,
 } from "../../lib/session.server";
 import {
@@ -45,8 +45,13 @@ export function meta() {
   ];
 }
 
+export function headers({ loaderHeaders, actionHeaders, errorHeaders }: HeadersArgs): Headers {
+  const baseHeaders = new Headers(errorHeaders ?? actionHeaders ?? loaderHeaders);
+  return createAdminHeaders(baseHeaders);
+}
+
 export async function loader({ request }: LoaderFunctionArgs) {
-  // 1. Verify admin configuration
+  // 1. Verify admin configuration (throws 503 if missing or invalid)
   getAdminConfig();
 
   // 2. Check if already authenticated
@@ -59,19 +64,22 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 
   const headers = createAdminHeaders();
-
-  // Clean corrupted or expired session cookie if present
   const cookieHeader = request.headers.get("Cookie");
-  if (cookieHeader && cookieHeader.includes("__parallax_admin_session") && session.has("adminId")) {
-    headers.set("Set-Cookie", await destroySession(session));
+
+  let activeSession = session;
+
+  // If previous session was expired, rotated, or invalid with admin fields,
+  // do not reuse its old fields or token; initialize a clean anonymous session.
+  if (cookieHeader && cookieHeader.includes("__parallax_admin_session") && (session.has("adminId") || session.has("expiresAt"))) {
+    activeSession = await getSession(null);
   }
 
-  // Ensure anonymous session with CSRF token for pre-login form
-  let csrfToken = session.get("csrfToken");
+  // Ensure anonymous session with fresh CSRF token for pre-login form
+  let csrfToken = activeSession.get("csrfToken");
   if (!csrfToken) {
     csrfToken = crypto.randomUUID();
-    session.set("csrfToken", csrfToken);
-    headers.set("Set-Cookie", await commitSession(session));
+    activeSession.set("csrfToken", csrfToken);
+    headers.set("Set-Cookie", await commitSession(activeSession));
   }
 
   return Response.json({ csrfToken }, { headers });
@@ -97,10 +105,10 @@ export async function action({ request }: ActionFunctionArgs) {
     });
   }
 
-  // 4. Read body strictly bounded to 8 KiB
+  // 4. Read body strictly bounded to 8 KiB with only allowed fields
   let params: URLSearchParams;
   try {
-    params = await readStrictFormUrlEncoded(request, 8192);
+    params = await readStrictFormUrlEncoded(request, 8192, ["password", "csrfToken"]);
   } catch (err: unknown) {
     if (err instanceof ActionSecurityError) {
       const headers = createAdminHeaders(new Headers(err.headers));
@@ -154,7 +162,16 @@ export async function action({ request }: ActionFunctionArgs) {
     );
   }
 
-  const isPasswordValid = await verifyAdminPassword(password);
+  let isPasswordValid: boolean;
+  try {
+    isPasswordValid = await verifyAdminPassword(password);
+  } catch {
+    return new Response("Service temporairement indisponible.", {
+      status: 503,
+      headers: createAdminHeaders(),
+    });
+  }
+
   if (!isPasswordValid) {
     return Response.json(
       { error: "Identifiants invalides." },
@@ -162,17 +179,26 @@ export async function action({ request }: ActionFunctionArgs) {
     );
   }
 
-  // 8. Authentication successful: reset rate limit and construct fresh authenticated session
-  resetRateLimit(ip, "admin");
+  // 8. Authentication successful: reset rate limit inside try/catch
+  try {
+    resetRateLimit(ip, "admin");
+  } catch {
+    return new Response("Service temporairement indisponible.", {
+      status: 503,
+      headers: createAdminHeaders(),
+    });
+  }
 
+  // 9. Construct fresh authenticated session from empty storage
+  const freshSession = await getSession(null);
   const now = Date.now();
-  session.set("adminId", crypto.randomUUID());
-  session.set("credentialVersion", computeCredentialVersion());
-  session.set("csrfToken", crypto.randomUUID());
-  session.set("createdAt", now);
-  session.set("expiresAt", now + SESSION_MAX_AGE_SECONDS * 1000);
+  freshSession.set("adminId", crypto.randomUUID());
+  freshSession.set("credentialVersion", computeCredentialVersion());
+  freshSession.set("csrfToken", crypto.randomUUID());
+  freshSession.set("createdAt", now);
+  freshSession.set("expiresAt", now + SESSION_MAX_AGE_SECONDS * 1000);
 
-  const cookieHeader = await commitSession(session);
+  const cookieHeader = await commitSession(freshSession);
   const redirectHeaders = createAdminHeaders();
   redirectHeaders.set("Set-Cookie", cookieHeader);
 
@@ -244,9 +270,7 @@ export function ErrorBoundary() {
           <div className={styles.indicator} />
           <h1 className={styles.errorTitle}>Administration indisponible</h1>
           <p className={styles.errorText}>
-            {typeof error.data === "string" && error.data
-              ? error.data
-              : "La configuration administrateur est incomplete ou manquante."}
+            Le service d'administration est temporairement indisponible.
           </p>
         </div>
       </div>

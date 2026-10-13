@@ -19,6 +19,7 @@ let _sessionStorage: ReturnType<
   typeof createCookieSessionStorage<AdminSessionData, AdminSessionFlashData>
 > | null = null;
 let _cachedSecret: string | null = null;
+let _cachedEnv: string | undefined = undefined;
 
 function getSessionStorage() {
   const secret = ENV.ADMIN_SESSION_SECRET;
@@ -26,12 +27,17 @@ function getSessionStorage() {
     throw new Error("ADMIN_SESSION_SECRET is not configured.");
   }
 
-  // Re-create if secret changed (e.g. rotation)
-  if (_sessionStorage && _cachedSecret === secret) {
+  // Re-create if secret changed (e.g. rotation) or environment changed
+  if (
+    _sessionStorage &&
+    _cachedSecret === secret &&
+    _cachedEnv === process.env.NODE_ENV
+  ) {
     return _sessionStorage;
   }
 
   _cachedSecret = secret;
+  _cachedEnv = process.env.NODE_ENV;
   _sessionStorage = createCookieSessionStorage<AdminSessionData, AdminSessionFlashData>({
     cookie: {
       name: "__parallax_admin_session",

@@ -5,8 +5,28 @@ import { renderToPipeableStream } from "react-dom/server";
 import { ServerRouter } from "react-router";
 import type { EntryContext } from "react-router";
 import crypto from "node:crypto";
+import { validateServerStartup } from "./lib/env.server";
 
 const ABORT_DELAY = 5_000;
+
+export function applyAdminSecurityHeaders(headers: Headers, url: string): void {
+  try {
+    const parsed = new URL(url);
+    if (parsed.pathname === "/admin" || parsed.pathname.startsWith("/admin/")) {
+      headers.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+      headers.set("Pragma", "no-cache");
+      headers.set("Expires", "0");
+      headers.set("X-Robots-Tag", "noindex, nofollow");
+    }
+  } catch {
+    if (url.includes("/admin")) {
+      headers.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+      headers.set("Pragma", "no-cache");
+      headers.set("Expires", "0");
+      headers.set("X-Robots-Tag", "noindex, nofollow");
+    }
+  }
+}
 
 export default function handleRequest(
   request: Request,
@@ -15,6 +35,8 @@ export default function handleRequest(
   routerContext: EntryContext,
   _loadContext: Record<string, unknown>
 ) {
+  validateServerStartup();
+
   return isbot(request.headers.get("user-agent") ?? "")
     ? handleBotRequest(request, responseStatusCode, responseHeaders, routerContext)
     : handleBrowserRequest(request, responseStatusCode, responseHeaders, routerContext);
@@ -77,6 +99,7 @@ function handleBotRequest(
           const body = new PassThrough();
           const stream = createReadableStreamFromReadable(body);
 
+          applyAdminSecurityHeaders(responseHeaders, request.url);
           addSecurityHeaders(responseHeaders, nonce);
           responseHeaders.set("Content-Type", "text/html; charset=utf-8");
 
@@ -124,6 +147,7 @@ function handleBrowserRequest(
           const body = new PassThrough();
           const stream = createReadableStreamFromReadable(body);
 
+          applyAdminSecurityHeaders(responseHeaders, request.url);
           addSecurityHeaders(responseHeaders, nonce);
           responseHeaders.set("Content-Type", "text/html; charset=utf-8");
 
