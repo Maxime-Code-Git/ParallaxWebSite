@@ -6,7 +6,7 @@ import {
 } from "react-router";
 import { requireAdminSession, constantTimeEqual } from "../../lib/auth.server";
 import { destroySession } from "../../lib/session.server";
-import { createAdminHeaders } from "../../lib/admin-auth.server";
+import { createAdminHeaders, composeAdminHeaders } from "../../lib/admin-auth.server";
 import {
   validateOrigin,
   readStrictFormUrlEncoded,
@@ -20,9 +20,8 @@ export function meta() {
   ];
 }
 
-export function headers({ loaderHeaders, actionHeaders, errorHeaders }: HeadersArgs): Headers {
-  const baseHeaders = new Headers(errorHeaders ?? actionHeaders ?? loaderHeaders);
-  return createAdminHeaders(baseHeaders);
+export function headers(args: HeadersArgs): Headers {
+  return composeAdminHeaders(args);
 }
 
 /**

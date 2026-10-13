@@ -127,6 +127,64 @@ describe("Admin Routes Suite (/admin, /admin/dashboard, /admin/logout)", () => {
         expect(h.get("X-Robots-Tag")).toBe("noindex, nofollow");
       }
     });
+
+    it("preserves Allow: POST from loaderHeaders when actionHeaders is empty (GET request scenario)", () => {
+      const loaderHeaders = new Headers();
+      loaderHeaders.set("Allow", "POST");
+      const actionHeaders = new Headers(); // Empty on GET requests
+
+      for (const headersFn of [loginHeaders, dashboardHeaders, logoutHeaders]) {
+        const h = headersFn({
+          loaderHeaders,
+          actionHeaders,
+          errorHeaders: undefined,
+          parentHeaders: new Headers(),
+        });
+        expect(h.get("Allow")).toBe("POST");
+        expect(h.get("Cache-Control")).toContain("no-store");
+        expect(h.get("X-Robots-Tag")).toBe("noindex, nofollow");
+      }
+    });
+
+    it("preserves Retry-After from loader and Location from action", () => {
+      const loaderHeaders = new Headers({ "Retry-After": "900" });
+      const actionHeaders = new Headers({ Location: "/admin/dashboard" });
+
+      const h = loginHeaders({
+        loaderHeaders,
+        actionHeaders,
+        errorHeaders: undefined,
+        parentHeaders: new Headers(),
+      });
+
+      expect(h.get("Retry-After")).toBe("900");
+      expect(h.get("Location")).toBe("/admin/dashboard");
+      expect(h.get("Cache-Control")).toContain("no-store");
+      expect(h.get("X-Robots-Tag")).toBe("noindex, nofollow");
+    });
+
+    it("preserves cookies without duplicate conflicting values for the same cookie name", () => {
+      const loaderHeaders = new Headers();
+      loaderHeaders.append("Set-Cookie", "__parallax_admin_session=anon-123; Path=/; HttpOnly");
+      loaderHeaders.append("Set-Cookie", "theme=dark; Path=/");
+
+      const actionHeaders = new Headers();
+      actionHeaders.append("Set-Cookie", "__parallax_admin_session=auth-456; Path=/; HttpOnly");
+
+      const h = loginHeaders({
+        loaderHeaders,
+        actionHeaders,
+        errorHeaders: undefined,
+        parentHeaders: new Headers(),
+      });
+
+      const setCookies = typeof h.getSetCookie === "function" ? h.getSetCookie() : [h.get("set-cookie") || ""];
+      // Authoritative action cookie should replace the loader cookie for __parallax_admin_session
+      expect(setCookies.some((c) => c.includes("auth-456"))).toBe(true);
+      expect(setCookies.some((c) => c.includes("anon-123"))).toBe(false);
+      // Other distinct cookies (theme) are preserved
+      expect(setCookies.some((c) => c.includes("theme=dark"))).toBe(true);
+    });
   });
 
   describe("GET /admin (loginLoader)", () => {
@@ -407,6 +465,25 @@ describe("Admin Routes Suite (/admin, /admin/dashboard, /admin/logout)", () => {
       expect(res.status).toBe(405);
       expect(res.headers.get("Allow")).toBe("POST");
       expect(res.headers.get("Cache-Control")).toContain("no-store");
+    });
+
+    it("produces final response with 405 and Allow: POST when composed through logoutHeaders", async () => {
+      const req = new Request("https://parallax.example.com/admin/logout", {
+        method: "GET",
+      });
+      const res = (await logoutLoader(createRouteArgs(req))) as Response;
+      expect(res.status).toBe(405);
+
+      const finalHeaders = logoutHeaders({
+        loaderHeaders: res.headers,
+        actionHeaders: new Headers(),
+        errorHeaders: undefined,
+        parentHeaders: new Headers(),
+      });
+
+      expect(finalHeaders.get("Allow")).toBe("POST");
+      expect(finalHeaders.get("Cache-Control")).toContain("no-store");
+      expect(finalHeaders.get("X-Robots-Tag")).toBe("noindex, nofollow");
     });
   });
 

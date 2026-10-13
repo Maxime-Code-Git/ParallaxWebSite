@@ -29,9 +29,12 @@ function ensureSafeDatabaseDirectory(dir: string): void {
   const realPrivateTmp = fs.existsSync("/private/tmp") ? fs.realpathSync("/private/tmp") : "";
   const realHome = process.env.HOME && fs.existsSync(process.env.HOME) ? fs.realpathSync(process.env.HOME) : "";
 
-  if (!fs.existsSync(dir)) {
+  const existed = fs.existsSync(dir);
+
+  if (!existed) {
     try {
       fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+      fs.chmodSync(dir, 0o700);
     } catch (err) {
       throw new RateLimitStorageError(`Impossible de creer le repertoire de limitation de debit: ${err instanceof Error ? err.message : String(err)}`, err);
     }
@@ -58,16 +61,14 @@ function ensureSafeDatabaseDirectory(dir: string): void {
     throw new RateLimitStorageError(`${dir} doit etre un repertoire.`);
   }
 
-  if ((stat.mode & 0o777) !== 0o700) {
-    try {
-      fs.chmodSync(dir, 0o700);
-    } catch (chmodErr) {
-      throw new RateLimitStorageError(`Impossible d'appliquer les permissions 0700 sur le repertoire dedie ${dir}`, chmodErr);
+  const currentMode = stat.mode & 0o777;
+  if (currentMode !== 0o700) {
+    if (existed) {
+      throw new RateLimitStorageError(
+        `Le repertoire existant ${dir} possede les permissions 0${currentMode.toString(8)} au lieu de 0700 requises. Par securite, ses permissions ne sont pas modifiees arbitrairement.`
+      );
     }
-    const verifiedStat = fs.statSync(dir);
-    if ((verifiedStat.mode & 0o777) !== 0o700) {
-      throw new RateLimitStorageError(`Les permissions 0700 n'ont pas pu etre garanties sur le repertoire dedie ${dir}`);
-    }
+    throw new RateLimitStorageError(`Les permissions 0700 n'ont pas pu etre garanties sur le repertoire dedie ${dir}`);
   }
 }
 

@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as fs from "node:fs";
+import { execFile } from "node:child_process";
 
 vi.mock("../../../scripts/env-loader.js", () => ({
   getMonorepoRoot: () => path.resolve(__dirname, "../../.."),
@@ -139,5 +140,65 @@ describe("Environment Validation (env.server.ts)", () => {
     const config = validateAdminConfig();
     expect(config.sessionSecret).not.toBe(config.rateLimitSecret);
     expect(config.hash).toBe(process.env.ADMIN_PASSWORD_HASH);
+  });
+
+  describe("validate-startup.js production pre-check CLI", () => {
+    const scriptPath = path.resolve(__dirname, "../scripts/validate-startup.js");
+
+    it("rejects execution with exit code 1 when configuration is missing", async () => {
+      await new Promise<void>((resolve, reject) => {
+        execFile(
+          "node",
+          [scriptPath],
+          {
+            env: {
+              PATH: process.env.PATH,
+              NODE_ENV: "production",
+            },
+          },
+          (error, _stdout, stderr) => {
+            try {
+              expect(error).not.toBeNull();
+              expect(error?.code).toBe(1);
+              expect(stderr).toContain("Erreur critique de configuration au demarrage");
+              resolve();
+            } catch (err) {
+              reject(err);
+            }
+          }
+        );
+      });
+    });
+
+    it("accepts execution with exit code 0 when artificial configuration is valid without requiring future variables", async () => {
+      const validDbPath = path.join(os.tmpdir(), `startup-test-${Date.now()}.sqlite`);
+      await new Promise<void>((resolve, reject) => {
+        execFile(
+          "node",
+          [scriptPath],
+          {
+            env: {
+              PATH: process.env.PATH,
+              NODE_ENV: "production",
+              PUBLIC_SITE_URL: "https://parallax.example.com",
+              ADMIN_PASSWORD_HASH: "$argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHQ$c29tZWhhc2g",
+              ADMIN_SESSION_SECRET: "valid-session-secret-min-32-chars-long!",
+              RATE_LIMIT_SECRET: "valid-ratelimit-secret-min-32-chars-long!",
+              RATE_LIMIT_DB_PATH: validDbPath,
+              TRUST_PROXY: "false",
+            },
+          },
+          (error, stdout) => {
+            try {
+              expect(error).toBeNull();
+              expect(stdout).toContain("Configuration de demarrage valide avec succes");
+              resolve();
+            } catch (err) {
+              reject(err);
+            }
+          }
+        );
+      });
+    });
   });
 });

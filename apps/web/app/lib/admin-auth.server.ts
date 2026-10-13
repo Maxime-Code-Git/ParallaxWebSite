@@ -11,6 +11,60 @@ export function createAdminHeaders(headers = new Headers()): Headers {
   return headers;
 }
 
+export interface AdminHeadersArgs {
+  loaderHeaders?: Headers;
+  actionHeaders?: Headers;
+  errorHeaders?: Headers;
+  parentHeaders?: Headers;
+}
+
+/**
+ * Composes admin response headers preserving loader headers (e.g. Allow, Retry-After),
+ * action headers (e.g. Location), and distinct cookies without duplication,
+ * while systematically applying admin security headers.
+ */
+export function composeAdminHeaders({
+  loaderHeaders,
+  actionHeaders,
+  errorHeaders,
+}: AdminHeadersArgs): Headers {
+  const result = new Headers();
+  const cookiesByLowerName = new Map<string, string>();
+
+  const sources = [loaderHeaders, actionHeaders, errorHeaders];
+
+  for (const source of sources) {
+    if (!source) continue;
+
+    if (typeof source.getSetCookie === "function") {
+      for (const cookie of source.getSetCookie()) {
+        if (cookie) {
+          const cookieName = cookie.split("=")[0].trim().toLowerCase();
+          cookiesByLowerName.set(cookieName, cookie);
+        }
+      }
+    } else {
+      const setCookie = source.get("set-cookie");
+      if (setCookie) {
+        const cookieName = setCookie.split("=")[0].trim().toLowerCase();
+        cookiesByLowerName.set(cookieName, setCookie);
+      }
+    }
+
+    source.forEach((value, key) => {
+      if (key.toLowerCase() !== "set-cookie") {
+        result.set(key, value);
+      }
+    });
+  }
+
+  for (const cookie of cookiesByLowerName.values()) {
+    result.append("set-cookie", cookie);
+  }
+
+  return createAdminHeaders(result);
+}
+
 /**
  * Validates the admin session.
  * Throws a 303 redirect to /admin destroying the cookie if the session is invalid.

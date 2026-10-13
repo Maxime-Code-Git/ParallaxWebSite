@@ -5,7 +5,6 @@ import { renderToPipeableStream } from "react-dom/server";
 import { ServerRouter } from "react-router";
 import type { EntryContext } from "react-router";
 import crypto from "node:crypto";
-import { validateServerStartup } from "./lib/env.server";
 
 const ABORT_DELAY = 5_000;
 
@@ -35,8 +34,6 @@ export default function handleRequest(
   routerContext: EntryContext,
   _loadContext: Record<string, unknown>
 ) {
-  validateServerStartup();
-
   return isbot(request.headers.get("user-agent") ?? "")
     ? handleBotRequest(request, responseStatusCode, responseHeaders, routerContext)
     : handleBrowserRequest(request, responseStatusCode, responseHeaders, routerContext);

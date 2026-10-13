@@ -6,7 +6,11 @@ import {
   useNavigation,
 } from "react-router";
 import * as crypto from "node:crypto";
-import { requireValidAdminSession, createAdminHeaders } from "../../lib/admin-auth.server";
+import {
+  requireValidAdminSession,
+  createAdminHeaders,
+  composeAdminHeaders,
+} from "../../lib/admin-auth.server";
 import { commitSession } from "../../lib/session.server";
 import styles from "./dashboard.module.css";
 
@@ -17,9 +21,8 @@ export function meta() {
   ];
 }
 
-export function headers({ loaderHeaders, actionHeaders, errorHeaders }: HeadersArgs): Headers {
-  const baseHeaders = new Headers(errorHeaders ?? actionHeaders ?? loaderHeaders);
-  return createAdminHeaders(baseHeaders);
+export function headers(args: HeadersArgs): Headers {
+  return composeAdminHeaders(args);
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {

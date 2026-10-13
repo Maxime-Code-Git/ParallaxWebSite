@@ -47,12 +47,43 @@ describe("rate-limit.server.ts", () => {
     vi.restoreAllMocks();
   });
 
-  it("enforces safe directory permissions (0700) and file permissions (0600)", () => {
+  it("creates dedicated directory in 0700 and protects database file in 0600", () => {
+    const subDir = path.join(tmpDir, "new-dedicated-dir");
+    mockDbPath = path.join(subDir, "rate-limit.sqlite");
+
     checkRateLimit("127.0.0.1", "admin");
-    const dirStat = fs.statSync(tmpDir);
+    const dirStat = fs.statSync(subDir);
     expect(dirStat.mode & 0o777).toBe(0o700);
 
-    const fileStat = fs.statSync(dbPath);
+    const fileStat = fs.statSync(mockDbPath);
+    expect(fileStat.mode & 0o777).toBe(0o600);
+  });
+
+  it("refuses an existing directory with different permissions (0755) without modifying its mode", () => {
+    const existingDir = path.join(tmpDir, "existing-dir-755");
+    fs.mkdirSync(existingDir, { mode: 0o755 });
+    fs.chmodSync(existingDir, 0o755);
+
+    mockDbPath = path.join(existingDir, "rate-limit.sqlite");
+
+    expect(() => checkRateLimit("127.0.0.1", "admin")).toThrow(
+      "au lieu de 0700 requises"
+    );
+
+    // Verify permissions were NOT changed to 0700 and remain strictly 0755
+    const statAfter = fs.statSync(existingDir);
+    expect(statAfter.mode & 0o777).toBe(0o755);
+  });
+
+  it("accepts an existing directory that already has 0700 mode", () => {
+    const existingDir = path.join(tmpDir, "existing-dir-700");
+    fs.mkdirSync(existingDir, { mode: 0o700 });
+    fs.chmodSync(existingDir, 0o700);
+
+    mockDbPath = path.join(existingDir, "rate-limit.sqlite");
+
+    expect(() => checkRateLimit("127.0.0.1", "admin")).not.toThrow();
+    const fileStat = fs.statSync(mockDbPath);
     expect(fileStat.mode & 0o777).toBe(0o600);
   });
 

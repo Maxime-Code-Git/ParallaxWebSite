@@ -18,7 +18,7 @@ import {
   computeCredentialVersion,
   constantTimeEqual,
 } from "../../lib/auth.server";
-import { createAdminHeaders } from "../../lib/admin-auth.server";
+import { createAdminHeaders, composeAdminHeaders } from "../../lib/admin-auth.server";
 import {
   checkRateLimit,
   resetRateLimit,
@@ -45,9 +45,8 @@ export function meta() {
   ];
 }
 
-export function headers({ loaderHeaders, actionHeaders, errorHeaders }: HeadersArgs): Headers {
-  const baseHeaders = new Headers(errorHeaders ?? actionHeaders ?? loaderHeaders);
-  return createAdminHeaders(baseHeaders);
+export function headers(args: HeadersArgs): Headers {
+  return composeAdminHeaders(args);
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {

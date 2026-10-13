@@ -8,7 +8,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint .",
-    "start": "react-router-serve ./build/server/index.js",
+    "start": "node scripts/validate-startup.js && react-router-serve ./build/server/index.js",
     "typecheck": "react-router typegen && tsc",
     "admin:hash": "node scripts/admin-hash.js"
   },
