@@ -90,18 +90,24 @@ export async function action({ request }: ActionFunctionArgs) {
 
   // 2. Only POST is accepted
   if (request.method !== "POST") {
-    return new Response("Method Not Allowed", {
-      status: 405,
-      headers: createAdminHeaders(new Headers({ Allow: "POST" })),
-    });
+    return Response.json(
+      { error: "Méthode non autorisée." },
+      {
+        status: 405,
+        headers: createAdminHeaders(new Headers({ Allow: "POST" })),
+      }
+    );
   }
 
   // 3. Strict Origin check
   if (!validateOrigin(request)) {
-    return new Response("Forbidden: Invalid Origin", {
-      status: 403,
-      headers: createAdminHeaders(),
-    });
+    return Response.json(
+      { error: "Origine de la requête non autorisée." },
+      {
+        status: 403,
+        headers: createAdminHeaders(),
+      }
+    );
   }
 
   // 4. Read body strictly bounded to 8 KiB with only allowed fields
@@ -110,16 +116,25 @@ export async function action({ request }: ActionFunctionArgs) {
     params = await readStrictFormUrlEncoded(request, 8192, ["password", "csrfToken"]);
   } catch (err: unknown) {
     if (err instanceof ActionSecurityError) {
-      const headers = createAdminHeaders(new Headers(err.headers));
-      return new Response(err.message, { status: err.status, headers });
+      const headers = createAdminHeaders(err.headers ? new Headers(err.headers) : undefined);
+      return Response.json(
+        { error: "Requête invalide ou non supportée." },
+        { status: err.status, headers }
+      );
     }
-    return new Response("Bad Request", { status: 400, headers: createAdminHeaders() });
+    return Response.json(
+      { error: "Requête invalide." },
+      { status: 400, headers: createAdminHeaders() }
+    );
   }
 
   // 5. Rate limiting check prior to any Argon2 computation
   const ip = getClientIp(request);
   if (!ip) {
-    return new Response("Forbidden: Invalid IP", { status: 403, headers: createAdminHeaders() });
+    return Response.json(
+      { error: "Accès refusé : adresse IP indéterminée." },
+      { status: 403, headers: createAdminHeaders() }
+    );
   }
 
   try {
@@ -129,17 +144,23 @@ export async function action({ request }: ActionFunctionArgs) {
       const headers = createAdminHeaders();
       headers.set("Retry-After", String(err.retryAfter));
       return Response.json(
-        { error: "Trop de tentatives de connexion. Veuillez reessayer dans 15 minutes." },
+        { error: "Trop de tentatives de connexion. Veuillez réessayer dans 15 minutes." },
         { status: 429, headers }
       );
     }
     if (err instanceof RateLimitStorageError) {
-      return new Response("Service temporairement indisponible.", {
-        status: 503,
-        headers: createAdminHeaders(),
-      });
+      return Response.json(
+        { error: "Service temporairement indisponible." },
+        {
+          status: 503,
+          headers: createAdminHeaders(),
+        }
+      );
     }
-    return new Response("Erreur interne", { status: 500, headers: createAdminHeaders() });
+    return Response.json(
+      { error: "Erreur interne du serveur." },
+      { status: 500, headers: createAdminHeaders() }
+    );
   }
 
   // 6. CSRF validation against current session
@@ -149,7 +170,10 @@ export async function action({ request }: ActionFunctionArgs) {
   const formCsrf = params.get("csrfToken") || "";
 
   if (!formCsrf || !sessionCsrf || !constantTimeEqual(formCsrf, sessionCsrf)) {
-    return new Response("Invalid CSRF token", { status: 403, headers: createAdminHeaders() });
+    return Response.json(
+      { error: "Session expirée ou jeton CSRF invalide. Veuillez recharger la page." },
+      { status: 403, headers: createAdminHeaders() }
+    );
   }
 
   // 7. Verify password
@@ -165,10 +189,13 @@ export async function action({ request }: ActionFunctionArgs) {
   try {
     isPasswordValid = await verifyAdminPassword(password);
   } catch {
-    return new Response("Service temporairement indisponible.", {
-      status: 503,
-      headers: createAdminHeaders(),
-    });
+    return Response.json(
+      { error: "Service temporairement indisponible." },
+      {
+        status: 503,
+        headers: createAdminHeaders(),
+      }
+    );
   }
 
   if (!isPasswordValid) {
@@ -182,10 +209,13 @@ export async function action({ request }: ActionFunctionArgs) {
   try {
     resetRateLimit(ip, "admin");
   } catch {
-    return new Response("Service temporairement indisponible.", {
-      status: 503,
-      headers: createAdminHeaders(),
-    });
+    return Response.json(
+      { error: "Service temporairement indisponible." },
+      {
+        status: 503,
+        headers: createAdminHeaders(),
+      }
+    );
   }
 
   // 9. Construct fresh authenticated session from empty storage
@@ -209,9 +239,14 @@ export async function action({ request }: ActionFunctionArgs) {
 
 export default function AdminLoginPage() {
   const { csrfToken } = useLoaderData<typeof loader>();
-  const actionData = useActionData<{ error?: string }>();
+  const actionData = useActionData<{ error?: string } | string>();
   const navigation = useNavigation();
   const isSubmitting = navigation.state === "submitting";
+
+  const errorMessage =
+    typeof actionData === "string"
+      ? actionData
+      : actionData?.error;
 
   return (
     <div className={styles.container}>
@@ -240,9 +275,9 @@ export default function AdminLoginPage() {
             />
           </div>
 
-          {actionData?.error && (
+          {errorMessage && (
             <p className={styles.error} role="alert">
-              {actionData.error}
+              {errorMessage}
             </p>
           )}
 
@@ -276,14 +311,19 @@ export function ErrorBoundary() {
     );
   }
 
+  const message =
+    isRouteErrorResponse(error)
+      ? error.status === 403
+        ? "Accès refusé."
+        : error.statusText || "Impossible d'afficher la page d'administration."
+      : "Impossible d'afficher la page d'administration.";
+
   return (
     <div className={styles.errorContainer}>
       <div className={styles.errorBox}>
         <div className={styles.indicator} />
         <h1 className={styles.errorTitle}>Une erreur est survenue</h1>
-        <p className={styles.errorText}>
-          Impossible d'afficher la page d'administration.
-        </p>
+        <p className={styles.errorText}>{message}</p>
       </div>
     </div>
   );
