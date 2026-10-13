@@ -175,7 +175,10 @@ describe("Environment Validation (env.server.ts)", () => {
       const validDbPath = path.join(validDir, `startup-test-${Date.now()}.sqlite`);
       const validContentPath = path.join(validDir, `startup-content-test-${Date.now()}.json`);
       const validMediaPath = path.join(validDir, `startup-media-test-${Date.now()}`);
+      const validPortfolioContentPath = path.join(validDir, `startup-portfolio-content-${Date.now()}.json`);
+      const validPortfolioMediaPath = path.join(validDir, `startup-portfolio-media-${Date.now()}`);
       fs.mkdirSync(validMediaPath, { recursive: true, mode: 0o700 });
+      fs.mkdirSync(validPortfolioMediaPath, { recursive: true, mode: 0o700 });
       await new Promise<void>((resolve, reject) => {
         execFile(
           "node",
@@ -191,6 +194,8 @@ describe("Environment Validation (env.server.ts)", () => {
               RATE_LIMIT_DB_PATH: validDbPath,
               SITE_CONTENT_PATH: validContentPath,
               SITE_MEDIA_PATH: validMediaPath,
+              PORTFOLIO_CONTENT_PATH: validPortfolioContentPath,
+              PORTFOLIO_MEDIA_PATH: validPortfolioMediaPath,
               TRUST_PROXY: "false",
             },
           },
@@ -212,7 +217,10 @@ describe("Environment Validation (env.server.ts)", () => {
       const validDbPath = path.join(validDir, `startup-test-media-${Date.now()}.sqlite`);
       const validContentPath = path.join(validDir, `startup-content-test-media-${Date.now()}.json`);
       const validMediaPath = path.join(validDir, `startup-media-dir-${Date.now()}`);
+      const validPortfolioContentPath = path.join(validDir, `startup-portfolio-content-${Date.now()}.json`);
+      const validPortfolioMediaPath = path.join(validDir, `startup-portfolio-media-${Date.now()}`);
       fs.mkdirSync(validMediaPath, { recursive: true, mode: 0o700 });
+      fs.mkdirSync(validPortfolioMediaPath, { recursive: true, mode: 0o700 });
 
       await new Promise<void>((resolve, reject) => {
         execFile(
@@ -229,6 +237,8 @@ describe("Environment Validation (env.server.ts)", () => {
               RATE_LIMIT_DB_PATH: validDbPath,
               SITE_CONTENT_PATH: validContentPath,
               SITE_MEDIA_PATH: validMediaPath,
+              PORTFOLIO_CONTENT_PATH: validPortfolioContentPath,
+              PORTFOLIO_MEDIA_PATH: validPortfolioMediaPath,
               TRUST_PROXY: "false",
             },
           },

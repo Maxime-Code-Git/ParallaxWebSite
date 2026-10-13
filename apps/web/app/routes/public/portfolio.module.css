@@ -1,0 +1,785 @@
+/* Portfolio Public Styles */
+
+.pageRoot {
+  width: 100%;
+  min-height: 100vh;
+  position: relative;
+  background: var(--color-ink, #0C0F17);
+  color: var(--color-text, #F5F6F7);
+  font-family: 'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  overflow-x: hidden;
+}
+
+.heroSection {
+  padding: 120px 80px 64px;
+}
+
+.heroTitle {
+  margin: 0;
+  font-size: 64px;
+  line-height: 1.0;
+  font-weight: 500;
+  letter-spacing: -0.03em;
+  color: #F5F6F7;
+}
+
+.emptyState {
+  padding: 80px;
+  text-align: center;
+  color: #8A92A6;
+  font-size: 18px;
+}
+
+/* -------------------------------------------------------------
+ * Alternating Showcase Rows
+ * ------------------------------------------------------------- */
+
+.showcaseSection {
+  padding: 0;
+}
+
+.showcaseRow {
+  display: grid;
+  align-items: center;
+  position: relative;
+}
+
+.rowOverlap {
+  margin-top: -80px;
+}
+
+.rowLayoutLeft {
+  grid-template-columns: 1.6fr 1fr;
+}
+
+.rowLayoutRight {
+  grid-template-columns: 1fr 1.6fr;
+}
+
+.imageCol {
+  width: 100%;
+}
+
+.showcaseImg {
+  width: 100%;
+  height: auto;
+  display: block;
+  object-fit: cover;
+}
+
+.textColLeft {
+  padding: 56px 80px 56px 48px;
+  display: flex;
+  align-items: center;
+  position: relative;
+  z-index: 2;
+  transform: translateX(-240px);
+}
+
+.textColRight {
+  padding: 56px 48px 56px 80px;
+  display: flex;
+  align-items: center;
+  position: relative;
+  z-index: 2;
+  transform: translateX(240px);
+}
+
+.textCard {
+  max-width: 500px;
+}
+
+.categoryTag {
+  font-size: 26px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: #1E9EFF;
+  margin-bottom: 14px;
+}
+
+.projectTitle {
+  margin: 0 0 10px;
+  font-size: 24px;
+  font-weight: 500;
+  color: #F5F6F7;
+}
+
+.projectSummary {
+  margin: 0 0 30px;
+  font-size: 20px;
+  line-height: 1.5;
+  color: #AEB6C6;
+}
+
+.seeMoreBtn {
+  background: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 18px;
+  border: 0.5px solid #39414F;
+  border-radius: 999px;
+  font-size: 18px;
+  color: #F5F6F7;
+  text-decoration: none;
+  transition: transform 0.18s ease, border-color 0.18s ease;
+}
+
+.seeMoreBtn:hover {
+  transform: scale(1.03);
+  border-color: #1E9EFF;
+  color: #F5F6F7;
+}
+
+.seeMoreBtnLeft {
+  padding: 8px 8px 8px 30px;
+}
+
+.seeMoreBtnRight {
+  padding: 8px 30px 8px 8px;
+}
+
+.circleIcon {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 0.5px solid #1E9EFF;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #F5F6F7;
+}
+
+/* -------------------------------------------------------------
+ * Directional Panel Overlay
+ * ------------------------------------------------------------- */
+
+.panelOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: #0C0F17;
+  overflow-y: auto;
+  overflow-x: hidden;
+  transition: transform 0.5s cubic-bezier(0.7, 0, 0.2, 1);
+}
+
+/* Direction right (enters from right 100% -> 0) */
+.panelOverlay[data-direction="right"][data-state="closed"] {
+  transform: translateX(100%);
+  pointer-events: none;
+}
+
+.panelOverlay[data-direction="right"][data-state="open"] {
+  transform: translateX(0);
+  pointer-events: auto;
+}
+
+/* Direction left (enters from left -100% -> 0) */
+.panelOverlay[data-direction="left"][data-state="closed"] {
+  transform: translateX(-100%);
+  pointer-events: none;
+}
+
+.panelOverlay[data-direction="left"][data-state="open"] {
+  transform: translateX(0);
+  pointer-events: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panelOverlay {
+    transition: opacity 0.2s ease !important;
+  }
+  .panelOverlay[data-state="closed"] {
+    opacity: 0 !important;
+    transform: none !important;
+  }
+  .panelOverlay[data-state="open"] {
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}
+
+.panelContent {
+  min-height: 100%;
+  box-sizing: border-box;
+  position: relative;
+  padding-bottom: 80px;
+}
+
+/* Panel Header Buttons */
+.panelNavButtons {
+  position: fixed;
+  top: 28px;
+  left: 40px;
+  right: 40px;
+  z-index: 60;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  pointer-events: none;
+}
+
+.backBtn {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  background: rgba(12, 15, 23, 0.75);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 0.5px solid #39414F;
+  border-radius: 999px;
+  padding: 9px 22px 9px 9px;
+  color: #F5F6F7;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 15px;
+  text-decoration: none;
+  cursor: pointer;
+  transition: transform 0.18s ease, border-color 0.18s ease;
+}
+
+.backBtn:hover {
+  transform: scale(1.04);
+  border-color: #1E9EFF;
+}
+
+.closeBtn {
+  pointer-events: auto;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: rgba(12, 15, 23, 0.75);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 0.5px solid #39414F;
+  color: #F5F6F7;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  text-decoration: none;
+  transition: transform 0.18s ease, border-color 0.18s ease;
+}
+
+.closeBtn:hover {
+  transform: scale(1.08);
+  border-color: #1E9EFF;
+}
+
+/* Section Banner */
+.sectionHero {
+  position: relative;
+  width: 100%;
+  height: 480px;
+  overflow: hidden;
+  background-size: cover;
+  background-position: center 42%;
+  background-color: #10141D;
+}
+
+.sectionGradient {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 65%;
+  background: linear-gradient(180deg, rgba(12, 15, 23, 0) 0%, rgba(12, 15, 23, 0.82) 72%, #0C0F17 100%);
+}
+
+.sectionTitleWrap {
+  position: absolute;
+  left: 80px;
+  right: 80px;
+  bottom: 52px;
+}
+
+.sectionTitle {
+  margin: 0;
+  font-size: 88px;
+  font-weight: 500;
+  letter-spacing: -0.03em;
+  line-height: 0.92;
+  color: #F5F6F7;
+}
+
+.sectionIntroWrap {
+  position: relative;
+  z-index: 2;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 72px 80px 24px;
+}
+
+.sectionIntro {
+  max-width: 720px;
+  margin: 0;
+  font-size: 26px;
+  line-height: 1.5;
+  color: #C7CED9;
+}
+
+/* Category Filter Tabs inside panel */
+.filterTabs {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 80px 32px;
+  display: flex;
+  gap: 16px;
+}
+
+.filterTab {
+  padding: 8px 20px;
+  border-radius: 999px;
+  border: 0.5px solid #39414F;
+  background: none;
+  color: #8A92A6;
+  font-size: 14px;
+  text-decoration: none;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.filterTab:hover,
+.filterTabActive {
+  color: #F5F6F7;
+  border-color: #1E9EFF;
+  background: rgba(30, 158, 255, 0.08);
+}
+
+/* Section Projects List - Prototype Rhythm */
+.projectsList {
+  position: relative;
+  z-index: 2;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 32px 80px 40px;
+}
+
+.projectRow {
+  display: flex;
+  align-items: center;
+  gap: 56px;
+  margin-bottom: 130px;
+  text-decoration: none;
+  color: inherit;
+}
+
+.projectRowVideo {
+  margin-bottom: 130px;
+  display: block;
+}
+
+.projectCardLink {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+  transition: transform 0.2s ease;
+}
+
+.projectCardLink:hover .imageBox {
+  border-color: #1E9EFF;
+  transform: scale(1.015);
+}
+
+.imageBox {
+  position: relative;
+  width: 100%;
+  background-color: #141822;
+  background-size: cover;
+  background-position: center;
+  border: 0.5px solid #232B3A;
+  border-radius: 14px;
+  overflow: hidden;
+  transition: transform 0.25s ease, border-color 0.25s ease;
+}
+
+.imageBox img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.aspect32 {
+  aspect-ratio: 3 / 2;
+}
+
+.aspect45 {
+  aspect-ratio: 4 / 5;
+}
+
+.aspect169 {
+  aspect-ratio: 16 / 9;
+}
+
+.aspect11 {
+  aspect-ratio: 1 / 1;
+}
+
+.videoOverlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 14px;
+  background: rgba(9, 11, 19, 0.25);
+}
+
+.playBtn {
+  width: 76px;
+  height: 76px;
+  border-radius: 50%;
+  background: rgba(12, 15, 23, 0.6);
+  border: 1.5px solid #1E9EFF;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.2s ease, background 0.2s ease;
+}
+
+.playBtn:hover {
+  transform: scale(1.08);
+  background: rgba(30, 158, 255, 0.2);
+}
+
+.projectInfoTitle {
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: #F5F6F7;
+  margin-bottom: 10px;
+}
+
+.projectInfoDesc {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.6;
+  color: #8A92A6;
+  max-width: 320px;
+}
+
+/* Masonry / Gallery Toggle */
+.galleryToggleWrap {
+  position: relative;
+  z-index: 2;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 10px 80px 0;
+  text-align: center;
+}
+
+.togglePhotosBtn {
+  background: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 18px;
+  border: 0.5px solid #39414F;
+  border-radius: 999px;
+  padding: 8px 8px 8px 30px;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 18px;
+  color: #F5F6F7;
+  transition: transform 0.18s ease, border-color 0.18s ease;
+}
+
+.togglePhotosBtn:hover {
+  transform: scale(1.03);
+  border-color: #1E9EFF;
+}
+
+.chevronIcon {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 0.5px solid #1E9EFF;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.3s ease;
+}
+
+.masonryGrid {
+  position: relative;
+  z-index: 2;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 48px 80px 8px;
+  column-count: 4;
+  column-gap: 20px;
+}
+
+.masonryItem {
+  break-inside: avoid;
+  margin-bottom: 20px;
+}
+
+.masonryThumb {
+  width: 100%;
+  border: 0.5px solid #232B3A;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #141822;
+}
+
+.masonryThumb img {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+/* Showreel Banner */
+.showreelSection {
+  position: relative;
+  z-index: 2;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 48px 80px 60px;
+}
+
+.showreelDivider {
+  padding-top: 72px;
+  border-top: 0.5px solid #1b2230;
+}
+
+.showreelHeader {
+  text-align: center;
+  font-size: 14px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #8A92A6;
+  margin: 0 0 44px;
+}
+
+.showreelCard {
+  max-width: 1000px;
+  margin: 0 auto;
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background-color: #090B13;
+  border: 0.5px solid #232B3A;
+  border-radius: 16px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.showreelCard img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* -------------------------------------------------------------
+ * Project Detail View (within Panel)
+ * ------------------------------------------------------------- */
+
+.detailContainer {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 120px 80px 60px;
+}
+
+.detailCategory {
+  font-size: 16px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: #1E9EFF;
+  margin-bottom: 16px;
+}
+
+.detailTitle {
+  font-size: 56px;
+  line-height: 1.05;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  color: #F5F6F7;
+  margin: 0 0 24px;
+}
+
+.detailSummary {
+  font-size: 22px;
+  line-height: 1.5;
+  color: #C7CED9;
+  margin: 0 0 48px;
+  max-width: 800px;
+}
+
+.detailCoverWrap {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 16px;
+  border: 0.5px solid #232B3A;
+  overflow: hidden;
+  background: #141822;
+  margin-bottom: 64px;
+}
+
+.detailCoverWrap img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.detailBody {
+  font-size: 18px;
+  line-height: 1.7;
+  color: #AEB6C6;
+  margin-bottom: 64px;
+  max-width: 800px;
+}
+
+.detailBody p {
+  margin: 0 0 24px;
+}
+
+.detailBody h3 {
+  font-size: 24px;
+  color: #F5F6F7;
+  margin: 36px 0 16px;
+}
+
+.detailGalleryTitle {
+  font-size: 20px;
+  color: #F5F6F7;
+  margin: 48px 0 24px;
+}
+
+.detailGalleryGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 20px;
+  margin-bottom: 64px;
+}
+
+.detailGalleryItem {
+  aspect-ratio: 4 / 3;
+  border-radius: 12px;
+  border: 0.5px solid #232B3A;
+  overflow: hidden;
+  background: #141822;
+}
+
+.detailGalleryItem img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* -------------------------------------------------------------
+ * Responsive Layout (Desktop 1440px -> Mobile 390px)
+ * ------------------------------------------------------------- */
+
+@media (max-width: 1024px) {
+  .heroSection {
+    padding: 100px 40px 48px;
+  }
+  .showcaseRow {
+    grid-template-columns: 1fr !important;
+    margin-top: 0 !important;
+  }
+  .textColLeft,
+  .textColRight {
+    transform: none !important;
+    padding: 40px !important;
+  }
+  .rowOverlap {
+    margin-top: 40px;
+  }
+  .sectionTitleWrap {
+    left: 40px;
+    right: 40px;
+  }
+  .sectionTitle {
+    font-size: 56px;
+  }
+  .sectionIntroWrap,
+  .projectsList,
+  .showreelSection,
+  .detailContainer {
+    padding-left: 40px;
+    padding-right: 40px;
+  }
+  .masonryGrid {
+    column-count: 2;
+    padding: 32px 40px 8px;
+  }
+  .projectRow {
+    flex-direction: column !important;
+    gap: 32px;
+    margin-bottom: 80px;
+  }
+  .projectRow > div {
+    transform: none !important;
+    width: 100% !important;
+  }
+}
+
+@media (max-width: 768px) {
+  .heroSection {
+    padding: 80px 24px 36px;
+  }
+  .heroTitle {
+    font-size: 42px;
+  }
+  .textColLeft,
+  .textColRight {
+    padding: 24px !important;
+  }
+  .categoryTag {
+    font-size: 22px;
+  }
+  .projectSummary {
+    font-size: 17px;
+  }
+  .seeMoreBtn {
+    font-size: 15px;
+  }
+  .panelNavButtons {
+    left: 20px;
+    right: 20px;
+    top: 20px;
+  }
+  .sectionTitleWrap {
+    left: 24px;
+    right: 24px;
+    bottom: 32px;
+  }
+  .sectionTitle {
+    font-size: 40px;
+  }
+  .sectionHero {
+    height: 340px;
+  }
+  .sectionIntroWrap,
+  .projectsList,
+  .showreelSection,
+  .detailContainer {
+    padding-left: 24px;
+    padding-right: 24px;
+  }
+  .sectionIntro {
+    font-size: 20px;
+  }
+  .detailTitle {
+    font-size: 36px;
+  }
+  .detailSummary {
+    font-size: 18px;
+  }
+  .masonryGrid {
+    column-count: 1;
+    padding: 24px 24px 8px;
+  }
+}

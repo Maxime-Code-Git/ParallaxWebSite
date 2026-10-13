@@ -6,22 +6,27 @@ import styles from "./header.module.css";
 interface HeaderProps {
   common: CommonContent;
   lang: "fr" | "en";
-  currentRoute: "home" | "studio";
+  currentRoute: "home" | "studio" | "portfolio";
+  alternateUrls?: { fr: string; en: string };
 }
 
-export function Header({ common, lang, currentRoute }: HeaderProps) {
+export function Header({ common, lang, currentRoute, alternateUrls }: HeaderProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const homeHref = `/${lang}`;
   const studioHref = `/${lang}/studio`;
   const contactHref = currentRoute === "home" ? "#contact" : `/${lang}#contact`;
   const sempraHref = currentRoute === "home" ? "#sempra" : `/${lang}#sempra`;
-  const portfolioHref = `/${lang}/projets`;
+  const portfolioHref = lang === "fr" ? "/fr/projets" : "/en/projects";
   const clientAreaHref = `/${lang}/espace-client`;
 
-  // Preserve page when switching language
-  const frSwitchHref = currentRoute === "studio" ? "/fr/studio" : "/fr";
-  const enSwitchHref = currentRoute === "studio" ? "/en/studio" : "/en";
+  // Preserve page when switching language (supports custom alternateUrls for project/section slugs)
+  const frSwitchHref =
+    alternateUrls?.fr ||
+    (currentRoute === "studio" ? "/fr/studio" : currentRoute === "portfolio" ? "/fr/projets" : "/fr");
+  const enSwitchHref =
+    alternateUrls?.en ||
+    (currentRoute === "studio" ? "/en/studio" : currentRoute === "portfolio" ? "/en/projects" : "/en");
 
   return (
     <>
@@ -37,7 +42,10 @@ export function Header({ common, lang, currentRoute }: HeaderProps) {
 
         <nav className={styles.nav}>
           <div className={`${styles.nav} ${styles.navLinksDesktop}`}>
-            <Link to={portfolioHref} className={styles.navLink}>
+            <Link
+              to={portfolioHref}
+              className={`${styles.navLink} ${currentRoute === "portfolio" ? styles.navLinkActive : ""}`}
+            >
               {common.navigation.portfolio[lang]}
             </Link>
             <Link

@@ -371,6 +371,32 @@ export const ENV = {
     return validateStorageDirectoryPath(val, "SITE_MEDIA_PATH");
   },
 
+  get PORTFOLIO_CONTENT_PATH(): string {
+    const isTest = process.env.NODE_ENV === "test";
+    const val = process.env.PORTFOLIO_CONTENT_PATH;
+
+    if (isTest) {
+      return validateTestPath(val, "PORTFOLIO_CONTENT_PATH");
+    }
+
+    return validateStoragePath(val, "PORTFOLIO_CONTENT_PATH");
+  },
+
+  get PORTFOLIO_MEDIA_PATH(): string {
+    const isTest = process.env.NODE_ENV === "test";
+    const val = process.env.PORTFOLIO_MEDIA_PATH;
+
+    if (isTest) {
+      const p = validateTestPath(val, "PORTFOLIO_MEDIA_PATH");
+      if (!fs.existsSync(p)) {
+        fs.mkdirSync(p, { recursive: true, mode: 0o700 });
+      }
+      return p;
+    }
+
+    return validateStorageDirectoryPath(val, "PORTFOLIO_MEDIA_PATH");
+  },
+
   get TRUST_PROXY(): boolean {
     return process.env.TRUST_PROXY === "true";
   },
@@ -408,6 +434,21 @@ export function validateContentConfig(): string {
 
 export function validateMediaConfig(): string {
   return ENV.SITE_MEDIA_PATH;
+}
+
+export function validatePortfolioContentConfig(): string {
+  return ENV.PORTFOLIO_CONTENT_PATH;
+}
+
+export function validatePortfolioMediaConfig(): string {
+  return ENV.PORTFOLIO_MEDIA_PATH;
+}
+
+export function validatePortfolioConfig(): { contentPath: string; mediaPath: string } {
+  return {
+    contentPath: ENV.PORTFOLIO_CONTENT_PATH,
+    mediaPath: ENV.PORTFOLIO_MEDIA_PATH,
+  };
 }
 
 export interface AdminConfig {
@@ -472,6 +513,7 @@ export function validateServerStartup(): void {
     }
     validateContentConfig();
     validateMediaConfig();
+    validatePortfolioConfig();
     if (process.env.NODE_ENV === "production") {
       validateAdminConfig();
     }

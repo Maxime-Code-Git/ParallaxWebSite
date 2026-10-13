@@ -125,10 +125,10 @@ describe("Admin UI Components", () => {
       }
 
       const activeBadges = screen.getAllByText("Actif");
-      expect(activeBadges.length).toBe(2);
+      expect(activeBadges.length).toBe(3);
 
       const nextLotBadges = screen.getAllByText("Lot suivant");
-      expect(nextLotBadges.length).toBe(6);
+      expect(nextLotBadges.length).toBe(5);
     });
   });
 });
