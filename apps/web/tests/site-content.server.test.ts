@@ -159,7 +159,7 @@ describe("site-content.server", () => {
 
   it("strictly rejects in-repo SITE_CONTENT_PATH when calling getSiteContentFilePath", () => {
     process.env.NODE_ENV = "production";
-    const inRepoPath = path.resolve(process.cwd(), "apps/web/site-content.json");
+    const inRepoPath = path.resolve(__dirname, "../site-content.json");
     process.env.SITE_CONTENT_PATH = inRepoPath;
 
     expect(() => getSiteContent()).toThrow(/CRITICAL:.*ne doit pas se trouver dans le depot/);

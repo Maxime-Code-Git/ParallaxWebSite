@@ -171,7 +171,9 @@ describe("Environment Validation (env.server.ts)", () => {
     });
 
     it("accepts execution with exit code 0 when artificial configuration is valid without requiring future variables", async () => {
-      const validDbPath = path.join(os.tmpdir(), `startup-test-${Date.now()}.sqlite`);
+      const validDir = fs.realpathSync(os.tmpdir());
+      const validDbPath = path.join(validDir, `startup-test-${Date.now()}.sqlite`);
+      const validContentPath = path.join(validDir, `startup-content-test-${Date.now()}.json`);
       await new Promise<void>((resolve, reject) => {
         execFile(
           "node",
@@ -185,6 +187,7 @@ describe("Environment Validation (env.server.ts)", () => {
               ADMIN_SESSION_SECRET: "valid-session-secret-min-32-chars-long!",
               RATE_LIMIT_SECRET: "valid-ratelimit-secret-min-32-chars-long!",
               RATE_LIMIT_DB_PATH: validDbPath,
+              SITE_CONTENT_PATH: validContentPath,
               TRUST_PROXY: "false",
             },
           },
