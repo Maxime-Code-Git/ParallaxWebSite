@@ -16,6 +16,9 @@ export default defineConfig({
     },
     dedupe: ["react", "react-dom", "react-router"],
   },
+  optimizeDeps: {
+    exclude: ["@node-rs/argon2"],
+  },
   css: {
     modules: {
       localsConvention: "camelCase",

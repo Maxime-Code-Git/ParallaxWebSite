@@ -15,11 +15,17 @@ export default defineConfig({
       ),
       "~": path.resolve(__dirname, "app"),
     },
+    dedupe: ["react", "react-dom", "react-router"],
   },
   test: {
     environment: "jsdom",
     globals: true,
     setupFiles: ["./tests/setup.ts"],
     include: ["tests/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}"],
+    server: {
+      deps: {
+        inline: ["react", "react-dom", "react-router"],
+      },
+    },
   },
 });

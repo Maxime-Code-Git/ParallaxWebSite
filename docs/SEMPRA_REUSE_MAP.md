@@ -1,10 +1,25 @@
-# Inventaire Technique de Reutilisation Sempra -> Parallax
+# Cartographie de Réutilisation Sempra -> Parallax
 
-Ce document dresse l'inventaire technique rigoureux des modules du depot de reference Sempra (commit `89bfee31ae5d477f71c95e83a0d55305521f426f`), a partir du code reellement consulte.
+Ce document inventorie formellement les briques techniques de référence du projet Sempra (`TimelessWebSite`, commit `89bfee31ae5d477f71c95e83a0d55305521f426f`), définit leur statut de réutilisation pour Parallax, et détaille les adaptations nécessaires.
 
-Pour chaque rubrique, ce document precise les fichiers existants, les fonctions et types observes, le statut de reutilisation, les adaptations necessaires pour Parallax, les tests Sempra associes et les elements non verifies.
+---
 
-Important : Le systeme de galerie Parallax reposera imperativement sur un code d'acces unique par galerie. Aucun niveau d'acces invite ou couple, aucun champ `accessLevel` et aucune terminologie de mariage ne sera integre dans la gestion des galeries Parallax.
+## Statut d'avancement par lot
+
+| Brique technique | Périmètre Sempra | Statut Parallax | Lot d'implémentation |
+|---|---|---|---|
+| **Authentification & Session Admin** | `auth.server.ts`, `session.server.ts` | **Porté et adapté** | **Lot 1 & 1 bis** (`apps/web/app/lib/auth.server.ts`, `session.server.ts`) |
+| **Sécurité des requêtes & Rate limiting** | `security.server.ts`, `rate-limit.server.ts` | **Porté et adapté** | **Lot 1 & 1 bis** (`apps/web/app/lib/security.server.ts`, `rate-limit.server.ts`) |
+| **Headers de sécurité & CSP SSR** | `entry.server.tsx` | **Porté et adapté** | **Lot 1 & 1 bis** (`apps/web/app/entry.server.tsx`) |
+| **Outil de hachage CLI** | `scripts/admin-hash.js` | **Porté et adapté** | **Lot 1 & 1 bis** (`apps/web/scripts/admin-hash.js`) |
+| **Schéma éditorial & Persistance atomique** | `site-content.server.ts`, `atomic-fs.server.ts` | **Différé** | Lot 2 (Éditorial V1) |
+| **Portfolio & Médias publics** | `portfolio-content.server.ts`, `portfolio-media.server.ts` | **Différé** | Lot 3 (Portfolio & vitrine) |
+| **Galeries privées & Téléchargements ZIP** | `gallery-*.server.ts`, code unique | **Différé** | Lot 4 (Espace client & galeries) |
+| **Previews WebP / Sharp** | `gallery-preview.server.ts`, `portfolio-image.server.ts` | **Différé** | Lot 4 / Lot 3 |
+| **Suppression & Rétention RGPD** | `gallery-deletion-worker.server.ts` | **Différé** | Lot 5 |
+| **Formulaire Contact & Mailer** | `contact.server.ts`, `mailer.server.ts` | **Différé** | Lot 6 |
+| **Pages légales & Inventaire cookies** | `admin.legal.tsx`, cookies techniques | **Différé** | Lot 7 |
+| **Tests E2E & Runner Playwright** | `run-e2e.js`, `playwright.config.ts` | **Différé** | Lot dédié ultérieur |
 
 ---
 
@@ -26,12 +41,14 @@ Important : Le systeme de galerie Parallax reposera imperativement sur un code d
    - `requireValidAdminSession(request)` dans `admin-auth.server.ts` : redirection `/admin` avec destruction du cookie si session invalide.
 
 3. **Choix** :
-   - **Adapter**.
+   - **Porté et adapté au Lot 1 & 1 bis**.
 
 4. **Adaptations Parallax** :
-   - Renommer le cookie de session (ex: `__parallax_admin_session`).
+   - Renommer le cookie de session (`__parallax_admin_session`).
    - Utiliser les variables d'environnement propres a Parallax (`ADMIN_SESSION_SECRET`, `ADMIN_PASSWORD_HASH`).
-   - Aligner les redirections sur les routes Parallax.
+   - Duree de session bornee a 8h validee cote serveur via timestamp signe (`expiresAt`).
+   - Session anonyme temporaire pour acheminer le CSRF sans privileges admin, avec regeneration complete de session et rotation du CSRF apres connexion.
+   - Aligner les redirections et en-tetes sur les routes Parallax (`/admin`, `/admin/dashboard`, `/admin/logout`).
 
 5. **Tests Sempra pertinents** :
    - `apps/web/tests/admin-auth.server.test.ts`
@@ -61,13 +78,13 @@ Important : Le systeme de galerie Parallax reposera imperativement sur un code d
    - `entry.server.tsx` : generation de nonce cryptographique (`generateNonce`), injection de nonce dans `ServerRouter` pour l'hydratation SSR, en-tetes `nosniff`, `X-Frame-Options: DENY`, `Permissions-Policy`.
 
 3. **Choix** :
-   - **Adapter**.
+   - **Porté et adapté au Lot 1 & 1 bis**.
 
 4. **Adaptations Parallax** :
-   - Adapter les directives CSP aux embeds video externes autorises pour Parallax (Vimeo, YouTube nocookie pour showreel et realisations).
-   - Interdire strictement les styles inline en cible de production (garanti par l'usage exclusif de CSS Modules).
-   - Maintenir les scripts techniques d'hydratation autorises exclusivement via le nonce de la reponse.
-   - Isoler la base de donnees du rate limiting via `RATE_LIMIT_DB_PATH` hors du depot.
+   - Validation stricte de l'Origin interdisant identifiants, requetes ou chemins.
+   - Lecture bornee en streaming a 8 Kio pour l'authentification et la deconnexion avec verification des champs autorises et rejet des doublons.
+   - Limitation transactionnelle SQLite a 5 tentatives sur 15 minutes, IP anonymisee par HMAC-SHA256 avec cle dediee, dossier prive 0700 et fichier 0600.
+   - En-tetes SSR `Cache-Control: no-store` et `X-Robots-Tag: noindex, nofollow` appliques a toutes les reponses d'administration.
 
 5. **Tests Sempra pertinents** :
    - `apps/web/tests/security.server.test.ts`
@@ -92,7 +109,7 @@ Important : Le systeme de galerie Parallax reposera imperativement sur un code d
    - Note sur la concurrence : l'ecriture atomique garantit l'integrite physique du fichier en cas de plantage, mais ne constitue pas un verrouillage distribue entre processus distincts (d'ou la necessite de la detection de revision).
 
 3. **Choix** :
-   - **Adapter**.
+   - **Différé pour les formulaires éditoriaux du Lot 2**.
    - Note : Zod reste une option de conception elegante pour le futur schema Parallax, mais doit etre distingue du validateur manuel observe dans Sempra.
 
 4. **Adaptations Parallax** :
@@ -127,7 +144,7 @@ Important : Le systeme de galerie Parallax reposera imperativement sur un code d
    - `portfolio-transaction.server.ts` : coordination transactionnelle entre ecriture disque et mise a jour des metadonnees.
 
 3. **Choix** :
-   - **Adapter**.
+   - **Différé au Lot 3 (Portfolio & vitrine)**.
 
 4. **Adaptations Parallax** :
    - Deux rubriques structurelles distinctes : Documentaire et Publicite.
@@ -138,46 +155,38 @@ Important : Le systeme de galerie Parallax reposera imperativement sur un code d
 
 5. **Tests Sempra pertinents** :
    - `apps/web/tests/portfolio-content.server.test.ts`
-   - `apps/web/tests/portfolio-image.server.test.ts`
-   - `apps/web/tests/portfolio-transaction.server.test.ts`
-   - `apps/web/tests/portfolio-video-cover.test.ts`
+   - `apps/web/tests/portfolio-media.test.ts`
 
 6. **Elements non verifies** :
-   - Integration d'un lecteur video personnalise avec streaming adapte.
+   - Comportement des transitions CSS sous charge reseau lente.
 
 ---
 
-## 5. Galerie privee (architecture a code unique)
+## 5. Galeries privees et telechargement ZIP
 
 1. **Fichiers consultes (commit Sempra `89bfee31ae5d477f71c95e83a0d55305521f426f`)** :
-   - `apps/web/app/lib/gallery-auth.server.ts`
    - `apps/web/app/lib/gallery-db.server.ts`
-   - `apps/web/app/lib/gallery.server.ts`
-   - `apps/web/app/lib/gallery-import.server.ts`
+   - `apps/web/app/lib/gallery-session.server.ts`
+   - `apps/web/app/lib/gallery-zip.server.ts`
+   - `apps/web/app/lib/crypto.server.ts`
 
 2. **Fonctions, types et comportements observes** :
-   - `hashGalleryCode(code)` : hachage HMAC-SHA256 du code d'acces pour recherche indexee en base sans stockage en clair.
-   - `encryptGalleryCode(code)` et `decryptGalleryCode(str)` : chiffrement AES-256-GCM permettant a l'administrateur de relire le code si necessaire.
-   - `gallerySessionStorage` : session de galerie isolee sous cookie dedie.
-   - `gallery-db.server.ts` : tables SQLite pour les galeries, medias et imports.
-   - Dans Sempra existaient `GalleryAccessLevel = "invites" | "maries"` et `isMediaAuthorized` : ces notions sont des specificites de mariage a supprimer integralement.
+   - `gallery-db.server.ts` : moteur SQLite dedie avec chiffrement AES-256-GCM des donnees sensibles et table `gallery_access_codes` associant les codes d'acces aux galeries.
+   - `gallery-session.server.ts` : gestion des sessions clients par cookies HTTP-only distincts (`__gallery_session`).
+   - `gallery-zip.server.ts` : generation et streaming a la volee d'archives ZIP non compressees via `yazl`.
+   - `crypto.server.ts` : fonctions de derivation de cle PBKDF2 et chiffrement AES-256-GCM.
 
 3. **Choix** :
-   - **Adapter en simplifiant radicalement**.
+   - **Différé au Lot 4 (Espace client & galeries)**.
 
-4. **Adaptations Parallax obligatoires** :
-   - Exactement UN code actif par galerie.
-   - Contrainte SQLite `UNIQUE(gallery_id)` sur la table des codes.
-   - Hachage HMAC pour recherche, AES-GCM pour restitution par l'admin, AUCUN mot de passe stocke en clair.
-   - Gestion d'une version de code (`code_version`) pour invalider immediatement les sessions apres rotation.
-   - Session client de galerie strictement separee de la session administrateur.
-   - Suppression totale de `accessLevel`, de la separation invite/couple et de tout vocabulaire de mariage dans la galerie.
-   - (Rappel : le bloc SEMPRA de la page d'accueil presente son activite de mariage, mais le moteur de galerie Parallax en est totalement affranchi).
+4. **Adaptations Parallax** :
+   - **Modele a code unique strict** : suppression totale des niveaux d'acces maries/invites et de tout vocabulaire relatif au mariage.
+   - Une galerie Parallax est identifiee par un identifiant opaque et un code d'acces unique de telechargement/consultation.
+   - Stockage separe defini par `GALLERY_DB_PATH`, `GALLERY_MEDIA_PATH` et `GALLERY_IMPORT_PATH`.
 
 5. **Tests Sempra pertinents** :
-   - `apps/web/tests/gallery.test.ts`
    - `apps/web/tests/gallery-db.server.test.ts`
-   - `apps/web/tests/admin-gallery-integration.server.test.ts`
+   - `apps/web/tests/gallery-zip.server.test.ts`
 
 6. **Elements non verifies** :
    - Impact sur les temps de reponse lors du telechargement simultane d'archives ZIP volumineuses par plusieurs clients.
@@ -205,8 +214,7 @@ Important : Le systeme de galerie Parallax reposera imperativement sur un code d
    - Pipeline des medias publics dans `portfolio-image.server.ts` : generation des variantes adaptees a la mise en page du site.
 
 3. **Choix** :
-   - **Porter** tel quel le pipeline `gallery-preview.server.ts` pour la galerie privee.
-   - **Adapter** le pipeline public aux dimensions graphiques de Parallax.
+   - **Différé au Lot 4 (galerie privée) et Lot 3 (médias publics)**.
 
 4. **Adaptations Parallax** :
    - Separation nette entre variantes publiques (adaptees aux grilles du site) et variantes de galerie privee (480, 960, 1920 px).
@@ -234,7 +242,7 @@ Important : Le systeme de galerie Parallax reposera imperativement sur un code d
    - `admin.data-retention.tsx` : interface d'administration de conformite RGPD avec declenchement manuel ou planifie.
 
 3. **Choix** :
-   - **Adapter**.
+   - **Différé au Lot 5**.
 
 4. **Adaptations Parallax** :
    - Adapter les regles contractuelles de conservation aux missions de production audiovisuelle (publicites, documentaires, clips).
@@ -263,7 +271,7 @@ Important : Le systeme de galerie Parallax reposera imperativement sur un code d
    - Envoi d'un double e-mail : notification a l'equipe et accuse de reception au contact.
 
 3. **Choix** :
-   - **Adapter**.
+   - **Différé au Lot 6**.
 
 4. **Adaptations Parallax** :
    - Champs du formulaire conformes au prototype Parallax :
@@ -305,7 +313,7 @@ Important : Le systeme de galerie Parallax reposera imperativement sur un code d
    - Validation stricte des sections legales bilingues.
 
 3. **Choix** :
-   - **Adapter**.
+   - **Différé au Lot 7**.
 
 4. **Adaptations Parallax** :
    - Conserver l'integralite du cycle de vie brouillon / publication / archive / restauration dans l'admin.
@@ -336,10 +344,10 @@ Important : Le systeme de galerie Parallax reposera imperativement sur un code d
    - Fermeture propre et garantie des processus fils.
 
 3. **Choix** :
-   - **Non repris dans ce lot de bootstrap**.
+   - **Non repris dans ce lot de bootstrap ou le socle admin**.
 
 4. **Adaptations Parallax** :
-   - Les tests E2E ne sont pas configures dans ce bootstrap et feront l'objet d'un lot dedie ulterieur apres autorisation explicite de l'utilisateur.
+   - Les tests E2E ne sont pas configures dans ce lot et feront l'objet d'un lot dedie ulterieur apres autorisation explicite de l'utilisateur.
 
 5. **Tests Sempra pertinents** :
    - `apps/web/tests/e2e-runner.test.ts`
