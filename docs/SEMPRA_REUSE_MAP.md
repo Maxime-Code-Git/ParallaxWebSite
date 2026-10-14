@@ -303,30 +303,33 @@ Ce document inventorie formellement les briques techniques de référence du pro
 
 ---
 
-## 7. Suppression et retention
+## 7. Suppression et rétention (Lot 5)
 
-1. **Fichiers consultes (commit Sempra `89bfee31ae5d477f71c95e83a0d55305521f426f`)** :
-   - `apps/web/app/lib/gallery-deletion-worker.server.ts`
-   - `apps/web/app/routes/admin.data-retention.tsx`
+1. **Fichiers consultés (commit Sempra `89bfee31ae5d477f71c95e83a0d55305521f426f`)** :
+   - `apps/web/app/routes/admin.data-retention.tsx` : Structure de l'interface de recherche, sélection bornée, modale de confirmation, suivi des jobs et relance.
+   - `apps/web/app/routes/admin.data-retention.module.css` : Présentation des listes tabulaires, badges de statut et boîtes de dialogue modales.
+   - `apps/web/app/lib/gallery-db.server.ts` : Suppression transactionnelle avec intention durable, quarantaine `.trash` et journalisation.
+   - `apps/web/app/lib/gallery-deletion-worker.server.ts` : Traitement par lots sous baux avec tentatives bornées, erreurs sûres et relance de jobs échoués.
+   - `apps/web/tests/admin-data-retention-gallery.server.test.ts` : Cas de tests transactionnels, fichiers disque, isolation de la source, rejet des symlinks, reprise après crash et échecs groupés.
+   - `apps/web/app/routes/api.admin.data-retention.booking-export.ts` : Architecture d'un point d'accès d'export sécurisé d'administration.
+   - `apps/web/e2e/data-retention.spec.ts` : Scénarios d'accessibilité clavier, modale et focus trap (consultés statiquement).
 
-2. **Fonctions, types et comportements observes** :
-   - `resumeGalleryDeletions()` : repris automatiquement au demarrage dans `entry.server.tsx` pour executer les purges planifiees en suspens.
-   - Suppression en deux temps : marquage d'expiration en base, puis suppression physique des repertoires sur disque avec logs d'audit.
-   - `admin.data-retention.tsx` : interface d'administration de conformite RGPD avec declenchement manuel ou planifie.
+2. **Éléments non repris de Sempra** :
+   - Aucune réservation, calendrier, contact couple ou terminologie de mariage (galeries de projets studio Parallax uniquement).
+   - Aucun niveau d'accès invité / couple.
+   - Aucune durée de conservation arbitraire ou légale inventée (pas de règle fixe de 24 mois imposée).
+   - Aucune migration historique Sempra ni table bookings.
+   - Aucun effacement direct sur disque avant validation de l'intention en base de données.
 
-3. **Choix** :
-   - **Différé au Lot 5**.
-
-4. **Adaptations Parallax** :
-   - Adapter les regles contractuelles de conservation aux missions de production audiovisuelle (publicites, documentaires, clips).
-   - Adapter les journaux d'audit et les notifications administrateur.
-
-5. **Tests Sempra pertinents** :
-   - `apps/web/tests/admin-data-retention-gallery.server.test.ts`
-   - `apps/web/tests/admin-data-retention-booking.server.test.ts`
-
-6. **Elements non verifies** :
-   - Comportement en cas de point de montage disque sature ou inaccessible lors de la purge.
+3. **Adaptations et durcissements Parallax** :
+   - **Moteur unique de suppression** : Rapprochement de la suppression unitaire (éditeur de galerie) et de la suppression groupée (tableau de rétention) via un service unique `deleteGalleriesWithIntentBulk`.
+   - **Politique de rétention désactivée par défaut** : La politique automatique s'initialise à `enabled: 0` avec un délai `retention_days: NULL` (« Non configurée »). Aucune purge automatique n'intervient sans configuration et activation explicites dans l'administration.
+   - **Prévisualisation d'impact obligatoire** : Toute activation ou réduction du délai de rétention exige une simulation préalable affichant la liste exacte des galeries immédiatement éligibles et le volume estimé, avec confirmation explicite par case à cocher.
+   - **Sélection groupée bornée** : Limitation stricte à 50 galeries par lot avec validation de révision optimiste (renvoi d'erreur 409 et préservation de la saisie sans altération partielle en cas de conflit).
+   - **Quarantaine sécurisée et reprise sur crash** : Les médias sont déplacés dans `.trash/gallery-deletions/<jobId>` (permissions `0700`) en dehors de la transaction SQLite. La réconciliation post-crash gère les fichiers restés à l'origine comme ceux déjà en quarantaine.
+   - **Protection des sources d'import** : Les fichiers originaux déposés dans `gallery-import/<projet>/` ne sont jamais supprimés par la purge automatique ; le bilan signale les dossiers sources connus avec instructions de nettoyage manuel.
+   - **Exports privés sécurisés** : Export métadonnées JSON sans secrets, codes chiffrés, sessions, IP ni chemins système ; export archive ZIP streaming paresseux protégé par `O_NOFOLLOW` avec annulation immédiate des descripteurs.
+   - **Accessibilité WAI-ARIA** : Modale accessible sans styles inline, piège de focus complet, fond inerte (`aria-hidden`), fermeture par touche Échap et restauration du focus.
 
 ---
 

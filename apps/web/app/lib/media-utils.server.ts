@@ -149,13 +149,13 @@ export function openSecureMediaFile(baseDir: string, segments: string[]): Secure
       if (isClosed) throw new Error("File descriptor already closed");
       const readStream = fs.createReadStream(verifiedPath, {
         fd,
-        autoClose: false,
+        autoClose: true,
         start: options?.start,
         end: options?.end,
       });
-      readStream.on("close", safeClose);
-      readStream.on("end", safeClose);
-      readStream.on("error", safeClose);
+      readStream.on("close", () => {
+        isClosed = true;
+      });
       return readStream;
     },
     close: safeClose,

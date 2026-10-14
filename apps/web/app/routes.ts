@@ -28,6 +28,8 @@ export default [
   route("admin/galleries/new", "routes/admin/galleries-new.tsx"),
   route("admin/galleries/:id", "routes/admin/galleries-edit.tsx"),
   route("admin/galleries/:id/preview", "routes/admin/galleries-preview.tsx"),
+  route("admin/data-retention", "routes/admin/data-retention.tsx"),
+  route("admin/data-retention/settings", "routes/admin/data-retention-settings.tsx"),
   route("admin/logout", "routes/admin/logout.tsx"),
 
   // Client Area Login FR/EN
@@ -51,6 +53,7 @@ export default [
   route("api/admin/galleries/:id/imports/:importId", "routes/api/admin-gallery-import-status.ts"),
   route("api/admin/galleries/:id/media/:mediaId/poster", "routes/api/admin-gallery-media-poster.ts"),
   route("api/admin/galleries/:id/media/:mediaId", "routes/api/admin-gallery-media.ts"),
+  route("api/admin/data-retention/gallery-export", "routes/api/admin-gallery-export.ts"),
 
   // Media API & Public variants serving
   route("api/admin/media-upload", "routes/api/admin-media-upload.ts"),

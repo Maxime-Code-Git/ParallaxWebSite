@@ -240,3 +240,119 @@ Depuis la racine du monorepo :
    - `POST /api/admin/galleries/:id/import` : Analyse du dossier source puis demarrage du job a bail persistant.
    - `GET /api/admin/galleries/:id/imports/:importId` : Suivi de progression temps reel de l'import.
    - `POST /api/admin/galleries/:id/media/:mediaId/poster` : Televersement de poster video via formulaire natif streaming (Sharp, limite 25 MiB).
+
+## 11. Conservation, suppression et exports des galeries (Lot 5)
+
+1. **Schéma de base de données V2 et migrations idempotentes** :
+   - Migration transactionnelle enregistrée dans `gallery_schema` sous le nom `parallax_gallery_v2`.
+   - Table `retention_settings` :
+     - `id` = 1 (singleton unique).
+     - `enabled` (0 ou 1, 0 par défaut : la suppression automatique commence systématiquement **désactivée**).
+     - `retention_days` (entier en jours ou `NULL` tant qu'il n'est pas configuré : affiche « Non configurée »).
+     - `log_retention_days` (entier en jours ou `NULL`).
+     - `revision` (entier incrémenté à chaque modification pour le contrôle de concurrence optimiste).
+     - `updated_at` (timestamp millisecondes UTC).
+   - Colonnes ajoutées à la table `galleries` :
+     - `retention_exempt` (0 ou 1, 0 par défaut).
+     - `retention_exempt_reason` (texte court décrivant le motif sans données personnelles sensibles).
+   - Colonnes ajoutées à la table `gallery_deletion_jobs` pour l'audit et le suivi :
+     - `decision_source` (source de la décision : `'manual'` ou `'policy_rev_<X>'`).
+     - `gallery_title` (titre mémorisé pour l'affichage de l'historique après effacement).
+     - `media_count` et `total_size` (métriques réelles des fichiers purgés).
+     - `completed_at` (timestamp de finalisation de la purge disque).
+
+2. **Moteur unifié de suppression (`gallery-db.server.ts` & `gallery-retention.server.ts`)** :
+   - Service unique pour la suppression unitaire et la suppression groupée (maximum 50 galeries par lot).
+   - **Validation transactionnelle préalable** :
+     - Vérification de l'existence de chaque galerie, de son statut et de sa révision attendue (`expectedRevision`).
+     - En cas de divergence de révision ou d'identifiant inconnu, l'opération échoue globalement avec une erreur HTTP 409 et aucune galerie ne subit de mutation partielle.
+     - Annulation immédiate de tout import actif associé aux galeries ciblées.
+     - Suppression en cascade immédiate des codes d'accès (`gallery_codes`) et des sessions dans la transaction SQLite.
+     - Création d'une intention de suppression durable (`status = 'pending'`) dans `gallery_deletion_jobs`.
+   - **Déplacement en quarantaine et suppression physique hors transaction** :
+     - Déplacement atomique du dossier de galerie vers `.trash/gallery-deletions/<jobId>` sous permissions strictes `0700`.
+     - Les suppressions récursives sur disque ne bloquent jamais la transaction SQLite.
+     - Le worker d'arrière-plan traite les jobs en quarantaine, procède à l'effacement définitif et met à jour le statut en `'completed'`.
+     - **Reprise après crash** : L'algorithme réconcilie les deux cas possibles après un redémarrage impromptu : fichiers encore à l'emplacement d'origine dans `GALLERY_MEDIA_PATH`, ou fichiers déjà transférés dans `.trash/`.
+
+3. **Politique de rétention et calculs de dates** :
+   - **Distinction stricte** :
+     - `expires_at` : Date de fin d'accès pour les clients (page et médias retournent 401).
+     - `scheduled_purge_at` : Date prévisionnelle de destruction physique calculée en UTC selon la formule :
+       $$\text{scheduledPurgeAt} = \text{expiresAt} + (\text{retentionDays} \times 86\,400\,000\text{ ms})$$
+     - Tant que `retention_days` est `null`, la purge affiche « Non configurée » et aucune suppression automatique n'a lieu.
+   - **Éligibilité à la purge automatique** :
+     - Statut obligatoirement publié ou archivé.
+     - `expires_at` non nul, échu dans le passé.
+     - `scheduled_purge_at` atteint dans le passé.
+     - `retention_exempt = 0` (les galeries exemptées sont protégées de la purge automatique).
+     - Aucun import en cours (en cas d'import actif, la purge est différée au cycle suivant).
+   - **Simulation obligatoire avant enregistrement** :
+     - Toute activation (`enabled: true`) ou réduction du délai de rétention exige de simuler l'impact sur l'écran `/admin/data-retention/settings`.
+     - La simulation affiche le nombre exact de galeries immédiatement éligibles et le volume estimé.
+     - Une confirmation explicite par case à cocher est obligatoire pour enregistrer les paramètres lorsqu'au moins une galerie devient éligible immédiatement.
+
+4. **Exports privés sécurisés (`/api/admin/data-retention/gallery-export`)** :
+   - Point d'accès réservé à l'administrateur connecté (`POST` avec vérification stricte `Origin` et CSRF constant-time).
+   - **Export JSON structuré** :
+     - `schemaVersion: 1`, métadonnées éditoriales bilingues FR/EN, nom client, dates et statuts.
+     - Inventaire détaillé des médias : nom original, type, taille, dimensions, hash de contenu SHA-256.
+     - Exclusion absolue de tout secret : ni code en clair, ni hash/chiffrement de code, ni token CSRF, ni cookie de session, ni chemin système absolu.
+   - **Export archive ZIP des originaux** :
+     - Streaming paresseux via `yazl` avec descripteurs de fichiers sécurisés (`openSecureMediaFile` avec `O_RDONLY | O_NOFOLLOW`).
+     - Vérification de la chaîne de répertoires contre tout lien symbolique.
+     - Quota de concurrence dédié (`MAX_CONCURRENT_EXPORT_ZIPS = 3`) et libération immédiate du slot et des descripteurs en cas d'interruption par le client.
+   - Si une suppression est déjà engagée (`pending` ou `processing`), la demande d'export est immédiatement rejetée avec HTTP 409 pour éviter toute extraction tronquée.
+
+5. **Superviseur d'arrière-plan et journalisation technique** :
+   - Le superviseur existant dans `gallery-import.server.ts` coordonne périodiquement :
+     - Le traitement des suppressions en quarantaine (`processGalleryDeletions`).
+     - L'avancement des imports en attente (`processNextPendingImport`).
+     - Le cycle de purge automatique (`runRetentionAutoPurgeCycle`).
+     - L'élagage des journaux d'audit de suppression finalisés (`pruneRetentionAuditLogs`) selon `log_retention_days`.
+   - Journal minimal : identifiant opaque de job, date, volume et nombre de médias, statut final et code d'erreur normalisé. Aucun e-mail, code, nom de client ou chemin système stocké dans l'audit.
+
+## 12. Guide d'exploitation, sauvegardes et restauration (Déploiement Mac mini)
+
+### Sauvegarde à chaud cohérente
+Pour sauvegarder l'application Parallax sur le Mac mini de production sans interrompre le service :
+
+1. **Sauvegarde de la base de données SQLite** :
+   Utiliser la commande native `VACUUM INTO` ou `.backup` de SQLite pour obtenir un snapshot cohérent même sous trafic actif :
+   ```bash
+   sqlite3 /Users/profadmin/.parallax-data/gallery.sqlite ".backup '/Users/profadmin/Backups/gallery-$(date +%Y%m%d%H%M%S).sqlite'"
+   ```
+2. **Sauvegarde du répertoire des médias** :
+   Synchroniser le dossier des médias stockés avec `rsync` :
+   ```bash
+   rsync -a --delete /Users/profadmin/.parallax-data/gallery-media/ /Users/profadmin/Backups/gallery-media/
+   ```
+3. **Sauvegarde du contenu du site et portfolio** :
+   ```bash
+   cp /Users/profadmin/.parallax-data/site-content.json /Users/profadmin/Backups/
+   rsync -a --delete /Users/profadmin/.parallax-data/portfolio-media/ /Users/profadmin/Backups/portfolio-media/
+   ```
+
+### Procédure de restauration sécurisée
+Lors de la restauration d'une sauvegarde antérieure (ex: suite à un incident matériel sur le Mac mini) :
+
+> [!WARNING]
+> **Risque de réouverture intempestive de galeries purgées** :
+> Si une sauvegarde ancienne est restaurée sans précaution, des galeries dont la rétention était expirée et les médias supprimés pourraient réapparaître en base.
+> Il est impératif d'isoler le réseau avant de relancer le service Parallax.
+
+1. **Arrêt complet du serveur Node.js** :
+   S'assurer qu'aucun processus Parallax n'est actif.
+2. **Restauration des fichiers SQLite et médias** :
+   Restaurer la base `gallery.sqlite` et le dossier `gallery-media/`.
+3. **Réconciliation hors ligne avant réouverture réseau** :
+   - Démarrer l'application avec `PARALLAX_LOCAL_PREVIEW=true` sur `127.0.0.1`.
+   - Se connecter à l'administration `/admin/data-retention`.
+   - Vérifier la cohérence entre les galeries présentes en base et les dossiers réels sur disque.
+   - Si la politique automatique était active, s'assurer que les dates d'expiration des galeries restaurées reflètent la volonté de l'opérateur (au besoin, activer l'exemption de rétention sur les galeries restaurées avant de réactiver le service public).
+4. **Réouverture du service public en production**.
+
+### Limites matérielles et effacement SSD
+- L'appel système `unlink` sous macOS / APFS marque les blocs de données comme non alloués dans le système de fichiers.
+- Sur les supports SSD (comme le stockage flash interne des Mac mini), l'effacement physique effectif des cellules dépend des cycles d'usure (wear-leveling) et des commandes TRIM opérées par macOS.
+- Le module de rétention garantit la révocation logique immédiate, la suppression des métadonnées applicatives et la libération des fichiers au niveau du système de fichiers, sans prétendre à un écrasement multipasse magnétique de bas niveau.

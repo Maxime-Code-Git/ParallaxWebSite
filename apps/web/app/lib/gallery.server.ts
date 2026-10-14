@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { getGalleryDb } from "./gallery-db.server";
+import { getGalleryDb, GalleryConflictError } from "./gallery-db.server";
 import {
   generateGalleryCode,
   hashGalleryCode,
@@ -22,6 +22,8 @@ export interface Gallery {
   expires_at: number | null;
   cover_media_id: string | null;
   revision: number;
+  retention_exempt?: number;
+  retention_exempt_reason?: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -95,12 +97,7 @@ export interface PublicMediaDto {
   posterRevision: number;
 }
 
-export class GalleryConflictError extends Error {
-  constructor(message = "Conflit de revision : la galerie a ete modifiee par une autre operation.") {
-    super(message);
-    this.name = "GalleryConflictError";
-  }
-}
+export { GalleryConflictError };
 
 export class GalleryValidationError extends Error {
   constructor(message: string) {
