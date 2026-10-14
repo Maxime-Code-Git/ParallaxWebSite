@@ -6,6 +6,12 @@ import { ENV } from "./env.server";
 import { getGalleryDb, processGalleryDeletions } from "./gallery-db.server";
 import { generateAllPreviews, removePreviews } from "./gallery-preview.server";
 import { verifySecurePathChain, imageProcessingLimiter, ConcurrencyLimitError } from "./media-image.server";
+import {
+  getRetentionSettings,
+  getRetentionEligibleGalleries,
+  deleteGalleriesWithIntentBulk,
+  pruneRetentionAuditLogs,
+} from "./gallery-retention.server";
 
 export const MAX_MEDIA_COUNT = 2000;
 export const MAX_PHOTO_FILE_SIZE = 50 * 1024 * 1024; // 50 MiB
@@ -849,8 +855,31 @@ let backgroundTimer: NodeJS.Timeout | null = null;
 let isRunningBackground = false;
 
 /**
+ * Executes a single cycle of automatic retention purge for eligible expired galleries.
+ */
+export function runRetentionAutoPurgeCycle(): number {
+  const db = getGalleryDb();
+  const settings = getRetentionSettings(db);
+  if (!settings.enabled || settings.retentionDays === null) return 0;
+
+  const eligible = getRetentionEligibleGalleries(50);
+  if (eligible.length === 0) return 0;
+
+  const items = eligible.map((g: { id: string; revision: number }) => ({ id: g.id, expectedRevision: g.revision }));
+  try {
+    const results = deleteGalleriesWithIntentBulk(items, {
+      decisionSource: `policy_rev_${settings.revision}`,
+      checkAutoEligibility: true,
+    });
+    return results.length;
+  } catch {
+    return 0;
+  }
+}
+
+/**
  * Starts the single-instance background worker supervisor.
- * Recovers pending imports and quarantine deletions automatically.
+ * Recovers pending imports, quarantine deletions, and runs retention policy automatically.
  */
 export function startGalleryBackgroundSupervisor(intervalMs = 3000): void {
   if (backgroundTimer) return;
@@ -861,6 +890,8 @@ export function startGalleryBackgroundSupervisor(intervalMs = 3000): void {
     try {
       processGalleryDeletions();
       await processNextPendingImport();
+      runRetentionAutoPurgeCycle();
+      pruneRetentionAuditLogs();
     } catch {
       // Suppress background errors
     } finally {

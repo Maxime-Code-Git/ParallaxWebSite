@@ -72,8 +72,10 @@ function createLazySecureEntryStream(
             }
           });
           fileStream.on("end", () => {
-            cleanup();
             this.push(null);
+          });
+          fileStream.on("close", () => {
+            cleanup();
           });
           fileStream.on("error", (err) => {
             cleanup();

@@ -148,3 +148,28 @@ Si le serveur s'arrête ou redémarre pendant un import :
 - Le worker d'import reprend les jobs en cours grâce au mécanisme de bail SQLite expiré.
 - Les fichiers partiellement copiés en zone temporaire sont nettoyés.
 - Les doublons de médias déjà importés et vérifiés sont ignorés sans corruption.
+
+---
+
+## 7. Préservation des Sources Déposées dans `gallery-import/` (Lot 5)
+
+### Principe d'isolation absolue
+Lors de la suppression d'une galerie (qu'elle soit déclenchée manuellement depuis l'éditeur, par sélection groupée dans le tableau de rétention, ou par la purge automatique programmée) :
+- Seules les données applicatives de Parallax sont purgées : entrées en base SQLite, enregistrements de médias, clés d'accès et répertoires confinés sous `GALLERY_MEDIA_PATH` (`~/.parallax-data/gallery-media/<galleryId>`).
+- **Les fichiers originaux déposés par Maxime dans `gallery-import/<projet>/` (photos et vidéos) ne sont JAMAIS supprimés ni modifiés automatiquement par le moteur de rétention.**
+- Parallax considère `gallery-import/` comme un espace de dépôt utilisateur externe ; le service s'interdit d'y appliquer toute opération destructive `rm` ou `unlink`.
+
+### Bilan et signalement des sources
+À l'issue de chaque suppression d'une galerie :
+1. Le bilan de suppression relève les dossiers sources associés aux jobs d'import passés.
+2. Si le dossier source est encore détecté sur le disque sous `gallery-import/`, son chemin relatif est clairement affiché dans l'administration.
+3. Le système rappelle que plusieurs galeries ont pu être alimentées depuis la même source (par exemple un ré-import ou une sélection partielle) et ne déduit jamais une exclusivité d'usage.
+
+### Guide de nettoyage manuel par l'opérateur
+Pour libérer de l'espace disque sur le Mac après avoir supprimé une galerie dans Parallax :
+1. Vérifier que la galerie n'est plus nécessaire et qu'aucun autre projet n'exploite ces fichiers sources.
+2. Ouvrir le Finder et naviguer vers le dossier d'import :
+   ```bash
+   open "/Users/profadmin/Documents/Antigravity/Parallax Website/ParallaxWebSite-admin/gallery-import"
+   ```
+3. Supprimer manuellement le sous-dossier correspondant au projet traité.
