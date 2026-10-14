@@ -142,6 +142,47 @@ describe("Environment Validation (env.server.ts)", () => {
     expect(config.hash).toBe(process.env.ADMIN_PASSWORD_HASH);
   });
 
+  describe("GALLERY_IMPORT_PATH Validation", () => {
+    it("accepts dedicated <repoRoot>/gallery-import directory in development and production", async () => {
+      process.env.NODE_ENV = "development";
+      const monorepoRoot = path.resolve(__dirname, "../../..");
+      const validImport = path.join(monorepoRoot, "gallery-import");
+      fs.mkdirSync(validImport, { recursive: true, mode: 0o700 });
+      process.env.GALLERY_IMPORT_PATH = validImport;
+
+      const { ENV } = await import("../app/lib/env.server");
+      expect(ENV.GALLERY_IMPORT_PATH).toBe(fs.realpathSync(validImport));
+    });
+
+    it("accepts an external directory outside repository", async () => {
+      process.env.NODE_ENV = "development";
+      const extImport = fs.mkdtempSync(path.join(os.tmpdir(), "parallax-import-test-"));
+      process.env.GALLERY_IMPORT_PATH = extImport;
+
+      const { ENV } = await import("../app/lib/env.server");
+      expect(ENV.GALLERY_IMPORT_PATH).toBe(fs.realpathSync(extImport));
+      fs.rmSync(extImport, { recursive: true, force: true });
+    });
+
+    it("rejects repository root itself as GALLERY_IMPORT_PATH", async () => {
+      process.env.NODE_ENV = "development";
+      const monorepoRoot = path.resolve(__dirname, "../../..");
+      process.env.GALLERY_IMPORT_PATH = monorepoRoot;
+
+      const { ENV } = await import("../app/lib/env.server");
+      expect(() => ENV.GALLERY_IMPORT_PATH).toThrow("ne doit pas se trouver dans le depot du projet");
+    });
+
+    it("rejects arbitrary repository directories like apps/web or public", async () => {
+      process.env.NODE_ENV = "development";
+      const monorepoRoot = path.resolve(__dirname, "../../..");
+      process.env.GALLERY_IMPORT_PATH = path.join(monorepoRoot, "apps", "web");
+
+      const { ENV } = await import("../app/lib/env.server");
+      expect(() => ENV.GALLERY_IMPORT_PATH).toThrow("ne doit pas se trouver dans le depot du projet");
+    });
+  });
+
   describe("validate-startup.js production pre-check CLI", () => {
     const scriptPath = path.resolve(__dirname, "../scripts/validate-startup.js");
 
@@ -177,8 +218,13 @@ describe("Environment Validation (env.server.ts)", () => {
       const validMediaPath = path.join(validDir, `startup-media-test-${Date.now()}`);
       const validPortfolioContentPath = path.join(validDir, `startup-portfolio-content-${Date.now()}.json`);
       const validPortfolioMediaPath = path.join(validDir, `startup-portfolio-media-${Date.now()}`);
+      const validGalleryDbPath = path.join(validDir, `startup-gallery-db-${Date.now()}.sqlite`);
+      const validGalleryMediaPath = path.join(validDir, `startup-gallery-media-${Date.now()}`);
+      const validGalleryImportPath = path.join(validDir, `startup-gallery-import-${Date.now()}`);
       fs.mkdirSync(validMediaPath, { recursive: true, mode: 0o700 });
       fs.mkdirSync(validPortfolioMediaPath, { recursive: true, mode: 0o700 });
+      fs.mkdirSync(validGalleryMediaPath, { recursive: true, mode: 0o700 });
+      fs.mkdirSync(validGalleryImportPath, { recursive: true, mode: 0o700 });
       await new Promise<void>((resolve, reject) => {
         execFile(
           "node",
@@ -196,6 +242,11 @@ describe("Environment Validation (env.server.ts)", () => {
               SITE_MEDIA_PATH: validMediaPath,
               PORTFOLIO_CONTENT_PATH: validPortfolioContentPath,
               PORTFOLIO_MEDIA_PATH: validPortfolioMediaPath,
+              GALLERY_DB_PATH: validGalleryDbPath,
+              GALLERY_MEDIA_PATH: validGalleryMediaPath,
+              GALLERY_IMPORT_PATH: validGalleryImportPath,
+              GALLERY_SECRET: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+              GALLERY_CODE_ENCRYPTION_KEY: "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
               TRUST_PROXY: "false",
             },
           },
@@ -219,8 +270,13 @@ describe("Environment Validation (env.server.ts)", () => {
       const validMediaPath = path.join(validDir, `startup-media-dir-${Date.now()}`);
       const validPortfolioContentPath = path.join(validDir, `startup-portfolio-content-${Date.now()}.json`);
       const validPortfolioMediaPath = path.join(validDir, `startup-portfolio-media-${Date.now()}`);
+      const validGalleryDbPath = path.join(validDir, `startup-gallery-db-media-${Date.now()}.sqlite`);
+      const validGalleryMediaPath = path.join(validDir, `startup-gallery-media-dir-${Date.now()}`);
+      const validGalleryImportPath = path.join(validDir, `startup-gallery-import-dir-${Date.now()}`);
       fs.mkdirSync(validMediaPath, { recursive: true, mode: 0o700 });
       fs.mkdirSync(validPortfolioMediaPath, { recursive: true, mode: 0o700 });
+      fs.mkdirSync(validGalleryMediaPath, { recursive: true, mode: 0o700 });
+      fs.mkdirSync(validGalleryImportPath, { recursive: true, mode: 0o700 });
 
       await new Promise<void>((resolve, reject) => {
         execFile(
@@ -239,6 +295,11 @@ describe("Environment Validation (env.server.ts)", () => {
               SITE_MEDIA_PATH: validMediaPath,
               PORTFOLIO_CONTENT_PATH: validPortfolioContentPath,
               PORTFOLIO_MEDIA_PATH: validPortfolioMediaPath,
+              GALLERY_DB_PATH: validGalleryDbPath,
+              GALLERY_MEDIA_PATH: validGalleryMediaPath,
+              GALLERY_IMPORT_PATH: validGalleryImportPath,
+              GALLERY_SECRET: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+              GALLERY_CODE_ENCRYPTION_KEY: "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
               TRUST_PROXY: "false",
             },
           },

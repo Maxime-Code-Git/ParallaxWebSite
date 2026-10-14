@@ -275,6 +275,123 @@ function validateStorageDirectoryPath(val: string | undefined, name: string): st
   return realPathToCheck;
 }
 
+function validateGalleryImportPath(val: string | undefined, name: string): string {
+  if (!val) {
+    throw new Error(`CRITICAL: La variable d'environnement ${name} est obligatoire.`);
+  }
+  if (!path.isAbsolute(val)) {
+    throw new Error(`CRITICAL: La variable d'environnement ${name} doit etre un chemin absolu.`);
+  }
+
+  checkNoSymlinksInPath(val, name);
+
+  const resolved = path.resolve(val);
+  const repoRoot = getMonorepoRoot();
+  let realRepoRoot = repoRoot;
+  try {
+    realRepoRoot = fs.realpathSync(repoRoot);
+  } catch {
+    // Ignored
+  }
+
+  const relResolved = path.relative(repoRoot, resolved);
+  const relReal = path.relative(realRepoRoot, resolved);
+  const isInsideRepo =
+    (!relResolved.startsWith("..") && !path.isAbsolute(relResolved)) ||
+    (!relReal.startsWith("..") && !path.isAbsolute(relReal));
+
+  const allowedRepoImportDir = path.resolve(repoRoot, "gallery-import");
+  let realAllowedRepoImportDir = allowedRepoImportDir;
+  try {
+    realAllowedRepoImportDir = fs.realpathSync(allowedRepoImportDir);
+  } catch {
+    // May not exist yet
+  }
+
+  if (isInsideRepo) {
+    if (resolved !== allowedRepoImportDir && resolved !== realAllowedRepoImportDir) {
+      throw new Error(`CRITICAL: ${name} ne doit pas se trouver dans le depot du projet, a l'exception du dossier dedie 'gallery-import' a la racine.`);
+    }
+  }
+
+  let realPathToCheck: string;
+  let stat: fs.Stats | undefined;
+
+  try {
+    const lstat = fs.lstatSync(val);
+    if (lstat.isSymbolicLink()) {
+      throw new Error(`CRITICAL: ${name} ne doit pas etre un lien symbolique.`);
+    }
+    stat = fs.statSync(val);
+    realPathToCheck = fs.realpathSync(val);
+  } catch (err: unknown) {
+    if (err && typeof err === "object" && "code" in err && (err as { code: unknown }).code === "ENOENT") {
+      const parentDir = path.dirname(val);
+      try {
+        const parentLstat = fs.lstatSync(parentDir);
+        if (parentLstat.isSymbolicLink()) {
+          throw new Error(`CRITICAL: Le dossier parent de ${name} ne doit pas etre un lien symbolique.`, { cause: err });
+        }
+        const parentStat = fs.statSync(parentDir);
+        if (!parentStat.isDirectory()) {
+          throw new Error(`CRITICAL: Le parent de ${name} doit etre un dossier.`, { cause: err });
+        }
+        fs.accessSync(parentDir, fs.constants.W_OK);
+        fs.mkdirSync(val, { recursive: true, mode: 0o700 });
+        try {
+          fs.chmodSync(val, 0o700);
+        } catch {
+          // best-effort
+        }
+        stat = fs.statSync(val);
+        realPathToCheck = fs.realpathSync(val);
+      } catch (parentErr) {
+        if (parentErr instanceof Error && parentErr.message.startsWith("CRITICAL:")) {
+          throw parentErr;
+        }
+        throw new Error(`CRITICAL: Le dossier parent de ${name} n'existe pas ou n'est pas inscriptible.`, { cause: parentErr });
+      }
+    } else {
+      if (err instanceof Error && err.message.startsWith("CRITICAL:")) {
+        throw err;
+      }
+      throw new Error(`CRITICAL: ${name} ou son dossier parent n'est pas inscriptible ou n'existe pas.`, { cause: err });
+    }
+  }
+
+  if (stat) {
+    if (!stat.isDirectory()) {
+      throw new Error(`CRITICAL: ${name} doit etre un repertoire.`);
+    }
+    try {
+      fs.accessSync(val, fs.constants.W_OK);
+      try {
+        fs.chmodSync(val, 0o700);
+      } catch {
+        // best-effort
+      }
+    } catch (accessErr) {
+      throw new Error(`CRITICAL: ${name} n'est pas accessible en ecriture.`, { cause: accessErr });
+    }
+  }
+
+  const relRealChecked = path.relative(realRepoRoot, realPathToCheck);
+  const isRealInsideRepo = !relRealChecked.startsWith("..") && !path.isAbsolute(relRealChecked);
+  if (isRealInsideRepo) {
+    let expectedReal = allowedRepoImportDir;
+    try {
+      expectedReal = fs.realpathSync(allowedRepoImportDir);
+    } catch {
+      // Ignored
+    }
+    if (realPathToCheck !== expectedReal) {
+      throw new Error(`CRITICAL: ${name} ne doit pas se trouver dans le depot du projet, a l'exception du dossier dedie 'gallery-import' a la racine.`);
+    }
+  }
+
+  return realPathToCheck;
+}
+
 export const ENV = {
   get PUBLIC_SITE_URL(): string {
     const isProd = process.env.NODE_ENV === "production";
@@ -397,6 +514,63 @@ export const ENV = {
     return validateStorageDirectoryPath(val, "PORTFOLIO_MEDIA_PATH");
   },
 
+  get GALLERY_DB_PATH(): string {
+    const isTest = process.env.NODE_ENV === "test";
+    const val = process.env.GALLERY_DB_PATH;
+
+    if (isTest) {
+      return validateTestPath(val, "GALLERY_DB_PATH");
+    }
+
+    return validateStoragePath(val, "GALLERY_DB_PATH");
+  },
+
+  get GALLERY_MEDIA_PATH(): string {
+    const isTest = process.env.NODE_ENV === "test";
+    const val = process.env.GALLERY_MEDIA_PATH;
+
+    if (isTest) {
+      const p = validateTestPath(val, "GALLERY_MEDIA_PATH");
+      if (!fs.existsSync(p)) {
+        fs.mkdirSync(p, { recursive: true, mode: 0o700 });
+      }
+      return p;
+    }
+
+    return validateStorageDirectoryPath(val, "GALLERY_MEDIA_PATH");
+  },
+
+  get GALLERY_IMPORT_PATH(): string {
+    const isTest = process.env.NODE_ENV === "test";
+    const val = process.env.GALLERY_IMPORT_PATH;
+
+    if (isTest) {
+      const p = validateTestPath(val, "GALLERY_IMPORT_PATH");
+      if (!fs.existsSync(p)) {
+        fs.mkdirSync(p, { recursive: true, mode: 0o700 });
+      }
+      return p;
+    }
+
+    return validateGalleryImportPath(val, "GALLERY_IMPORT_PATH");
+  },
+
+  get GALLERY_SECRET(): string {
+    const val = process.env.GALLERY_SECRET;
+    if (!val || val.length !== 64 || !HEX_64_REGEX.test(val)) {
+      throw new Error("CRITICAL: GALLERY_SECRET doit etre une chaine hexadecimale de 32 octets (64 caracteres).");
+    }
+    return val;
+  },
+
+  get GALLERY_CODE_ENCRYPTION_KEY(): string {
+    const val = process.env.GALLERY_CODE_ENCRYPTION_KEY;
+    if (!val || val.length !== 64 || !HEX_64_REGEX.test(val)) {
+      throw new Error("CRITICAL: GALLERY_CODE_ENCRYPTION_KEY doit etre une chaine hexadecimale de 32 octets (64 caracteres).");
+    }
+    return val;
+  },
+
   get TRUST_PROXY(): boolean {
     return process.env.TRUST_PROXY === "true";
   },
@@ -405,6 +579,29 @@ export const ENV = {
     return process.env.PARALLAX_LOCAL_PREVIEW === "true";
   },
 };
+
+export const HEX_64_REGEX = /^[0-9a-fA-F]{64}$/;
+
+function isPathInside(parent: string, child: string): boolean {
+  const rel = path.relative(path.resolve(parent), path.resolve(child));
+  return !rel.startsWith("..") && !path.isAbsolute(rel);
+}
+
+function ensureDisjoint(pathA: string, pathB: string, nameA: string, nameB: string): void {
+  const resA = path.resolve(pathA);
+  const resB = path.resolve(pathB);
+  if (resA === resB) {
+    throw new Error(`CRITICAL: ${nameA} et ${nameB} ne doivent pas pointer vers le meme chemin.`);
+  }
+  const relA = path.relative(resA, resB);
+  const relB = path.relative(resB, resA);
+  if (!relA.startsWith("..") && !path.isAbsolute(relA)) {
+    throw new Error(`CRITICAL: ${nameB} ne doit pas etre a l'interieur de ${nameA}.`);
+  }
+  if (!relB.startsWith("..") && !path.isAbsolute(relB)) {
+    throw new Error(`CRITICAL: ${nameA} ne doit pas etre a l'interieur de ${nameB}.`);
+  }
+}
 
 export function isLocalPreviewMode(): boolean {
   if (process.env.PARALLAX_LOCAL_PREVIEW !== "true") return false;
@@ -448,6 +645,67 @@ export function validatePortfolioConfig(): { contentPath: string; mediaPath: str
   return {
     contentPath: ENV.PORTFOLIO_CONTENT_PATH,
     mediaPath: ENV.PORTFOLIO_MEDIA_PATH,
+  };
+}
+
+export interface GalleryConfig {
+  dbPath: string;
+  mediaPath: string;
+  importPath: string;
+  secret: string;
+  codeEncryptionKey: string;
+}
+
+export function validateGalleryConfig(): GalleryConfig {
+  const isTest = process.env.NODE_ENV === "test";
+  const dbPath = ENV.GALLERY_DB_PATH;
+  const mediaPath = ENV.GALLERY_MEDIA_PATH;
+  const importPath = ENV.GALLERY_IMPORT_PATH;
+  const secret = ENV.GALLERY_SECRET;
+  const codeEncryptionKey = ENV.GALLERY_CODE_ENCRYPTION_KEY;
+
+  if (secret.toLowerCase() === codeEncryptionKey.toLowerCase()) {
+    throw new Error("CRITICAL: GALLERY_SECRET et GALLERY_CODE_ENCRYPTION_KEY doivent obligatoirement etre distincts.");
+  }
+  const adminSecret = process.env.ADMIN_SESSION_SECRET;
+  if (adminSecret && (secret === adminSecret || codeEncryptionKey === adminSecret)) {
+    throw new Error("CRITICAL: Les secrets de galerie ne doivent pas reutiliser ADMIN_SESSION_SECRET.");
+  }
+  const rateLimitSecret = process.env.RATE_LIMIT_SECRET;
+  if (rateLimitSecret && (secret === rateLimitSecret || codeEncryptionKey === rateLimitSecret)) {
+    throw new Error("CRITICAL: Les secrets de galerie ne doivent pas reutiliser RATE_LIMIT_SECRET.");
+  }
+
+  ensureDisjoint(mediaPath, importPath, "GALLERY_MEDIA_PATH", "GALLERY_IMPORT_PATH");
+  if (isPathInside(mediaPath, dbPath)) {
+    throw new Error("CRITICAL: GALLERY_DB_PATH ne doit pas etre a l'interieur de GALLERY_MEDIA_PATH.");
+  }
+  if (isPathInside(importPath, dbPath)) {
+    throw new Error("CRITICAL: GALLERY_DB_PATH ne doit pas etre a l'interieur de GALLERY_IMPORT_PATH.");
+  }
+
+  if (!isTest) {
+    if (process.env.SITE_MEDIA_PATH) {
+      ensureDisjoint(mediaPath, ENV.SITE_MEDIA_PATH, "GALLERY_MEDIA_PATH", "SITE_MEDIA_PATH");
+      ensureDisjoint(importPath, ENV.SITE_MEDIA_PATH, "GALLERY_IMPORT_PATH", "SITE_MEDIA_PATH");
+    }
+    if (process.env.PORTFOLIO_MEDIA_PATH) {
+      ensureDisjoint(mediaPath, ENV.PORTFOLIO_MEDIA_PATH, "GALLERY_MEDIA_PATH", "PORTFOLIO_MEDIA_PATH");
+      ensureDisjoint(importPath, ENV.PORTFOLIO_MEDIA_PATH, "GALLERY_IMPORT_PATH", "PORTFOLIO_MEDIA_PATH");
+    }
+    if (process.env.RATE_LIMIT_DB_PATH) {
+      if (path.resolve(dbPath) === path.resolve(ENV.RATE_LIMIT_DB_PATH)) {
+        throw new Error("CRITICAL: GALLERY_DB_PATH et RATE_LIMIT_DB_PATH doivent etre distincts.");
+      }
+    }
+  }
+
+  return {
+    dbPath,
+    mediaPath,
+    importPath,
+    secret,
+    codeEncryptionKey,
   };
 }
 
@@ -514,9 +772,17 @@ export function validateServerStartup(): void {
     validateContentConfig();
     validateMediaConfig();
     validatePortfolioConfig();
+    validateGalleryConfig();
     if (process.env.NODE_ENV === "production") {
       validateAdminConfig();
     }
     hasValidatedStartup = true;
+    import("./gallery-import.server")
+      .then((m) => {
+        m.startGalleryBackgroundSupervisor();
+      })
+      .catch(() => {
+        // Ignored
+      });
   }
 }

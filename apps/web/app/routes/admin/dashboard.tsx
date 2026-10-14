@@ -91,9 +91,10 @@ const MODULES: DashboardModule[] = [
   {
     id: "galleries",
     title: "Galeries clients",
-    description: "Creation des galeries privees, codes uniques et gestion des acces clients.",
-    status: "Lot suivant",
-    isActive: false,
+    description: "Création des galeries privées, codes uniques et gestion des accès clients.",
+    status: "Actif",
+    isActive: true,
+    href: "/admin/galleries",
   },
   {
     id: "retention",

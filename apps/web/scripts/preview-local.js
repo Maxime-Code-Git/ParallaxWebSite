@@ -53,11 +53,12 @@ process.env.PUBLIC_SITE_URL = canonicalSiteUrl;
 
 // 4. Validate startup and content configuration
 try {
-  const { validateAdminConfig, validateContentConfig, validateMediaConfig, validatePortfolioConfig } = await import("../app/lib/env.server.ts");
+  const { validateAdminConfig, validateContentConfig, validateMediaConfig, validatePortfolioConfig, validateGalleryConfig } = await import("../app/lib/env.server.ts");
   validateAdminConfig();
   validateContentConfig();
   validateMediaConfig();
   validatePortfolioConfig();
+  validateGalleryConfig();
 } catch (err) {
   console.error("CRITICAL: Configuration invalide au démarrage :");
   console.error(err instanceof Error ? err.message : String(err));

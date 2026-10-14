@@ -14,9 +14,8 @@ Ce document inventorie formellement les briques techniques de référence du pro
 | **Outil de hachage CLI** | `scripts/admin-hash.js` | **Porté et adapté** | **Lot 1 & 1 bis** (`apps/web/scripts/admin-hash.js`) |
 | **Schéma éditorial & Persistance atomique** | `site-content.server.ts`, `atomic-fs.server.ts` | **Porté et adapté** | **Lot 2** (`apps/web/app/lib/site-content.server.ts`, `site-content.shared.ts`, `atomic-fs.server.ts`) |
 | **Pipeline d'import d'images de site (Lot 2 bis)** | `api.admin.home-image.ts`, `home-media.server.ts`, `portfolio-image.server.ts`, `media.home.*.tsx`, `ImageUploader.tsx` | **Porté et adapté** | **Lot 2 bis** (`apps/web/app/lib/media-image.server.ts`, `routes/media/site-variant.ts`, `routes/api/admin-media-upload.ts`, `ImageUploader.tsx`) |
-| **Portfolio & Médias publics (Lot 3)** | `portfolio-content.server.ts`, `portfolio-image.server.ts`, `portfolio-media.server.ts`, `portfolio-transaction.server.ts`, `admin.portfolio.tsx`, `admin.portfolio.upload.tsx`, `PortfolioPage.tsx` | **Porté et adapté** | **Lot 3** (`apps/web/app/lib/portfolio-content.shared.ts`, `portfolio-content.server.ts`, `routes/admin/portfolio.tsx`, `routes/admin/portfolio-edit.tsx`, `routes/admin/portfolio-section.tsx`, `routes/public/portfolio.tsx`, `routes/api/admin-portfolio-upload.ts`, `routes/media/portfolio-variant.ts`) |
-| **Galeries privées & Téléchargements ZIP** | `gallery-*.server.ts`, code unique | **Différé** | Lot 4 (Espace client & galeries) |
-| **Previews WebP / Sharp** | `gallery-preview.server.ts`, `portfolio-image.server.ts` | **Différé** | Lot 4 / Lot 3 |
+| **Galeries privées & Téléchargements ZIP** | `gallery-*.server.ts`, code unique | **Porté et adapté** | **Lot 4** (`apps/web/app/lib/gallery-*.server.ts`, routes client/admin) |
+| **Previews WebP / Sharp** | `gallery-preview.server.ts`, `portfolio-image.server.ts` | **Porté et adapté** | **Lot 4 / Lot 3** (`apps/web/app/lib/gallery-preview.server.ts`, `media-image.server.ts`) |
 | **Suppression & Rétention RGPD** | `gallery-deletion-worker.server.ts` | **Différé** | Lot 5 |
 | **Formulaire Contact & Mailer** | `contact.server.ts`, `mailer.server.ts` | **Différé** | Lot 6 |
 | **Pages légales & Inventaire cookies** | `admin.legal.tsx`, cookies techniques | **Différé** | Lot 7 |
@@ -219,34 +218,48 @@ Ce document inventorie formellement les briques techniques de référence du pro
 
 ---
 
-## 5. Galeries privees et telechargement ZIP
+## 5. Galeries privees et telechargement ZIP (Lot 4)
 
 1. **Fichiers consultes (commit Sempra `89bfee31ae5d477f71c95e83a0d55305521f426f`)** :
-   - `apps/web/app/lib/gallery-db.server.ts`
-   - `apps/web/app/lib/gallery-session.server.ts`
-   - `apps/web/app/lib/gallery-zip.server.ts`
-   - `apps/web/app/lib/crypto.server.ts`
+   - `apps/web/app/lib/gallery-db.server.ts` : moteur SQLite dedie, PRAGMAs WAL, foreign keys, baux workers et jobs de suppression.
+   - `apps/web/app/lib/gallery-auth.server.ts` : derivation HKDF-SHA256, chiffrement AES-256-GCM, HMAC-SHA256 des codes, cookie de session client signe `__gallery_session`, CSRF. (Note de clarification : les fichiers `gallery-session.server.ts` et `crypto.server.ts` mentionnes dans les esquisses initiales n'existent pas dans Sempra a ce commit : ces responsabilites sont integralement concentrees dans `gallery-auth.server.ts`).
+   - `apps/web/app/lib/gallery.server.ts` : modele, creation atomique galerie et code, revision optimiste, rotation de code.
+   - `apps/web/app/lib/gallery-import.server.ts` : inspection de dossier, baux workers atomiques avec renouvellement conditionnel, copie securisee en streaming.
+   - `apps/web/app/lib/media-utils.ts` et `apps/web/app/routes/api.gallery.$publicId.media.$mediaId.ts` : RFC 7233 Range streaming video (206, Content-Range, Accept-Ranges, 416).
+   - `apps/web/app/routes/api.gallery.$publicId.download.ts` : generation et streaming d'archives ZIP via `yazl` avec `compress: false`. (Note de clarification : `gallery-zip.server.ts` n'existe pas a ce commit : la logique de streaming ZIP est portee directement dans sa route de telechargement).
+   - `apps/web/app/routes/api.admin.gallery.$id.media.$mediaId.poster.ts` : televersement multipart streaming de poster video Sharp.
+   - Routes client : `apps/web/app/routes/fr.clients.tsx`, `en.clients.tsx`, `fr.gallery.tsx`, `en.gallery.tsx`, `GalleryView.tsx`.
+   - Routes admin : `apps/web/app/routes/admin.galleries._index.tsx`, `admin.galleries.new.tsx`, `admin.galleries.$id.tsx`.
 
 2. **Fonctions, types et comportements observes** :
-   - `gallery-db.server.ts` : moteur SQLite dedie avec chiffrement AES-256-GCM des donnees sensibles et table `gallery_access_codes` associant les codes d'acces aux galeries.
-   - `gallery-session.server.ts` : gestion des sessions clients par cookies HTTP-only distincts (`__gallery_session`).
-   - `gallery-zip.server.ts` : generation et streaming a la volee d'archives ZIP non compressees via `yazl`.
-   - `crypto.server.ts` : fonctions de derivation de cle PBKDF2 et chiffrement AES-256-GCM.
+   - SQLite isole avec baux workers `UPDATE ... RETURNING` et verification stricte du proprietaire avant tout effet persistant.
+   - Chiffrement AES-256-GCM avec nonce aleatoire pour reveler les codes aux administrateurs sans stockage en clair.
+   - HMAC-SHA256 pour indexation rapide sans clair.
+   - Cookie `__parallax_gallery_session` signe et cloisonne de l'admin.
+   - Streaming ZIP yazl sans compression des medias deja compresses (`compress: false`), avec ouverture progressive des descripteurs pour eviter toute saturation memoire.
 
 3. **Choix** :
-   - **Différé au Lot 4 (Espace client & galeries)**.
+   - **Porté et adapté au Lot 4**.
 
 4. **Adaptations Parallax** :
-   - **Modele a code unique strict** : suppression totale des niveaux d'acces maries/invites et de tout vocabulaire relatif au mariage.
-   - Une galerie Parallax est identifiee par un identifiant opaque et un code d'acces unique de telechargement/consultation.
-   - Stockage separe defini par `GALLERY_DB_PATH`, `GALLERY_MEDIA_PATH` et `GALLERY_IMPORT_PATH`.
+   - **Modele a code unique strict** : suppression totale des branches invites/maries, des tables ou colonnes `guest_*`/`couple_*` et de tout vocabulaire mariage dans le code, la base et l'interface.
+   - Schéma SQLite V1 neuf, propre et direct, sans chaine de migrations historiques Sempra.
+   - Normalisation unique du code (insensible a la casse et aux tirets).
+   - Protection de confinement de chemin appliquee a chaque niveau (`verifySecurePathChain` et `O_NOFOLLOW`).
+   - Stockage independant defini par `GALLERY_DB_PATH`, `GALLERY_MEDIA_PATH` et `GALLERY_IMPORT_PATH`.
+   - Script de setup idempotent `scripts/gallery-setup.js` configure via `npm run gallery:setup`.
 
-5. **Tests Sempra pertinents** :
+5. **Tests Parallax utiles** :
    - `apps/web/tests/gallery-db.server.test.ts`
+   - `apps/web/tests/gallery-auth.server.test.ts`
+   - `apps/web/tests/gallery-import-worker.server.test.ts`
+   - `apps/web/tests/gallery-media.server.test.ts`
    - `apps/web/tests/gallery-zip.server.test.ts`
+   - `apps/web/tests/admin-galleries.test.ts`
+   - `apps/web/tests/gallery-setup.test.ts`
 
 6. **Elements non verifies** :
-   - Impact sur les temps de reponse lors du telechargement simultane d'archives ZIP volumineuses par plusieurs clients.
+   - Comportement lors de telechargements simultanes de ZIP par plus de 50 clients concurrents (necessite un banc de charge de production).
 
 ---
 
@@ -271,11 +284,14 @@ Ce document inventorie formellement les briques techniques de référence du pro
    - Pipeline des medias publics dans `portfolio-image.server.ts` : generation des variantes adaptees a la mise en page du site.
 
 3. **Choix** :
-   - **Différé au Lot 4 (galerie privée) et Lot 3 (médias publics)**.
+   - **Porté et adapté** (Lot 3 pour les variantes de portfolio, Lot 4 pour les variantes WebP 480/960/1920 de galerie privée).
 
 4. **Adaptations Parallax** :
-   - Separation nette entre variantes publiques (adaptees aux grilles du site) et variantes de galerie privee (480, 960, 1920 px).
-   - Ne pas substituer les dimensions de maquettes (1440 / 390 px) aux formats fixes de la galerie privee.
+   - Separation nette entre variantes publiques (adaptees aux grilles du site et portfolio) et variantes de galerie privee (480, 960, 1920 px WebP).
+   - Variantes 480 et 960 pour la grille masonry, 1920 reserve a la lightbox. Aucun fallback vers l'original pour eviter tout telechargement implicite de fichier lourd.
+   - Partage du limiteur global Sharp `imageProcessingLimiter` borne a 2 operations simultanees.
+   - Confinement strict via `verifySecurePathChain` et `O_NOFOLLOW`.
+   - Dimensions reelles persistees dans les metadonnees pour eviter tout ecart d'affichage.
 
 5. **Tests Sempra pertinents** :
    - `apps/web/tests/gallery-preview.server.test.ts`

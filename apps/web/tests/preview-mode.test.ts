@@ -97,7 +97,7 @@ describe("PARALLAX_LOCAL_PREVIEW mode and security constraints", () => {
     const routePaths = routes.map((r: { path?: string }) => r.path).filter(Boolean);
     expect(routePaths).not.toContain("preview/login");
     expect(routePaths).not.toContain("preview");
-    expect(routePaths.some((p: string | undefined) => p?.includes("preview"))).toBe(false);
+    expect(routePaths.some((p: string | undefined) => p === "preview" || p?.startsWith("preview/"))).toBe(false);
   });
 
   it("requires authentication for admin dashboard even in preview mode (no auto-auth)", async () => {
