@@ -80,7 +80,36 @@ export function setupGalleryEnvironment(options = {}) {
   // 1. Prepare data directories
   const dbDir = ensurePrivateDirectory(dataDir, dryRun);
   const mediaDir = ensurePrivateDirectory(path.join(dataDir, "gallery-media"), dryRun);
-  const importDir = ensurePrivateDirectory(path.join(dataDir, "gallery-import"), dryRun);
+
+  // Visible gallery-import directory at monorepo root (or options.importDir if overridden)
+  const defaultImportPath = options.importDir
+    ? path.resolve(options.importDir)
+    : path.join(monorepoRoot, "gallery-import");
+
+  const importDir = ensurePrivateDirectory(defaultImportPath, dryRun);
+  if (!dryRun) {
+    const starterGallery = path.join(importDir, "ma-galerie");
+    ensurePrivateDirectory(starterGallery, dryRun);
+    ensurePrivateDirectory(path.join(starterGallery, "photos"), dryRun);
+    ensurePrivateDirectory(path.join(starterGallery, "videos"), dryRun);
+  }
+
+  // Preserve historical hidden directory if it exists, without deleting it
+  const historicalHiddenImport = path.join(dataDir, "gallery-import");
+  if (fs.existsSync(historicalHiddenImport) && !dryRun) {
+    try {
+      const entries = fs.readdirSync(historicalHiddenImport, { withFileTypes: true });
+      for (const entry of entries) {
+        const srcPath = path.join(historicalHiddenImport, entry.name);
+        const destPath = path.join(importDir, entry.name);
+        if (!fs.existsSync(destPath)) {
+          fs.cpSync(srcPath, destPath, { recursive: true, errorOnExist: false });
+        }
+      }
+    } catch {
+      // Best-effort migration of existing files
+    }
+  }
 
   // 2. Read existing .env.local
   let existingContent = "";
@@ -92,40 +121,65 @@ export function setupGalleryEnvironment(options = {}) {
 
   const defaultDbPath = path.join(dbDir, "gallery.sqlite");
   const defaultMediaPath = mediaDir;
-  const defaultImportPath = importDir;
 
-  const updates = [];
+  const replacements = new Map();
+  const additions = [];
   const configuredKeys = [];
 
   // Helper to ensure key is set
-  function getOrSet(key, generateDefault) {
+  function checkOrSet(key, generateDefault) {
     const existing = parsed.get(key);
     if (existing && existing.value && existing.value.trim().length > 0) {
       configuredKeys.push({ key, status: "preserve" });
       return existing.value;
     }
     const newVal = generateDefault();
-    updates.push({ key, value: newVal });
+    additions.push({ key, value: newVal });
     configuredKeys.push({ key, status: "created" });
     return newVal;
   }
 
-  getOrSet("GALLERY_DB_PATH", () => defaultDbPath);
-  getOrSet("GALLERY_MEDIA_PATH", () => defaultMediaPath);
-  getOrSet("GALLERY_IMPORT_PATH", () => defaultImportPath);
-  getOrSet("GALLERY_SECRET", () => crypto.randomBytes(32).toString("hex"));
-  getOrSet("GALLERY_CODE_ENCRYPTION_KEY", () => crypto.randomBytes(32).toString("hex"));
+  checkOrSet("GALLERY_DB_PATH", () => defaultDbPath);
+  checkOrSet("GALLERY_MEDIA_PATH", () => defaultMediaPath);
 
-  // 3. Write updates safely if needed
-  if (updates.length > 0 && !dryRun) {
-    let newContent = existingContent;
-    if (newContent.length > 0 && !newContent.endsWith("\n")) {
-      newContent += "\n";
+  // Targeted migration for GALLERY_IMPORT_PATH
+  const existingImportKey = parsed.get("GALLERY_IMPORT_PATH");
+  if (existingImportKey && existingImportKey.value && existingImportKey.value.trim().length > 0) {
+    const existingVal = path.resolve(existingImportKey.value.trim());
+    const historicalVal = path.resolve(historicalHiddenImport);
+    if (existingVal === historicalVal) {
+      replacements.set("GALLERY_IMPORT_PATH", defaultImportPath);
+      configuredKeys.push({ key: "GALLERY_IMPORT_PATH", status: "migrated" });
+    } else {
+      configuredKeys.push({ key: "GALLERY_IMPORT_PATH", status: "preserve" });
     }
+  } else {
+    additions.push({ key: "GALLERY_IMPORT_PATH", value: defaultImportPath });
+    configuredKeys.push({ key: "GALLERY_IMPORT_PATH", status: "created" });
+  }
 
-    newContent += "\n# --- Parallax Lot 4 : Espace client & Galeries privées ---\n";
-    for (const { key, value } of updates) {
-      newContent += `${key}=${value}\n`;
+  checkOrSet("GALLERY_SECRET", () => crypto.randomBytes(32).toString("hex"));
+  checkOrSet("GALLERY_CODE_ENCRYPTION_KEY", () => crypto.randomBytes(32).toString("hex"));
+
+  // 3. Write updates safely without duplicating keys
+  const totalUpdates = replacements.size + additions.length;
+  if (totalUpdates > 0 && !dryRun) {
+    const lines = existingContent ? existingContent.split("\n") : [];
+    for (const [key, newVal] of replacements.entries()) {
+      const info = parsed.get(key);
+      if (info && info.index !== undefined && info.index < lines.length) {
+        lines[info.index] = `${key}="${newVal}"`;
+      }
+    }
+    let newContent = lines.join("\n");
+    if (additions.length > 0) {
+      if (newContent.length > 0 && !newContent.endsWith("\n")) {
+        newContent += "\n";
+      }
+      newContent += "\n# --- Parallax Lot 4 : Espace client & Galeries privées ---\n";
+      for (const { key, value } of additions) {
+        newContent += `${key}="${value}"\n`;
+      }
     }
 
     const tmpPath = path.join(path.dirname(envPath), `.env.local.tmp.${crypto.randomUUID()}`);
@@ -143,12 +197,19 @@ export function setupGalleryEnvironment(options = {}) {
     console.log(" Parallax - Configuration Espace Client & Galeries ");
     console.log("==================================================");
     console.log(`Dossier données : ${dataDir}`);
+    console.log(`Dossier import  : ${importDir}`);
     console.log(`Fichier .env    : ${envPath}`);
     if (dryRun) {
       console.log("Mode            : DRY-RUN (aucune modification sur le disque)");
     }
     for (const item of configuredKeys) {
-      console.log(`Clé ${item.key.padEnd(28)} : ${item.status === "preserve" ? "Conservee (deja existante)" : "Configuree"}`);
+      const statusText =
+        item.status === "preserve"
+          ? "Conservee (deja existante)"
+          : item.status === "migrated"
+            ? "Migree vers dossier visible"
+            : "Configuree";
+      console.log(`Clé ${item.key.padEnd(28)} : ${statusText}`);
     }
     console.log("==================================================");
   }
@@ -157,8 +218,9 @@ export function setupGalleryEnvironment(options = {}) {
     success: true,
     envPath,
     dataDir,
+    importDir,
     configuredKeys,
-    updatesCount: updates.length,
+    updatesCount: totalUpdates,
   };
 }
 

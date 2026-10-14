@@ -5,8 +5,8 @@ import path from "node:path";
 import os from "node:os";
 import { RouterContextProvider } from "react-router";
 import { loader as listLoader } from "../app/routes/admin/galleries-list";
-import { action as newAction } from "../app/routes/admin/galleries-new";
-import { action as editAction } from "../app/routes/admin/galleries-edit";
+import { loader as newLoader, action as newAction } from "../app/routes/admin/galleries-new";
+import { loader as editLoader, action as editAction } from "../app/routes/admin/galleries-edit";
 import { loader as previewLoader } from "../app/routes/admin/galleries-preview";
 import {
   closeGalleryDb,
@@ -113,6 +113,15 @@ describe("Admin Galleries Management (CRUD, Code Rotation, Concurrency, Quaranti
   });
 
   describe("Create Gallery (/admin/galleries/new)", () => {
+    it("returns importRootPath matching configured GALLERY_IMPORT_PATH", async () => {
+      const request = new Request("http://127.0.0.1:3000/admin/galleries/new", {
+        headers: { Cookie: adminCookie },
+      });
+      const response = await newLoader(createRouteArgs(request));
+      const data = await response.json();
+      expect(data.importRootPath).toBe(testImportPath);
+    });
+
     it("creates a gallery, generates access code, and redirects to edit page", async () => {
       const body = new URLSearchParams({
         csrfToken,
@@ -149,6 +158,19 @@ describe("Admin Galleries Management (CRUD, Code Rotation, Concurrency, Quaranti
   });
 
   describe("Edit Gallery (/admin/galleries/:id)", () => {
+    it("returns importRootPath matching configured GALLERY_IMPORT_PATH", async () => {
+      const { gallery } = createGallery({
+        title: "Test Import Path Gallery",
+        clientName: "Client Path",
+        projectDate: "2026-06-01",
+      });
+      const request = new Request(`http://127.0.0.1:3000/admin/galleries/${gallery.id}`, {
+        headers: { Cookie: adminCookie },
+      });
+      const response = await editLoader(createRouteArgs(request, { id: gallery.id }));
+      const data = await response.json();
+      expect(data.importRootPath).toBe(testImportPath);
+    });
     it("updates editorial metadata and increments revision", async () => {
       const { gallery } = createGallery({
         title: "Projet Initial",

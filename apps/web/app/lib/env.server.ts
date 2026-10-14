@@ -275,6 +275,123 @@ function validateStorageDirectoryPath(val: string | undefined, name: string): st
   return realPathToCheck;
 }
 
+function validateGalleryImportPath(val: string | undefined, name: string): string {
+  if (!val) {
+    throw new Error(`CRITICAL: La variable d'environnement ${name} est obligatoire.`);
+  }
+  if (!path.isAbsolute(val)) {
+    throw new Error(`CRITICAL: La variable d'environnement ${name} doit etre un chemin absolu.`);
+  }
+
+  checkNoSymlinksInPath(val, name);
+
+  const resolved = path.resolve(val);
+  const repoRoot = getMonorepoRoot();
+  let realRepoRoot = repoRoot;
+  try {
+    realRepoRoot = fs.realpathSync(repoRoot);
+  } catch {
+    // Ignored
+  }
+
+  const relResolved = path.relative(repoRoot, resolved);
+  const relReal = path.relative(realRepoRoot, resolved);
+  const isInsideRepo =
+    (!relResolved.startsWith("..") && !path.isAbsolute(relResolved)) ||
+    (!relReal.startsWith("..") && !path.isAbsolute(relReal));
+
+  const allowedRepoImportDir = path.resolve(repoRoot, "gallery-import");
+  let realAllowedRepoImportDir = allowedRepoImportDir;
+  try {
+    realAllowedRepoImportDir = fs.realpathSync(allowedRepoImportDir);
+  } catch {
+    // May not exist yet
+  }
+
+  if (isInsideRepo) {
+    if (resolved !== allowedRepoImportDir && resolved !== realAllowedRepoImportDir) {
+      throw new Error(`CRITICAL: ${name} ne doit pas se trouver dans le depot du projet, a l'exception du dossier dedie 'gallery-import' a la racine.`);
+    }
+  }
+
+  let realPathToCheck: string;
+  let stat: fs.Stats | undefined;
+
+  try {
+    const lstat = fs.lstatSync(val);
+    if (lstat.isSymbolicLink()) {
+      throw new Error(`CRITICAL: ${name} ne doit pas etre un lien symbolique.`);
+    }
+    stat = fs.statSync(val);
+    realPathToCheck = fs.realpathSync(val);
+  } catch (err: unknown) {
+    if (err && typeof err === "object" && "code" in err && (err as { code: unknown }).code === "ENOENT") {
+      const parentDir = path.dirname(val);
+      try {
+        const parentLstat = fs.lstatSync(parentDir);
+        if (parentLstat.isSymbolicLink()) {
+          throw new Error(`CRITICAL: Le dossier parent de ${name} ne doit pas etre un lien symbolique.`, { cause: err });
+        }
+        const parentStat = fs.statSync(parentDir);
+        if (!parentStat.isDirectory()) {
+          throw new Error(`CRITICAL: Le parent de ${name} doit etre un dossier.`, { cause: err });
+        }
+        fs.accessSync(parentDir, fs.constants.W_OK);
+        fs.mkdirSync(val, { recursive: true, mode: 0o700 });
+        try {
+          fs.chmodSync(val, 0o700);
+        } catch {
+          // best-effort
+        }
+        stat = fs.statSync(val);
+        realPathToCheck = fs.realpathSync(val);
+      } catch (parentErr) {
+        if (parentErr instanceof Error && parentErr.message.startsWith("CRITICAL:")) {
+          throw parentErr;
+        }
+        throw new Error(`CRITICAL: Le dossier parent de ${name} n'existe pas ou n'est pas inscriptible.`, { cause: parentErr });
+      }
+    } else {
+      if (err instanceof Error && err.message.startsWith("CRITICAL:")) {
+        throw err;
+      }
+      throw new Error(`CRITICAL: ${name} ou son dossier parent n'est pas inscriptible ou n'existe pas.`, { cause: err });
+    }
+  }
+
+  if (stat) {
+    if (!stat.isDirectory()) {
+      throw new Error(`CRITICAL: ${name} doit etre un repertoire.`);
+    }
+    try {
+      fs.accessSync(val, fs.constants.W_OK);
+      try {
+        fs.chmodSync(val, 0o700);
+      } catch {
+        // best-effort
+      }
+    } catch (accessErr) {
+      throw new Error(`CRITICAL: ${name} n'est pas accessible en ecriture.`, { cause: accessErr });
+    }
+  }
+
+  const relRealChecked = path.relative(realRepoRoot, realPathToCheck);
+  const isRealInsideRepo = !relRealChecked.startsWith("..") && !path.isAbsolute(relRealChecked);
+  if (isRealInsideRepo) {
+    let expectedReal = allowedRepoImportDir;
+    try {
+      expectedReal = fs.realpathSync(allowedRepoImportDir);
+    } catch {
+      // Ignored
+    }
+    if (realPathToCheck !== expectedReal) {
+      throw new Error(`CRITICAL: ${name} ne doit pas se trouver dans le depot du projet, a l'exception du dossier dedie 'gallery-import' a la racine.`);
+    }
+  }
+
+  return realPathToCheck;
+}
+
 export const ENV = {
   get PUBLIC_SITE_URL(): string {
     const isProd = process.env.NODE_ENV === "production";
@@ -435,7 +552,7 @@ export const ENV = {
       return p;
     }
 
-    return validateStorageDirectoryPath(val, "GALLERY_IMPORT_PATH");
+    return validateGalleryImportPath(val, "GALLERY_IMPORT_PATH");
   },
 
   get GALLERY_SECRET(): string {

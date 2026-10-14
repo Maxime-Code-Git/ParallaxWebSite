@@ -40,6 +40,7 @@ import {
   getAvailableImportFolders,
   type RejectedFileItem,
 } from "../../lib/gallery-import.server";
+import { ENV } from "../../lib/env.server";
 import styles from "./galleries.module.css";
 
 interface LoaderData {
@@ -47,6 +48,7 @@ interface LoaderData {
   accessCode: string;
   codeVersion: number;
   folders: string[];
+  importRootPath: string;
   csrfToken: string;
   media: GalleryMediaRow[];
   activeImportJob: {
@@ -82,6 +84,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   const { code: accessCode, version: codeVersion } = getGalleryDecryptedCode(gallery.id);
   const folders = getAvailableImportFolders();
+  const importRootPath = ENV.GALLERY_IMPORT_PATH;
   const csrfToken = session.get("csrfToken") || "";
   const media = getGalleryMediaList(gallery.id);
 
@@ -99,6 +102,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       accessCode,
       codeVersion,
       folders,
+      importRootPath,
       csrfToken,
       media,
       activeImportJob: activeJob || null,
@@ -271,6 +275,7 @@ export default function AdminGalleryEditPage() {
     accessCode,
     codeVersion,
     folders,
+    importRootPath,
     csrfToken,
     media,
     activeImportJob,
@@ -284,6 +289,28 @@ export default function AdminGalleryEditPage() {
   // Code reveal/copy state
   const [showCode, setShowCode] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
+
+  // Import root path copy state
+  const [copiedImportPath, setCopiedImportPath] = useState(false);
+  const [copyImportPathStatus, setCopyImportPathStatus] = useState<string | null>(null);
+
+  const handleCopyImportPath = async () => {
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(importRootPath);
+        setCopiedImportPath(true);
+        setCopyImportPathStatus("Chemin copié dans le presse-papiers.");
+        setTimeout(() => {
+          setCopiedImportPath(false);
+          setCopyImportPathStatus(null);
+        }, 3000);
+      } else {
+        setCopyImportPathStatus("Copie automatique non supportée par le navigateur. Copiez le chemin manuellement.");
+      }
+    } catch {
+      setCopyImportPathStatus("Échec de la copie automatique. Copiez le chemin manuellement.");
+    }
+  };
 
   // Controlled editorial inputs state (preserves unsubmitted typing across imports/revalidations)
   const initialExpiresDateStr = gallery.expires_at
@@ -830,20 +857,40 @@ export default function AdminGalleryEditPage() {
         <section className={styles.sectionCard}>
           <h2 className={styles.sectionTitle}>
             <span>Importation depuis un dossier contrôlé</span>
-            <span className={styles.codeMeta}>Dossier racine : gallery-import</span>
           </h2>
 
-          <p className={`${styles.codeMeta} ${styles.codeMetaBottom16}`}>
-            Placez vos photos dans un sous-dossier <code>photos/</code> et vos vidéos dans un sous-dossier <code>videos/</code> du dossier d'import.
-          </p>
+          <div className={styles.importPathCard}>
+            <div className={styles.pathRow}>
+              <code className={styles.pathCode}>{importRootPath}</code>
+              <button
+                type="button"
+                onClick={handleCopyImportPath}
+                className={`${styles.btn} ${styles.btnSecondary} ${styles.btnSmall}`}
+                aria-label="Copier le chemin absolu du dossier d'import"
+              >
+                {copiedImportPath ? "✓ Chemin copié" : "Copier le chemin"}
+              </button>
+            </div>
+            {copyImportPathStatus && (
+              <p role="status" className={styles.copyStatusNotice}>
+                {copyImportPathStatus}
+              </p>
+            )}
+            <p className={styles.pathInstruction}>
+              <strong>Organisation :</strong> créez un sous-dossier par galerie (ex. <code>mariage-alice-bob/</code>) contenant un dossier <code>photos/</code> pour les images et un dossier <code>videos/</code> pour les films.
+            </p>
+            <p className={styles.pathInstruction}>
+              <strong>Astuce Finder (Mac) :</strong> ouvrez le Finder, appuyez sur <kbd>⌘ Cmd</kbd> + <kbd>Maj ⇧</kbd> + <kbd>G</kbd> (Aller au dossier...), collez le chemin ci-dessus et validez.
+            </p>
+          </div>
 
-          <div className={styles.rowGap12Align}>
+          <div className={styles.rowGap12Align} style={{ marginTop: "16px" }}>
             <select
               value={selectedFolder}
               onChange={(e) => setSelectedFolder(e.target.value)}
               className={`${styles.select} ${styles.selectMaxWidth}`}
             >
-              {folders.length === 0 && <option value="">Aucun dossier disponible</option>}
+              {folders.length === 0 && <option value="">Aucun sous-dossier disponible</option>}
               {folders.map((f) => (
                 <option key={f} value={f}>
                   📁 {f}

@@ -291,5 +291,37 @@ describe("gallery-import.server.ts (Folder Analysis, Magic Bytes, Lease Worker)"
       expect(mediaList.length).toBe(1);
       expect(mediaList[0].original_filename).toBe("valid.jpg");
     });
+
+    it("analyzes and imports an artificial photo placed in the visible structure <importRoot>/test-gallery/photos/", async () => {
+      const folderName = "test-gallery";
+      const folderPath = path.join(testImportPath, folderName);
+      const photosDir = path.join(folderPath, "photos");
+      fs.mkdirSync(photosDir, { recursive: true, mode: 0o700 });
+
+      await sharp({
+        create: { width: 800, height: 600, channels: 3, background: { r: 50, g: 120, b: 200 } },
+      })
+        .jpeg()
+        .toFile(path.join(photosDir, "mon-image.jpg"));
+
+      // 1. Analyze
+      const analysis = analyzeImportFolder(folderName);
+      expect(analysis.validPhotosCount).toBe(1);
+      expect(analysis.validVideosCount).toBe(0);
+      expect(analysis.rejectedFiles.length).toBe(0);
+
+      // 2. Import
+      const jobId = startImportJob(testGallery.id, folderName);
+      await processImportJob(jobId);
+
+      const job = getImportJobStatus(jobId);
+      expect(job?.status).toBe("completed");
+      expect(job?.progress_current).toBe(1);
+      expect(job?.progress_total).toBe(1);
+
+      const mediaList = getGalleryMediaList(testGallery.id);
+      expect(mediaList.length).toBe(1);
+      expect(mediaList[0].original_filename).toBe("mon-image.jpg");
+    });
   });
 });

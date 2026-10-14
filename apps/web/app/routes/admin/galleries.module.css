@@ -627,3 +627,63 @@
   margin: 0 0 12px;
   font-size: 14px;
 }
+
+.importPathCard {
+  background: rgba(20, 24, 34, 0.6);
+  border: 0.5px solid var(--px-line, #1B2230);
+  border-radius: 8px;
+  padding: 16px;
+  margin-top: 8px;
+  box-sizing: border-box;
+}
+
+.pathRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.pathCode {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  background: #0C0F17;
+  color: #5FB8FF;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 0.5px solid #232B3A;
+  word-break: break-all;
+  flex: 1;
+  min-width: 260px;
+}
+
+.copyStatusNotice {
+  font-size: 13px;
+  color: #10B981;
+  margin: 0 0 10px;
+}
+
+.pathInstruction {
+  font-size: 13px;
+  color: var(--px-muted, #AEB6C6);
+  margin: 6px 0 0;
+  line-height: 1.5;
+}
+
+.pathInstruction kbd {
+  background: #1B2230;
+  color: #F5F6F7;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  border: 0.5px solid #2D3748;
+}
+
+.pathInstruction code {
+  color: #5FB8FF;
+  background: rgba(30, 158, 255, 0.1);
+  padding: 2px 4px;
+  border-radius: 4px;
+}

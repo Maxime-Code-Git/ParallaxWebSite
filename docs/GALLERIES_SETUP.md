@@ -13,7 +13,7 @@ Les galeries privées Parallax reposent sur un stockage SQLite natif V1 et un st
 ```dotenv
 GALLERY_DB_PATH=/Users/profadmin/.parallax-data/gallery.sqlite
 GALLERY_MEDIA_PATH=/Users/profadmin/.parallax-data/gallery-media
-GALLERY_IMPORT_PATH=/Users/profadmin/.parallax-data/gallery-import
+GALLERY_IMPORT_PATH="/Users/profadmin/Documents/Antigravity/Parallax Website/ParallaxWebSite-admin/gallery-import"
 GALLERY_SECRET=<64 caractères hexadécimaux / 32 octets aléatoires>
 GALLERY_CODE_ENCRYPTION_KEY=<64 caractères hexadécimaux / 32 octets aléatoires>
 ```
@@ -27,22 +27,29 @@ npm run gallery:setup
 ```
 
 Cette commande effectue les opérations suivantes :
-- Prépare les dossiers privés par défaut sous `~/.parallax-data/` avec permissions strictes (`0700`).
+- Crée le dossier d'import visible `gallery-import/` directement à la racine du projet (ignoré par Git via `.gitignore`), avec une arborescence vide de démarrage : `ma-galerie/photos/` et `ma-galerie/videos/`.
+- Prépare les dossiers de stockage privés sous `~/.parallax-data/` (`gallery-media/` et `gallery.sqlite`) avec permissions strictes (`0700`).
+- Si une ancienne racine d'import cachée contenait déjà des fichiers, les copie vers le nouveau dossier visible sans écraser de contenu différent.
 - Génère les deux secrets cryptographiques manquants (`GALLERY_SECRET` et `GALLERY_CODE_ENCRYPTION_KEY`) de 32 octets aléatoires.
-- Ajoute les clés manquantes dans `.env.local` avec permissions de fichier restreintes (`0600`).
-- Préserve l'intégralité des valeurs et secrets existants (aucune écrasement ni duplication).
+- Ajoute ou met à jour les clés dans `.env.local` sans duplication et avec permissions de fichier restreintes (`0600`).
+- Préserve l'intégralité des valeurs et secrets existants (aucun écrasement non sollicité).
 - Ne journalise ni mot de passe, ni hash Argon2, ni secret.
 
 ---
 
 ## 2. Arborescence du Dossier d'Import Contrôlé
 
-Pour importer des médias dans une galerie, Maxime dépose les fichiers dans un sous-dossier de `GALLERY_IMPORT_PATH` (`~/.parallax-data/gallery-import/`).
+Pour importer des médias dans une galerie, Maxime dépose ses fichiers dans un sous-dossier de `gallery-import/` situé directement à la racine du projet.
+
+Pour ouvrir ce dossier rapidement dans le Finder sur Mac :
+1. Copier le chemin affiché dans l'administration (ou cliquer sur « Copier le chemin »).
+2. Dans le Finder, appuyer sur **⌘ Cmd + Maj ⇧ + G** (Aller au dossier...).
+3. Coller le chemin et valider.
 
 ### Structure attendue
 
 ```text
-GALLERY_IMPORT_PATH/
+gallery-import/
   nom-du-dossier/
     photos/
       photo-01.jpg
@@ -54,8 +61,9 @@ GALLERY_IMPORT_PATH/
 
 ### Règles structurelles
 
-- Le sous-dossier peut contenir uniquement un répertoire `photos/`, uniquement un répertoire `videos/`, ou les deux.
-- Aucun sous-dossier invité ou couple.
+- Chaque sous-dossier de premier niveau correspond à un projet / galerie.
+- Le sous-dossier peut contenir un répertoire `photos/`, un répertoire `videos/`, ou les deux.
+- Aucun sous-dossier imbriqué invité ou couple.
 - Les fichiers sources restent intacts dans le dossier d'import : ils sont copiés vers le stockage privé `GALLERY_MEDIA_PATH` de manière atomique.
 
 ---

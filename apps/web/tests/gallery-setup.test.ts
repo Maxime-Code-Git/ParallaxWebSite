@@ -22,10 +22,11 @@ describe("gallery-setup.js (npm run gallery:setup Idempotence & Security)", () =
     }
   });
 
-  it("configures fresh environment safely with 0600 file and 0700 directories", () => {
+  it("configures fresh environment safely with 0600 file and visible gallery-import with starter structure", () => {
     const result = setupGalleryEnvironment({
       envPath: testEnvPath,
       dataDir: testDataDir,
+      monorepoRoot: tmpDir,
       log: false,
     });
 
@@ -35,7 +36,10 @@ describe("gallery-setup.js (npm run gallery:setup Idempotence & Security)", () =
     // Verify directories created
     expect(fs.existsSync(testDataDir)).toBe(true);
     expect(fs.existsSync(path.join(testDataDir, "gallery-media"))).toBe(true);
-    expect(fs.existsSync(path.join(testDataDir, "gallery-import"))).toBe(true);
+    const visibleImport = path.join(tmpDir, "gallery-import");
+    expect(fs.existsSync(visibleImport)).toBe(true);
+    expect(fs.existsSync(path.join(visibleImport, "ma-galerie", "photos"))).toBe(true);
+    expect(fs.existsSync(path.join(visibleImport, "ma-galerie", "videos"))).toBe(true);
 
     // Verify .env.local created with 0600 permissions
     expect(fs.existsSync(testEnvPath)).toBe(true);
@@ -43,17 +47,54 @@ describe("gallery-setup.js (npm run gallery:setup Idempotence & Security)", () =
 
     expect(content).toContain("GALLERY_DB_PATH=");
     expect(content).toContain("GALLERY_MEDIA_PATH=");
-    expect(content).toContain("GALLERY_IMPORT_PATH=");
+    expect(content).toContain(`GALLERY_IMPORT_PATH="${visibleImport}"`);
     expect(content).toContain("GALLERY_SECRET=");
     expect(content).toContain("GALLERY_CODE_ENCRYPTION_KEY=");
 
     // Extract secrets and verify 64-char hex format
-    const secretMatch = content.match(/GALLERY_SECRET=([0-9a-fA-F]{64})/);
-    const encKeyMatch = content.match(/GALLERY_CODE_ENCRYPTION_KEY=([0-9a-fA-F]{64})/);
+    const secretMatch = content.match(/GALLERY_SECRET="?([0-9a-fA-F]{64})"?/);
+    const encKeyMatch = content.match(/GALLERY_CODE_ENCRYPTION_KEY="?([0-9a-fA-F]{64})"?/);
 
     expect(secretMatch).not.toBeNull();
     expect(encKeyMatch).not.toBeNull();
     expect(secretMatch![1]).not.toBe(encKeyMatch![1]); // Must be distinct
+  });
+
+  it("migrates historical hidden import path to visible import path without duplicating keys", () => {
+    const hiddenImport = path.join(testDataDir, "gallery-import");
+    fs.mkdirSync(path.join(hiddenImport, "old-session"), { recursive: true });
+    fs.writeFileSync(path.join(hiddenImport, "old-session", "file.txt"), "keep-me");
+
+    const initialContent = [
+      `GALLERY_DB_PATH="${path.join(testDataDir, "gallery.sqlite")}"`,
+      `GALLERY_MEDIA_PATH="${path.join(testDataDir, "gallery-media")}"`,
+      `GALLERY_IMPORT_PATH="${hiddenImport}"`,
+      `GALLERY_SECRET="1111111111111111111111111111111111111111111111111111111111111111"`,
+      `GALLERY_CODE_ENCRYPTION_KEY="2222222222222222222222222222222222222222222222222222222222222222"`,
+    ].join("\n");
+
+    fs.writeFileSync(testEnvPath, initialContent, { mode: 0o600 });
+
+    const result = setupGalleryEnvironment({
+      envPath: testEnvPath,
+      dataDir: testDataDir,
+      monorepoRoot: tmpDir,
+      log: false,
+    });
+
+    expect(result.success).toBe(true);
+    const updatedContent = fs.readFileSync(testEnvPath, "utf-8");
+
+    const visibleImport = path.join(tmpDir, "gallery-import");
+    expect(updatedContent).toContain(`GALLERY_IMPORT_PATH="${visibleImport}"`);
+    // Ensure no duplicate definition
+    const matches = updatedContent.match(/GALLERY_IMPORT_PATH=/g);
+    expect(matches?.length).toBe(1);
+
+    // Ensure historical files copied to visible import
+    expect(fs.existsSync(path.join(visibleImport, "old-session", "file.txt"))).toBe(true);
+    // Ensure historical original preserved
+    expect(fs.existsSync(path.join(hiddenImport, "old-session", "file.txt"))).toBe(true);
   });
 
   it("executes idempotently without regenerating secrets or duplicating keys on second run", () => {

@@ -142,6 +142,47 @@ describe("Environment Validation (env.server.ts)", () => {
     expect(config.hash).toBe(process.env.ADMIN_PASSWORD_HASH);
   });
 
+  describe("GALLERY_IMPORT_PATH Validation", () => {
+    it("accepts dedicated <repoRoot>/gallery-import directory in development and production", async () => {
+      process.env.NODE_ENV = "development";
+      const monorepoRoot = path.resolve(__dirname, "../../..");
+      const validImport = path.join(monorepoRoot, "gallery-import");
+      fs.mkdirSync(validImport, { recursive: true, mode: 0o700 });
+      process.env.GALLERY_IMPORT_PATH = validImport;
+
+      const { ENV } = await import("../app/lib/env.server");
+      expect(ENV.GALLERY_IMPORT_PATH).toBe(fs.realpathSync(validImport));
+    });
+
+    it("accepts an external directory outside repository", async () => {
+      process.env.NODE_ENV = "development";
+      const extImport = fs.mkdtempSync(path.join(os.tmpdir(), "parallax-import-test-"));
+      process.env.GALLERY_IMPORT_PATH = extImport;
+
+      const { ENV } = await import("../app/lib/env.server");
+      expect(ENV.GALLERY_IMPORT_PATH).toBe(fs.realpathSync(extImport));
+      fs.rmSync(extImport, { recursive: true, force: true });
+    });
+
+    it("rejects repository root itself as GALLERY_IMPORT_PATH", async () => {
+      process.env.NODE_ENV = "development";
+      const monorepoRoot = path.resolve(__dirname, "../../..");
+      process.env.GALLERY_IMPORT_PATH = monorepoRoot;
+
+      const { ENV } = await import("../app/lib/env.server");
+      expect(() => ENV.GALLERY_IMPORT_PATH).toThrow("ne doit pas se trouver dans le depot du projet");
+    });
+
+    it("rejects arbitrary repository directories like apps/web or public", async () => {
+      process.env.NODE_ENV = "development";
+      const monorepoRoot = path.resolve(__dirname, "../../..");
+      process.env.GALLERY_IMPORT_PATH = path.join(monorepoRoot, "apps", "web");
+
+      const { ENV } = await import("../app/lib/env.server");
+      expect(() => ENV.GALLERY_IMPORT_PATH).toThrow("ne doit pas se trouver dans le depot du projet");
+    });
+  });
+
   describe("validate-startup.js production pre-check CLI", () => {
     const scriptPath = path.resolve(__dirname, "../scripts/validate-startup.js");
 

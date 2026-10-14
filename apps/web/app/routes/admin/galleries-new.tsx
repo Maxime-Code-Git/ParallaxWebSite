@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   Form,
   Link,
@@ -16,10 +17,12 @@ import { constantTimeEqual } from "../../lib/auth.server";
 import { validateOrigin, readStrictFormUrlEncoded } from "../../lib/security.server";
 import { createGallery, GalleryValidationError } from "../../lib/gallery.server";
 import { getAvailableImportFolders, startImportJob, processImportJob } from "../../lib/gallery-import.server";
+import { ENV } from "../../lib/env.server";
 import styles from "./galleries.module.css";
 
 interface LoaderData {
   folders: string[];
+  importRootPath: string;
   csrfToken: string;
 }
 
@@ -37,9 +40,10 @@ export function meta() {
 export async function loader({ request }: LoaderFunctionArgs) {
   const session = await requireValidAdminSession(request);
   const folders = getAvailableImportFolders();
+  const importRootPath = ENV.GALLERY_IMPORT_PATH;
   const csrfToken = session.get("csrfToken") || "";
 
-  return Response.json({ folders, csrfToken }, { headers: createAdminHeaders() });
+  return Response.json({ folders, importRootPath, csrfToken }, { headers: createAdminHeaders() });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -141,10 +145,31 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function AdminGalleryNewPage() {
-  const { folders, csrfToken } = useLoaderData<LoaderData>();
+  const { folders, importRootPath, csrfToken } = useLoaderData<LoaderData>();
   const actionData = useActionData<ActionData>();
   const navigation = useNavigation();
   const isSubmitting = navigation.state === "submitting";
+
+  const [copiedPath, setCopiedPath] = useState(false);
+  const [copyStatus, setCopyStatus] = useState<string | null>(null);
+
+  const handleCopyPath = async () => {
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(importRootPath);
+        setCopiedPath(true);
+        setCopyStatus("Chemin copié dans le presse-papiers.");
+        setTimeout(() => {
+          setCopiedPath(false);
+          setCopyStatus(null);
+        }, 3000);
+      } else {
+        setCopyStatus("Copie automatique non supportée par le navigateur. Copiez le chemin manuellement.");
+      }
+    } catch {
+      setCopyStatus("Échec de la copie automatique. Copiez le chemin manuellement.");
+    }
+  };
 
   const today = new Date().toISOString().split("T")[0];
 
@@ -243,21 +268,55 @@ export default function AdminGalleryNewPage() {
               />
             </div>
 
-            {folders.length > 0 && (
-              <div className={styles.formGroup}>
-                <label htmlFor="importFolder" className={styles.label}>
-                  Dossier d'import initial (facultatif)
-                </label>
-                <select id="importFolder" name="importFolder" className={styles.select}>
-                  <option value="">-- Aucun dossier d'import --</option>
-                  {folders.map((f) => (
-                    <option key={f} value={f}>
-                      📁 {f}
-                    </option>
-                  ))}
-                </select>
+            <div className={`${styles.formGroup} ${styles.formFullWidth}`}>
+              <label className={styles.label}>
+                Dossier d'import sur le serveur / Mac
+              </label>
+              <div className={styles.importPathCard}>
+                <div className={styles.pathRow}>
+                  <code className={styles.pathCode}>{importRootPath}</code>
+                  <button
+                    type="button"
+                    onClick={handleCopyPath}
+                    className={`${styles.btn} ${styles.btnSecondary} ${styles.btnSmall}`}
+                    aria-label="Copier le chemin absolu du dossier d'import"
+                  >
+                    {copiedPath ? "✓ Chemin copié" : "Copier le chemin"}
+                  </button>
+                </div>
+                {copyStatus && (
+                  <p role="status" className={styles.copyStatusNotice}>
+                    {copyStatus}
+                  </p>
+                )}
+                <p className={styles.pathInstruction}>
+                  <strong>Organisation :</strong> créez un sous-dossier par galerie (ex. <code>mariage-alice-bob/</code>) contenant un dossier <code>photos/</code> pour les images et un dossier <code>videos/</code> pour les films.
+                </p>
+                <p className={styles.pathInstruction}>
+                  <strong>Astuce Finder (Mac) :</strong> ouvrez le Finder, appuyez sur <kbd>⌘ Cmd</kbd> + <kbd>Maj ⇧</kbd> + <kbd>G</kbd> (Aller au dossier...), collez le chemin ci-dessus et validez.
+                </p>
               </div>
-            )}
+
+              {folders.length > 0 ? (
+                <div style={{ marginTop: "16px" }}>
+                  <label htmlFor="importFolder" className={styles.label}>
+                    Sélectionner un sous-dossier d'import initial (facultatif)
+                  </label>
+                  <select id="importFolder" name="importFolder" className={styles.select}>
+                    <option value="">-- Aucun dossier d'import pour l'instant --</option>
+                    {folders.map((f) => (
+                      <option key={f} value={f}>
+                        📁 {f}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <p className={styles.codeMeta} style={{ marginTop: "10px" }}>
+                  Aucun sous-dossier détecté dans <code>{importRootPath}</code> pour l'instant. Vous pourrez aussi lancer l'import plus tard depuis la page d'édition.
+                </p>
+              )}
+            </div>
 
             <div className={`${styles.formGroup} ${styles.formFullWidth}`}>
               <label htmlFor="introFr" className={styles.label}>
