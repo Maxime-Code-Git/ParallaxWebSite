@@ -47,16 +47,45 @@ export function meta({ data }: { data?: LoaderData }) {
   ];
 }
 
+export function headers({
+  loaderHeaders,
+  actionHeaders,
+}: {
+  loaderHeaders: Headers;
+  actionHeaders: Headers;
+}): Headers {
+  const headers = new Headers();
+  for (const [key, value] of Object.entries(GALLERY_PRIVATE_HEADERS)) {
+    headers.set(key, value);
+  }
+
+  const actionCookie = actionHeaders?.get("Set-Cookie");
+  if (actionCookie) {
+    headers.set("Set-Cookie", actionCookie);
+  } else {
+    const loaderCookie = loaderHeaders?.get("Set-Cookie");
+    if (loaderCookie) {
+      headers.set("Set-Cookie", loaderCookie);
+    }
+  }
+
+  const retryAfter = actionHeaders?.get("Retry-After");
+  if (retryAfter) {
+    headers.set("Retry-After", retryAfter);
+  }
+
+  return headers;
+}
+
 export async function loader({ request }: LoaderFunctionArgs) {
   const url = new URL(request.url);
   const lang: "fr" | "en" = url.pathname.startsWith("/en") ? "en" : "fr";
   const session = await getGallerySession(request);
 
-  let csrfToken = session.get("csrfToken") as string | undefined;
-  if (!csrfToken) {
-    csrfToken = createGalleryCsrfToken();
-    session.set("csrfToken", csrfToken);
-  }
+  // Generate anonymous CSRF token with short-lived server expiration (15 minutes)
+  const csrfToken = createGalleryCsrfToken();
+  session.set("csrfToken", csrfToken);
+  session.set("csrfExpiresAt", Date.now() + 15 * 60 * 1000);
 
   const statusParam = url.searchParams.get("status");
   let statusMessage: string | null = null;
@@ -78,7 +107,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 
   const { common } = getSiteContent();
-  const sessionCookie = await commitGallerySession(session);
+  const sessionCookie = await commitGallerySession(session, { maxAge: 15 * 60 });
 
   return Response.json(
     {

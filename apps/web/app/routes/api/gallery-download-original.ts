@@ -1,12 +1,11 @@
-import fs from "node:fs";
 import { Readable } from "node:stream";
 import type { LoaderFunctionArgs } from "react-router";
 import {
   requireGalleryAccess,
   GALLERY_PRIVATE_HEADERS,
 } from "../../lib/gallery-auth.server";
-import { getGalleryOriginalPath } from "../../lib/gallery-preview.server";
-import { buildContentDisposition } from "../../lib/media-utils.server";
+import { buildContentDisposition, openSecureMediaFile } from "../../lib/media-utils.server";
+import { ENV } from "../../lib/env.server";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   if (request.method !== "GET" && request.method !== "HEAD") {
@@ -26,20 +25,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     return new Response("Media not found", { status: 404, headers: GALLERY_PRIVATE_HEADERS });
   }
 
-  let filePath: string;
+  let handle: ReturnType<typeof openSecureMediaFile>;
   try {
-    filePath = getGalleryOriginalPath(gallery.id, media.id);
-  } catch {
-    return new Response("File not found", { status: 404, headers: GALLERY_PRIVATE_HEADERS });
-  }
-
-  if (!fs.existsSync(filePath)) {
-    return new Response("File not found", { status: 404, headers: GALLERY_PRIVATE_HEADERS });
-  }
-
-  let stats: fs.Stats;
-  try {
-    stats = fs.statSync(filePath);
+    handle = openSecureMediaFile(ENV.GALLERY_MEDIA_PATH, [gallery.id, media.id]);
   } catch {
     return new Response("File not found", { status: 404, headers: GALLERY_PRIVATE_HEADERS });
   }
@@ -47,20 +35,22 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const contentDisposition = buildContentDisposition("attachment", media.original_filename);
 
   if (request.method === "HEAD") {
+    const sizeStr = handle.size.toString();
+    handle.close();
     return new Response(null, {
       status: 200,
       headers: {
         ...GALLERY_PRIVATE_HEADERS,
-        "Content-Length": stats.size.toString(),
+        "Content-Length": sizeStr,
         "Content-Type": media.mime_type || "application/octet-stream",
         "Content-Disposition": contentDisposition,
       },
     });
   }
 
-  const stream = fs.createReadStream(filePath, { flags: "r", mode: 0o600 });
+  const stream = handle.createReadStream();
   request.signal.addEventListener("abort", () => {
-    stream.destroy();
+    handle.close();
   });
 
   const webStream = Readable.toWeb(stream) as ReadableStream;
@@ -69,7 +59,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     status: 200,
     headers: {
       ...GALLERY_PRIVATE_HEADERS,
-      "Content-Length": stats.size.toString(),
+      "Content-Length": handle.size.toString(),
       "Content-Type": media.mime_type || "application/octet-stream",
       "Content-Disposition": contentDisposition,
     },

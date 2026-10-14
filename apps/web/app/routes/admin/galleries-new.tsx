@@ -47,9 +47,11 @@ export async function action({ request }: ActionFunctionArgs) {
   const expectedCsrfToken = session.get("csrfToken") || "";
 
   if (request.method !== "POST") {
+    const headers = createAdminHeaders();
+    headers.set("Allow", "POST");
     return new Response("Method Not Allowed", {
       status: 405,
-      headers: { ...createAdminHeaders(), Allow: "POST" },
+      headers,
     });
   }
 

@@ -1,4 +1,6 @@
+import fs from "node:fs";
 import { ALLOWED_WIDTHS, type AllowedWidth } from "./gallery-preview.server";
+import { verifySecurePathChain, SafeImageError } from "./media-image.server";
 
 export interface ByteRange {
   start: number;
@@ -86,4 +88,76 @@ function pathBasenameSafe(name: string): string {
   // Strip control characters and path traversal markers
   const clean = name.replace(/[\0\r\n/\\]/g, "_").trim();
   return clean.length > 0 ? clean : "media";
+}
+
+export interface SecureMediaHandle {
+  fd: number;
+  size: number;
+  fullPath: string;
+  createReadStream: (options?: { start?: number; end?: number }) => fs.ReadStream;
+  close: () => void;
+}
+
+/**
+ * Safely opens a media file by validating every directory and leaf component
+ * against symlink traversal and strict confinement, then opening with O_RDONLY | O_NOFOLLOW
+ * and verifying via fstatSync on the open descriptor.
+ */
+export function openSecureMediaFile(baseDir: string, segments: string[]): SecureMediaHandle {
+  const verifiedPath = verifySecurePathChain(baseDir, segments, "file");
+  let fd: number;
+  try {
+    fd = fs.openSync(verifiedPath, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  } catch {
+    throw new SafeImageError("Impossible d'ouvrir le fichier de média de façon sécurisée.");
+  }
+
+  let stat: fs.Stats;
+  try {
+    stat = fs.fstatSync(fd);
+    if (!stat.isFile()) {
+      fs.closeSync(fd);
+      throw new SafeImageError("Le descripteur ouvert ne correspond pas à un fichier régulier.");
+    }
+  } catch (err) {
+    try {
+      fs.closeSync(fd);
+    } catch {
+      // Ignored
+    }
+    if (err instanceof SafeImageError) throw err;
+    throw new SafeImageError("Impossible de vérifier les attributs du fichier ouvert.");
+  }
+
+  let isClosed = false;
+  const safeClose = () => {
+    if (!isClosed) {
+      isClosed = true;
+      try {
+        fs.closeSync(fd);
+      } catch {
+        // Ignored
+      }
+    }
+  };
+
+  return {
+    fd,
+    size: stat.size,
+    fullPath: verifiedPath,
+    createReadStream: (options?: { start?: number; end?: number }) => {
+      if (isClosed) throw new Error("File descriptor already closed");
+      const readStream = fs.createReadStream(verifiedPath, {
+        fd,
+        autoClose: false,
+        start: options?.start,
+        end: options?.end,
+      });
+      readStream.on("close", safeClose);
+      readStream.on("end", safeClose);
+      readStream.on("error", safeClose);
+      return readStream;
+    },
+    close: safeClose,
+  };
 }

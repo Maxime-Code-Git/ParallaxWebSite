@@ -160,4 +160,31 @@ describe("gallery-media.server.ts & gallery-preview.server.ts (Previews, Range S
       expect(fs.existsSync(p1920)).toBe(false);
     });
   });
+
+  describe("buildPhotoSrcSet (gallery-media.shared.ts)", () => {
+    it("deduplicates srcset entries and handles small images accurately without false enlargement descriptors", async () => {
+      const { buildPhotoSrcSet } = await import("../app/lib/gallery-media.shared");
+
+      // For a small image with fallbackWidth = 200 and no larger variants
+      const smallRes = buildPhotoSrcSet("/api/gallery/pub123/media", "img-small-1", null, 200);
+      expect(smallRes.srcSet).toBe("/api/gallery/pub123/media/img-small-1?width=480&format=webp 200w");
+      expect(smallRes.srcSet).not.toContain("960w");
+      expect(smallRes.srcSet).not.toContain("1920w");
+
+      // For an 800px image with parsed variants { 480: { width: 480 }, 960: { width: 800 } }
+      const medRes = buildPhotoSrcSet(
+        "/api/gallery/pub123/media",
+        "img-med-1",
+        {
+          480: { width: 480, height: 360 },
+          960: { width: 800, height: 600 },
+        },
+        800
+      );
+      expect(medRes.srcSet).toBe(
+        "/api/gallery/pub123/media/img-med-1?width=480&format=webp 480w, /api/gallery/pub123/media/img-med-1?width=960&format=webp 800w"
+      );
+      expect(medRes.srcSet).not.toContain("960w");
+    });
+  });
 });

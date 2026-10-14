@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import {
   Form,
   Link,
@@ -6,6 +6,7 @@ import {
   useActionData,
   useLoaderData,
   useNavigation,
+  useRevalidator,
   type ActionFunctionArgs,
   type LoaderFunctionArgs,
 } from "react-router";
@@ -111,9 +112,11 @@ export async function action({ request, params }: ActionFunctionArgs) {
   const expectedCsrfToken = session.get("csrfToken") || "";
 
   if (request.method !== "POST") {
+    const headers = createAdminHeaders();
+    headers.set("Allow", "POST");
     return new Response("Method Not Allowed", {
       status: 405,
-      headers: { ...createAdminHeaders(), Allow: "POST" },
+      headers,
     });
   }
 
@@ -221,7 +224,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
     if (intent === "set_cover") {
       const mediaId = (body.get("mediaId") || "").trim();
-      setCoverPhoto(gallery.id, mediaId);
+      const revision = parseInt(body.get("revision") || "0", 10);
+      setCoverPhoto(gallery.id, mediaId, revision);
       return Response.json({ success: "Photo de couverture mise à jour.", intent }, { headers: createAdminHeaders() });
     }
 
@@ -274,11 +278,30 @@ export default function AdminGalleryEditPage() {
 
   const actionData = useActionData<ActionData>();
   const navigation = useNavigation();
+  const revalidator = useRevalidator();
   const isSubmitting = navigation.state === "submitting";
 
   // Code reveal/copy state
   const [showCode, setShowCode] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
+
+  // Controlled editorial inputs state (preserves unsubmitted typing across imports/revalidations)
+  const initialExpiresDateStr = gallery.expires_at
+    ? new Date(gallery.expires_at).toISOString().split("T")[0]
+    : "";
+
+  const [title, setTitle] = useState(gallery.title);
+  const [clientName, setClientName] = useState(gallery.client_name);
+  const [projectDate, setProjectDate] = useState(gallery.project_date);
+  const [location, setLocation] = useState(gallery.location || "");
+  const [expiresAt, setExpiresAt] = useState(initialExpiresDateStr);
+  const [introFr, setIntroFr] = useState(gallery.intro_fr || "");
+  const [introEn, setIntroEn] = useState(gallery.intro_en || "");
+  const [signatureFr, setSignatureFr] = useState(gallery.signature_fr || "");
+  const [signatureEn, setSignatureEn] = useState(gallery.signature_en || "");
+
+  // Accessible UI status and error notifications (replaces window.alert())
+  const [feedback, setFeedback] = useState<{ type: "error" | "success"; message: string } | null>(null);
 
   // Import state
   const [selectedFolder, setSelectedFolder] = useState(folders[0] || "");
@@ -302,10 +325,15 @@ export default function AdminGalleryEditPage() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteConfirmationText, setDeleteConfirmationText] = useState("");
 
-  const copyCodeToClipboard = () => {
-    navigator.clipboard.writeText(accessCode);
-    setCopiedCode(true);
-    setTimeout(() => setCopiedCode(false), 2500);
+  const copyCodeToClipboard = async () => {
+    try {
+      await navigator.clipboard.writeText(accessCode);
+      setCopiedCode(true);
+      setFeedback({ type: "success", message: "Code d'accès copié dans le presse-papier." });
+      setTimeout(() => setCopiedCode(false), 2500);
+    } catch {
+      setFeedback({ type: "error", message: "Échec de la copie du code dans le presse-papier." });
+    }
   };
 
   // Analyze import folder
@@ -313,6 +341,7 @@ export default function AdminGalleryEditPage() {
     if (!selectedFolder) return;
     setAnalyzing(true);
     setAnalysisResult(null);
+    setFeedback(null);
 
     try {
       const res = await fetch(`/api/admin/galleries/${gallery.id}/import`, {
@@ -330,18 +359,78 @@ export default function AdminGalleryEditPage() {
         setAnalysisResult(data.analysis);
       } else {
         const err = await res.json();
-        alert(err.error || "Erreur lors de l'analyse du dossier.");
+        setFeedback({ type: "error", message: err.error || "Erreur lors de l'analyse du dossier." });
       }
     } catch {
-      alert("Erreur de connexion.");
+      setFeedback({ type: "error", message: "Erreur de connexion lors de l'analyse du dossier." });
     } finally {
       setAnalyzing(false);
     }
   };
 
+  const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const isPollingRef = useRef(false);
+
+  // Poll import status without page reload, keeping user form inputs untouched
+  const pollImportStatus = useCallback(
+    (jobId: string) => {
+      if (pollTimerRef.current) {
+        clearInterval(pollTimerRef.current);
+      }
+
+      pollTimerRef.current = setInterval(async () => {
+        if (isPollingRef.current) return;
+        isPollingRef.current = true;
+        try {
+          const res = await fetch(`/api/admin/galleries/${gallery.id}/imports/${jobId}`);
+          if (res.ok) {
+            const data = await res.json();
+            setImportStatus(data.status);
+            setImportProgress({ current: data.progress_current, total: data.progress_total });
+
+            if (data.status === "completed" || data.status === "failed") {
+              if (pollTimerRef.current) {
+                clearInterval(pollTimerRef.current);
+                pollTimerRef.current = null;
+              }
+              if (data.status === "completed") {
+                setFeedback({ type: "success", message: "Importation terminée avec succès." });
+              } else {
+                setFeedback({ type: "error", message: data.error_message || "L'importation a échoué." });
+              }
+              revalidator.revalidate();
+            }
+          }
+        } catch {
+          if (pollTimerRef.current) {
+            clearInterval(pollTimerRef.current);
+            pollTimerRef.current = null;
+          }
+        } finally {
+          isPollingRef.current = false;
+        }
+      }, 1500);
+    },
+    [gallery.id, revalidator]
+  );
+
+  // Resume tracking an already active import job on mount and clean up on unmount
+  useEffect(() => {
+    if (activeImportJob && (activeImportJob.status === "importing" || activeImportJob.status === "pending")) {
+      pollImportStatus(activeImportJob.id);
+    }
+    return () => {
+      if (pollTimerRef.current) {
+        clearInterval(pollTimerRef.current);
+        pollTimerRef.current = null;
+      }
+    };
+  }, [activeImportJob?.id, activeImportJob?.status, pollImportStatus]);
+
   // Start import
   const handleStartImport = async () => {
     if (!selectedFolder) return;
+    setFeedback(null);
 
     try {
       const res = await fetch(`/api/admin/galleries/${gallery.id}/import`, {
@@ -360,37 +449,17 @@ export default function AdminGalleryEditPage() {
         pollImportStatus(data.jobId);
       } else {
         const err = await res.json();
-        alert(err.error || "Impossible de démarrer l'importation.");
+        setFeedback({ type: "error", message: err.error || "Impossible de démarrer l'importation." });
       }
     } catch {
-      alert("Erreur de connexion.");
+      setFeedback({ type: "error", message: "Erreur de connexion lors du démarrage de l'import." });
     }
   };
 
-  // Poll import status
-  const pollImportStatus = (jobId: string) => {
-    const timer = setInterval(async () => {
-      try {
-        const res = await fetch(`/api/admin/galleries/${gallery.id}/imports/${jobId}`);
-        if (res.ok) {
-          const data = await res.json();
-          setImportStatus(data.status);
-          setImportProgress({ current: data.progress_current, total: data.progress_total });
-
-          if (data.status === "completed" || data.status === "failed") {
-            clearInterval(timer);
-            window.location.reload();
-          }
-        }
-      } catch {
-        clearInterval(timer);
-      }
-    }, 1500);
-  };
-
-  // Video poster upload
+  // Video poster upload without page reload
   const handlePosterUpload = async (mediaId: string, file: File) => {
     setPosterUploadingId(mediaId);
+    setFeedback(null);
     const formData = new FormData();
     formData.append("file", file);
     formData.append("csrfToken", csrfToken);
@@ -402,13 +471,14 @@ export default function AdminGalleryEditPage() {
       });
 
       if (res.ok) {
-        window.location.reload();
+        setFeedback({ type: "success", message: "Poster vidéo mis à jour avec succès." });
+        revalidator.revalidate();
       } else {
         const err = await res.json();
-        alert(err.error || "Échec du téléversement du poster.");
+        setFeedback({ type: "error", message: err.error || "Échec du téléversement du poster." });
       }
     } catch {
-      alert("Erreur réseau lors du téléversement.");
+      setFeedback({ type: "error", message: "Erreur réseau lors du téléversement du poster." });
     } finally {
       setPosterUploadingId(null);
     }
@@ -416,10 +486,6 @@ export default function AdminGalleryEditPage() {
 
   const photos = media.filter((m) => m.media_type === "photo");
   const videos = media.filter((m) => m.media_type === "video");
-
-  const expiresDateStr = gallery.expires_at
-    ? new Date(gallery.expires_at).toISOString().split("T")[0]
-    : "";
 
   return (
     <div className={styles.container}>
@@ -467,6 +533,15 @@ export default function AdminGalleryEditPage() {
       </header>
 
       <main className={styles.content}>
+        {feedback && (
+          <div
+            className={feedback.type === "success" ? styles.alertSuccess : styles.alertError}
+            role={feedback.type === "success" ? "status" : "alert"}
+          >
+            {feedback.message}
+          </div>
+        )}
+
         {actionData?.success && (
           <div className={styles.alertSuccess} role="status">
             {actionData.success}
@@ -550,7 +625,7 @@ export default function AdminGalleryEditPage() {
                 <input type="hidden" name="csrfToken" value={csrfToken} />
                 <input type="hidden" name="intent" value="publish" />
                 <input type="hidden" name="revision" value={gallery.revision} />
-                <input type="hidden" name="expiresAt" value={expiresDateStr} />
+                <input type="hidden" name="expiresAt" value={expiresAt} />
                 <button
                   type="submit"
                   disabled={isSubmitting || media.length === 0}
@@ -616,7 +691,8 @@ export default function AdminGalleryEditPage() {
                   type="text"
                   required
                   maxLength={100}
-                  defaultValue={gallery.title}
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
                   className={styles.input}
                 />
               </div>
@@ -631,7 +707,8 @@ export default function AdminGalleryEditPage() {
                   type="text"
                   required
                   maxLength={100}
-                  defaultValue={gallery.client_name}
+                  value={clientName}
+                  onChange={(e) => setClientName(e.target.value)}
                   className={styles.input}
                 />
               </div>
@@ -645,7 +722,8 @@ export default function AdminGalleryEditPage() {
                   name="projectDate"
                   type="date"
                   required
-                  defaultValue={gallery.project_date}
+                  value={projectDate}
+                  onChange={(e) => setProjectDate(e.target.value)}
                   className={styles.input}
                 />
               </div>
@@ -659,7 +737,8 @@ export default function AdminGalleryEditPage() {
                   name="location"
                   type="text"
                   maxLength={100}
-                  defaultValue={gallery.location || ""}
+                  value={location}
+                  onChange={(e) => setLocation(e.target.value)}
                   className={styles.input}
                 />
               </div>
@@ -672,7 +751,8 @@ export default function AdminGalleryEditPage() {
                   id="expiresAt"
                   name="expiresAt"
                   type="date"
-                  defaultValue={expiresDateStr}
+                  value={expiresAt}
+                  onChange={(e) => setExpiresAt(e.target.value)}
                   className={styles.input}
                 />
               </div>
@@ -685,7 +765,8 @@ export default function AdminGalleryEditPage() {
                   id="introFr"
                   name="introFr"
                   rows={3}
-                  defaultValue={gallery.intro_fr || ""}
+                  value={introFr}
+                  onChange={(e) => setIntroFr(e.target.value)}
                   className={styles.textarea}
                 />
               </div>
@@ -698,7 +779,8 @@ export default function AdminGalleryEditPage() {
                   id="introEn"
                   name="introEn"
                   rows={3}
-                  defaultValue={gallery.intro_en || ""}
+                  value={introEn}
+                  onChange={(e) => setIntroEn(e.target.value)}
                   className={styles.textarea}
                 />
               </div>
@@ -711,7 +793,8 @@ export default function AdminGalleryEditPage() {
                   id="signatureFr"
                   name="signatureFr"
                   type="text"
-                  defaultValue={gallery.signature_fr || ""}
+                  value={signatureFr}
+                  onChange={(e) => setSignatureFr(e.target.value)}
                   className={styles.input}
                 />
               </div>
@@ -724,7 +807,8 @@ export default function AdminGalleryEditPage() {
                   id="signatureEn"
                   name="signatureEn"
                   type="text"
-                  defaultValue={gallery.signature_en || ""}
+                  value={signatureEn}
+                  onChange={(e) => setSignatureEn(e.target.value)}
                   className={styles.input}
                 />
               </div>
@@ -909,6 +993,7 @@ export default function AdminGalleryEditPage() {
                           <input type="hidden" name="csrfToken" value={csrfToken} />
                           <input type="hidden" name="intent" value="set_cover" />
                           <input type="hidden" name="mediaId" value={p.id} />
+                          <input type="hidden" name="revision" value={gallery.revision} />
                           <button
                             type="submit"
                             className={`${styles.btn} ${styles.btnSecondary} ${styles.btnSmall} ${styles.fullWidthSmall}`}

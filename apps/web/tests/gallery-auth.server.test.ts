@@ -157,8 +157,11 @@ describe("gallery-auth.server.ts (Cryptographic Tokens, Sessions, and Access Gua
       // Create session cookie
       const storage = getGallerySessionStorage();
       const session = await storage.getSession();
+      const now = Date.now();
       session.set("galleryId", gallery.id);
       session.set("codeVersion", 1);
+      session.set("issuedAt", now);
+      session.set("expiresAt", now + 8 * 3600 * 1000);
       const cookieHeader = await storage.commitSession(session);
 
       const request = new Request(`http://127.0.0.1:3000/fr/galerie/${gallery.public_id}`, {
@@ -178,8 +181,11 @@ describe("gallery-auth.server.ts (Cryptographic Tokens, Sessions, and Access Gua
 
       const storage = getGallerySessionStorage();
       const session = await storage.getSession();
+      const now = Date.now();
       session.set("galleryId", gallery.id);
       session.set("codeVersion", 1);
+      session.set("issuedAt", now);
+      session.set("expiresAt", now + 8 * 3600 * 1000);
       const cookieHeader = await storage.commitSession(session);
 
       const request = new Request(`http://127.0.0.1:3000/fr/galerie/${gallery.public_id}`, {
@@ -204,8 +210,114 @@ describe("gallery-auth.server.ts (Cryptographic Tokens, Sessions, and Access Gua
 
       const storage = getGallerySessionStorage();
       const session = await storage.getSession();
+      const now = Date.now();
       session.set("galleryId", gallery.id);
       session.set("codeVersion", 1);
+      session.set("issuedAt", now - 2000);
+      session.set("expiresAt", now + 8 * 3600 * 1000);
+      const cookieHeader = await storage.commitSession(session);
+
+      const request = new Request(`http://127.0.0.1:3000/fr/galerie/${gallery.public_id}`, {
+        headers: { Cookie: cookieHeader },
+      });
+
+      await expect(requireGalleryAccess(request, gallery.public_id)).rejects.toThrow();
+    });
+
+    it("rejects legacy session cookie missing issuedAt or expiresAt timestamps", async () => {
+      const { gallery } = createGallery({
+        title: "Galerie Legacy Cookie",
+        clientName: "Client Legacy",
+        projectDate: "2026-07-01",
+      });
+
+      const db = getGalleryDb();
+      db.prepare("UPDATE galleries SET status = 'published', expires_at = ? WHERE id = ?").run(
+        Date.now() + 86400000,
+        gallery.id
+      );
+
+      // Legacy cookie without issuedAt/expiresAt
+      const storage = getGallerySessionStorage();
+      const session = await storage.getSession();
+      session.set("galleryId", gallery.id);
+      session.set("codeVersion", 1);
+      const cookieHeader = await storage.commitSession(session);
+
+      const request = new Request(`http://127.0.0.1:3000/fr/galerie/${gallery.public_id}`, {
+        headers: { Cookie: cookieHeader },
+      });
+
+      try {
+        await requireGalleryAccess(request, gallery.public_id);
+        expect.unreachable("Should have thrown 302 redirect");
+      } catch (err) {
+        expect(err).toBeInstanceOf(Response);
+        const res = err as Response;
+        expect(res.status).toBe(302);
+        expect(res.headers.get("Location")).toContain("status=expired");
+        expect(res.headers.get("Set-Cookie")).toMatch(/max-age=0/i);
+      }
+    });
+
+    it("rejects 9-hour-old session cookie beyond 8-hour max age", async () => {
+      const { gallery } = createGallery({
+        title: "Galerie 9h Old",
+        clientName: "Client 9h",
+        projectDate: "2026-07-01",
+      });
+
+      const db = getGalleryDb();
+      db.prepare("UPDATE galleries SET status = 'published', expires_at = ? WHERE id = ?").run(
+        Date.now() + 86400000,
+        gallery.id
+      );
+
+      const now = Date.now();
+      const nineHoursAgo = now - 9 * 3600 * 1000;
+      const eightHoursAfterIssued = nineHoursAgo + 8 * 3600 * 1000; // 1h in the past
+
+      const storage = getGallerySessionStorage();
+      const session = await storage.getSession();
+      session.set("galleryId", gallery.id);
+      session.set("codeVersion", 1);
+      session.set("issuedAt", nineHoursAgo);
+      session.set("expiresAt", eightHoursAfterIssued);
+      const cookieHeader = await storage.commitSession(session);
+
+      const request = new Request(`http://127.0.0.1:3000/fr/galerie/${gallery.public_id}`, {
+        headers: { Cookie: cookieHeader },
+      });
+
+      try {
+        await requireGalleryAccess(request, gallery.public_id);
+        expect.unreachable("Should have rejected expired session");
+      } catch (err) {
+        expect(err).toBeInstanceOf(Response);
+        const res = err as Response;
+        expect(res.status).toBe(302);
+        expect(res.headers.get("Location")).toContain("status=expired");
+      }
+    });
+
+    it("rejects access to published gallery when expires_at is NULL", async () => {
+      const { gallery } = createGallery({
+        title: "Galerie Sans Expiration",
+        clientName: "Client NoExp",
+        projectDate: "2026-07-01",
+      });
+
+      const db = getGalleryDb();
+      // Force status published with NULL expires_at
+      db.prepare("UPDATE galleries SET status = 'published', expires_at = NULL WHERE id = ?").run(gallery.id);
+
+      const now = Date.now();
+      const storage = getGallerySessionStorage();
+      const session = await storage.getSession();
+      session.set("galleryId", gallery.id);
+      session.set("codeVersion", 1);
+      session.set("issuedAt", now);
+      session.set("expiresAt", now + 8 * 3600 * 1000);
       const cookieHeader = await storage.commitSession(session);
 
       const request = new Request(`http://127.0.0.1:3000/fr/galerie/${gallery.public_id}`, {
@@ -231,8 +343,11 @@ describe("gallery-auth.server.ts (Cryptographic Tokens, Sessions, and Access Gua
       // Client holds session with version 1
       const storage = getGallerySessionStorage();
       const session = await storage.getSession();
+      const now = Date.now();
       session.set("galleryId", gallery.id);
       session.set("codeVersion", 1);
+      session.set("issuedAt", now);
+      session.set("expiresAt", now + 8 * 3600 * 1000);
       const cookieHeader = await storage.commitSession(session);
 
       const request = new Request(`http://127.0.0.1:3000/fr/galerie/${gallery.public_id}`, {
@@ -278,8 +393,11 @@ describe("gallery-auth.server.ts (Cryptographic Tokens, Sessions, and Access Gua
       // Client session for gallery 1
       const storage = getGallerySessionStorage();
       const session = await storage.getSession();
+      const now = Date.now();
       session.set("galleryId", g1.id);
       session.set("codeVersion", 1);
+      session.set("issuedAt", now);
+      session.set("expiresAt", now + 8 * 3600 * 1000);
       const cookieHeader = await storage.commitSession(session);
 
       const request = new Request(`http://127.0.0.1:3000/api/gallery/${g1.public_id}/media/${media2Id}`, {

@@ -132,14 +132,18 @@ export async function getGallerySession(request: Request): Promise<Session> {
   return storage.getSession(cookie);
 }
 
-export async function commitGallerySession(session: Session): Promise<string> {
+export async function commitGallerySession(
+  session: Session,
+  options?: Parameters<ReturnType<typeof getGallerySessionStorage>["commitSession"]>[1]
+): Promise<string> {
   const storage = getGallerySessionStorage();
-  return storage.commitSession(session);
+  return storage.commitSession(session, options);
 }
 
 export async function destroyGallerySession(session: Session): Promise<string> {
   const storage = getGallerySessionStorage();
-  return storage.destroySession(session);
+  const cookie = await storage.destroySession(session);
+  return cookie.toLowerCase().includes("max-age=0") ? cookie : `${cookie}; Max-Age=0`;
 }
 
 /**
@@ -157,6 +161,16 @@ export function verifyGalleryCsrfToken(session: Session, token: string | null): 
   if (!stored || typeof stored !== "string" || stored.length !== 64 || !/^[0-9a-fA-F]{64}$/.test(stored)) {
     return false;
   }
+
+  const csrfExpiresAt = session.get("csrfExpiresAt") as number | undefined;
+  if (
+    typeof csrfExpiresAt === "number" &&
+    Number.isFinite(csrfExpiresAt) &&
+    Date.now() >= csrfExpiresAt
+  ) {
+    return false;
+  }
+
   return crypto.timingSafeEqual(Buffer.from(token, "hex"), Buffer.from(stored, "hex"));
 }
 
@@ -176,13 +190,17 @@ export async function requireGalleryAccess(
   isApiRequest = false
 ): Promise<GalleryAccessResult> {
   const lang = request.url.includes("/en/") ? "en" : "fr";
-  const loginUrl = lang === "fr" ? "/fr/espace-client" : "/en/client-area";
+  const loginBase = lang === "fr" ? "/fr/espace-client" : "/en/client-area";
 
   const session = await getGallerySession(request);
   const sessionGalleryId = session.get("galleryId") as string | undefined;
   const sessionCodeVersion = session.get("codeVersion") as number | undefined;
+  const issuedAt = session.get("issuedAt") as number | undefined;
+  const expiresAt = session.get("expiresAt") as number | undefined;
 
-  const handleUnauthorized = async (message = "Unauthorized"): Promise<never> => {
+  const now = Date.now();
+
+  const handleUnauthorized = async (message = "Unauthorized", statusParam = "expired"): Promise<never> => {
     const destroyCookie = await destroyGallerySession(session);
     const headers = new Headers(GALLERY_PRIVATE_HEADERS);
     headers.set("Set-Cookie", destroyCookie);
@@ -190,11 +208,22 @@ export async function requireGalleryAccess(
     if (isApiRequest || request.url.includes(".data")) {
       throw new Response(JSON.stringify({ error: message }), { status: 401, headers });
     }
-    throw redirect(loginUrl, { headers });
+    throw redirect(`${loginBase}?status=${statusParam}`, { headers });
   };
 
-  if (!sessionGalleryId || typeof sessionCodeVersion !== "number") {
-    throw await handleUnauthorized("Session requise");
+  // Reject missing, non-numeric, non-finite, future-issued or expired timestamps
+  if (
+    !sessionGalleryId ||
+    typeof sessionCodeVersion !== "number" ||
+    typeof issuedAt !== "number" ||
+    !Number.isFinite(issuedAt) ||
+    typeof expiresAt !== "number" ||
+    !Number.isFinite(expiresAt) ||
+    issuedAt > now + 60_000 || // clock skew tolerance
+    expiresAt <= issuedAt ||
+    now >= expiresAt
+  ) {
+    throw await handleUnauthorized("Session invalide ou expirée", "expired");
   }
 
   const db = getGalleryDb();
@@ -205,17 +234,26 @@ export async function requireGalleryAccess(
     | undefined;
 
   if (!gallery || gallery.id !== sessionGalleryId) {
-    throw await handleUnauthorized("Galerie introuvable ou non autorisee");
+    throw await handleUnauthorized("Galerie introuvable ou non autorisée", "unavailable");
   }
 
   // Verify gallery status
   if (gallery.status !== "published") {
-    throw await handleUnauthorized("Galerie non disponible");
+    throw await handleUnauthorized("Galerie non disponible", "unavailable");
   }
 
-  // Verify gallery expiration
-  if (gallery.expires_at && Date.now() > gallery.expires_at) {
-    throw await handleUnauthorized("Galerie expiree");
+  // Verify gallery expiration (must be finite, future timestamp)
+  if (
+    typeof gallery.expires_at !== "number" ||
+    !Number.isFinite(gallery.expires_at) ||
+    now >= gallery.expires_at
+  ) {
+    throw await handleUnauthorized("Galerie expirée", "expired");
+  }
+
+  // Invariant: session cannot outlive gallery
+  if (expiresAt > gallery.expires_at && now >= gallery.expires_at) {
+    throw await handleUnauthorized("Galerie expirée", "expired");
   }
 
   // Verify code version in database (revokes immediately after rotation!)
@@ -224,7 +262,7 @@ export async function requireGalleryAccess(
     | undefined;
 
   if (!codeRow || codeRow.version !== sessionCodeVersion) {
-    throw await handleUnauthorized("Code d'acces renouvele, veuillez vous reconnecter");
+    throw await handleUnauthorized("Code d'accès renouvelé, veuillez vous reconnecter", "expired");
   }
 
   // Verify media belonging if requested
@@ -305,6 +343,11 @@ export async function authenticateGalleryCode(
   const codeHash = hashGalleryCode(code);
   const db = getGalleryDb();
 
+  const genericAuthError =
+    lang === "fr"
+      ? "Code d'accès incorrect ou galerie non disponible."
+      : "Incorrect access code or gallery unavailable.";
+
   const codeRow = db.prepare("SELECT gallery_id, version FROM gallery_codes WHERE code_hash = ?").get(codeHash) as
     | { gallery_id: string; version: number }
     | undefined;
@@ -313,7 +356,7 @@ export async function authenticateGalleryCode(
     return {
       success: false,
       status: 401,
-      error: lang === "fr" ? "Code d'accès incorrect." : "Incorrect access code.",
+      error: genericAuthError,
     };
   }
 
@@ -321,19 +364,25 @@ export async function authenticateGalleryCode(
     | Gallery
     | undefined;
 
+  const now = Date.now();
+
   if (!gallery || gallery.status !== "published") {
     return {
       success: false,
       status: 401,
-      error: lang === "fr" ? "Cette galerie n'est pas disponible actuellement." : "This gallery is not currently available.",
+      error: genericAuthError,
     };
   }
 
-  if (gallery.expires_at && Date.now() > gallery.expires_at) {
+  if (
+    typeof gallery.expires_at !== "number" ||
+    !Number.isFinite(gallery.expires_at) ||
+    now >= gallery.expires_at
+  ) {
     return {
       success: false,
       status: 401,
-      error: lang === "fr" ? "L'accès à cette galerie a expiré." : "Access to this gallery has expired.",
+      error: genericAuthError,
     };
   }
 
@@ -344,12 +393,19 @@ export async function authenticateGalleryCode(
     // Non-blocking
   }
 
-  // Set session and refresh CSRF
+  // Session duration: minimum of 8 hours and gallery expiration
+  const maxSessionDurationMs = 8 * 60 * 60 * 1000;
+  const sessionExpiresAt = Math.min(now + maxSessionDurationMs, gallery.expires_at);
+
+  // Set authenticated session attributes
   session.set("galleryId", gallery.id);
   session.set("codeVersion", codeRow.version);
+  session.set("issuedAt", now);
+  session.set("expiresAt", sessionExpiresAt);
   session.set("csrfToken", createGalleryCsrfToken());
-  session.set("authenticatedAt", Date.now());
+  session.set("csrfExpiresAt", now + 15 * 60 * 1000);
 
-  const sessionCookie = await commitGallerySession(session);
+  const maxAgeSeconds = Math.max(1, Math.floor((sessionExpiresAt - now) / 1000));
+  const sessionCookie = await commitGallerySession(session, { maxAge: maxAgeSeconds });
   return { success: true, publicId: gallery.public_id, sessionCookie };
 }

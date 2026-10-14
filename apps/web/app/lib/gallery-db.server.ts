@@ -180,6 +180,7 @@ export function openGalleryDb(dbPath: string): DatabaseSync {
         );
 
         CREATE INDEX IF NOT EXISTS idx_gallery_import_active ON gallery_import_jobs(gallery_id, status);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_gallery_import_unique_active ON gallery_import_jobs(gallery_id) WHERE status IN ('pending', 'scanning', 'importing');
 
         CREATE TABLE IF NOT EXISTS gallery_deletion_jobs (
           id TEXT PRIMARY KEY,
@@ -201,6 +202,29 @@ export function openGalleryDb(dbPath: string): DatabaseSync {
       `);
     } else if (schemaRow.name !== "parallax_gallery_v1") {
       throw new GalleryDatabaseError(`CRITICAL: Schema de base inconnu: ${schemaRow.name}`);
+    }
+
+    // Idempotent migration for existing Parallax V1 databases: ensure unique active import index
+    const hasUniqueIndex = db
+      .prepare("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'idx_gallery_import_unique_active'")
+      .get();
+    if (!hasUniqueIndex) {
+      db.exec(`
+        UPDATE gallery_import_jobs
+        SET status = 'failed',
+            error_message = 'Doublon d''import hérité annulé pour garantir l''unicité',
+            updated_at = ${Date.now()}
+        WHERE status IN ('pending', 'scanning', 'importing')
+          AND id NOT IN (
+            SELECT id FROM gallery_import_jobs
+            WHERE status IN ('pending', 'scanning', 'importing')
+            GROUP BY gallery_id
+            HAVING MAX(created_at)
+          );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_gallery_import_unique_active
+        ON gallery_import_jobs(gallery_id)
+        WHERE status IN ('pending', 'scanning', 'importing');
+      `);
     }
 
     db.exec("COMMIT;");
@@ -258,8 +282,104 @@ export function closeGalleryDb(): void {
 }
 
 /**
+ * Recursively removes entries within a directory without following any symbolic links.
+ * Symbolic links themselves are unlinked without recursing into target directories.
+ */
+function safeRemoveDirectoryWithoutFollowingSymlinks(dirPath: string): void {
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dirPath, { withFileTypes: true });
+  } catch {
+    return;
+  }
+
+  for (const entry of entries) {
+    const fullEntryPath = path.join(dirPath, entry.name);
+    try {
+      if (entry.isSymbolicLink() || entry.isFile()) {
+        fs.unlinkSync(fullEntryPath);
+      } else if (entry.isDirectory()) {
+        safeRemoveDirectoryWithoutFollowingSymlinks(fullEntryPath);
+        fs.rmdirSync(fullEntryPath);
+      }
+    } catch {
+      // Ignore individual file unlink errors
+    }
+  }
+}
+
+/**
+ * Safely removes a quarantine target folder, strictly verifying every ancestor component
+ * to reject symbolic links, and never following symlinks to outside directories.
+ */
+function safeDeleteQuarantineTarget(baseMedia: string, jobId: string, galleryId?: string): void {
+  if (!/^[0-9a-fA-F-]{36}$/.test(jobId)) {
+    throw new Error("INVALID_JOB_ID");
+  }
+
+  const canonicalBase = fs.realpathSync(baseMedia);
+  const baseStat = fs.lstatSync(canonicalBase);
+  if (baseStat.isSymbolicLink() || !baseStat.isDirectory()) {
+    throw new Error("INVALID_BASE_MEDIA");
+  }
+
+  // 1. Ancestor .trash check
+  const trashRoot = path.join(canonicalBase, ".trash");
+  if (fs.existsSync(trashRoot)) {
+    const trashStat = fs.lstatSync(trashRoot);
+    if (trashStat.isSymbolicLink() || !trashStat.isDirectory()) {
+      throw new Error("INVALID_QUARANTINE_ANCESTOR");
+    }
+
+    // 2. Ancestor gallery-deletions check
+    const deletionsRoot = path.join(trashRoot, "gallery-deletions");
+    if (fs.existsSync(deletionsRoot)) {
+      const deletionsStat = fs.lstatSync(deletionsRoot);
+      if (deletionsStat.isSymbolicLink() || !deletionsStat.isDirectory()) {
+        throw new Error("INVALID_QUARANTINE_ANCESTOR");
+      }
+
+      // 3. Quarantine target folder
+      const targetDir = path.join(deletionsRoot, jobId);
+      if (fs.existsSync(targetDir)) {
+        const targetStat = fs.lstatSync(targetDir);
+        if (targetStat.isSymbolicLink()) {
+          fs.unlinkSync(targetDir);
+        } else if (targetStat.isDirectory()) {
+          safeRemoveDirectoryWithoutFollowingSymlinks(targetDir);
+          try {
+            fs.rmdirSync(targetDir);
+          } catch {
+            // Ignored
+          }
+        }
+      }
+    }
+  }
+
+  // 4. Crash window recovery: if source media folder still exists under baseMedia/<galleryId>, safely clean it
+  if (galleryId && /^[0-9a-fA-F-]{36}$/.test(galleryId)) {
+    const orphanMediaDir = path.join(canonicalBase, galleryId);
+    if (fs.existsSync(orphanMediaDir)) {
+      const orphanStat = fs.lstatSync(orphanMediaDir);
+      if (orphanStat.isSymbolicLink()) {
+        fs.unlinkSync(orphanMediaDir);
+      } else if (orphanStat.isDirectory()) {
+        safeRemoveDirectoryWithoutFollowingSymlinks(orphanMediaDir);
+        try {
+          fs.rmdirSync(orphanMediaDir);
+        } catch {
+          // Ignored
+        }
+      }
+    }
+  }
+}
+
+/**
  * Deletes a gallery, quarantines its files in GALLERY_MEDIA_PATH/.trash/gallery-deletions/:jobId,
  * and schedules transactional deletion.
+ * Persists deletion intent in DB first to eliminate crash window between rename and transaction.
  */
 export function deleteGalleryAndQuarantine(galleryId: string): void {
   if (!galleryId || typeof galleryId !== "string" || !/^[0-9a-fA-F-]{36}$/.test(galleryId)) {
@@ -300,7 +420,7 @@ export function deleteGalleryAndQuarantine(galleryId: string): void {
 
   if (fs.existsSync(trashRoot)) {
     const rootStat = fs.lstatSync(trashRoot);
-    if (rootStat.isSymbolicLink()) {
+    if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) {
       throw new Error("INVALID_QUARANTINE_PATH");
     }
   }
@@ -316,18 +436,13 @@ export function deleteGalleryAndQuarantine(galleryId: string): void {
 
   const jobId = crypto.randomUUID();
   const quarantineDir = path.join(trashBase, jobId);
-  const relativeQuarantinePath = path.relative(baseMedia, quarantineDir);
-
-  if (hasMediaDir) {
-    fs.renameSync(mediaDir, quarantineDir);
-  } else {
-    fs.mkdirSync(quarantineDir, { recursive: true, mode: 0o700 });
-  }
+  const relativeQuarantinePath = path.join(".trash", "gallery-deletions", jobId);
 
   const now = Date.now();
   db.exec("BEGIN EXCLUSIVE TRANSACTION;");
   try {
-    // Delete gallery from DB (foreign keys ON DELETE CASCADE will purge codes, media, and import jobs)
+    // Delete gallery from DB first (foreign keys ON DELETE CASCADE will purge codes, media, and import jobs)
+    // Persisting intent first ensures no orphaned active records if crash occurs before/during rename
     db.prepare("DELETE FROM galleries WHERE id = ?").run(galleryId);
 
     // Record deletion job
@@ -343,15 +458,22 @@ export function deleteGalleryAndQuarantine(galleryId: string): void {
     } catch {
       // Ignored
     }
-    // Attempt rollback of rename if media directory was moved
-    if (hasMediaDir && fs.existsSync(quarantineDir)) {
-      try {
-        fs.renameSync(quarantineDir, mediaDir);
-      } catch {
-        // Ignored
-      }
-    }
     throw new GalleryDatabaseError("Erreur lors de la suppression de la galerie", err);
+  }
+
+  // Now move media directory to quarantine
+  if (hasMediaDir) {
+    try {
+      fs.renameSync(mediaDir, quarantineDir);
+    } catch {
+      // If rename fails, quarantine recovery worker cleans up baseMedia/<galleryId>
+    }
+  } else {
+    try {
+      fs.mkdirSync(quarantineDir, { recursive: true, mode: 0o700 });
+    } catch {
+      // Ignored
+    }
   }
 }
 
@@ -366,17 +488,17 @@ export function processGalleryDeletions(): void {
   const batchSize = 5;
   const leaseDurationMs = 5 * 60 * 1000;
 
-  let jobsToProcess: { id: string; relative_quarantine_path: string }[];
+  let jobsToProcess: { id: string; gallery_id: string; relative_quarantine_path: string }[];
 
   db.exec("BEGIN EXCLUSIVE TRANSACTION;");
   try {
     const pending = db.prepare(`
-      SELECT id, relative_quarantine_path
+      SELECT id, gallery_id, relative_quarantine_path
       FROM gallery_deletion_jobs
       WHERE (status = 'pending' OR (status = 'processing' AND lease_expires_at < ?))
         AND attempt_count < ?
       LIMIT ?
-    `).all(now, maxAttempts, batchSize) as { id: string; relative_quarantine_path: string }[];
+    `).all(now, maxAttempts, batchSize) as { id: string; gallery_id: string; relative_quarantine_path: string }[];
 
     if (pending.length === 0) {
       db.exec("COMMIT;");
@@ -413,17 +535,14 @@ export function processGalleryDeletions(): void {
 
   for (const job of jobsToProcess) {
     try {
-      const fullQuarantinePath = path.resolve(baseMedia, job.relative_quarantine_path);
-
-      // Verify strict confinement
-      const rel = path.relative(baseMedia, fullQuarantinePath);
-      if (!rel || path.isAbsolute(rel) || rel.startsWith(".." + path.sep) || rel === "..") {
-        throw new Error("INVALID_QUARANTINE_PATH");
+      // Validate relative quarantine path convention exactly
+      const expectedRel = path.join(".trash", "gallery-deletions", job.id);
+      const normalizedJobRel = path.normalize(job.relative_quarantine_path);
+      if (normalizedJobRel !== expectedRel) {
+        throw new Error("INVALID_QUARANTINE_CONVENTION");
       }
 
-      if (fs.existsSync(fullQuarantinePath)) {
-        fs.rmSync(fullQuarantinePath, { recursive: true, force: true });
-      }
+      safeDeleteQuarantineTarget(baseMedia, job.id, job.gallery_id);
 
       db.prepare(`
         UPDATE gallery_deletion_jobs

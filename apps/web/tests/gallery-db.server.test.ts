@@ -219,4 +219,80 @@ describe("gallery-db.server.ts (Parallax V1 Schema & Transactions)", () => {
     };
     expect(updatedJob.status).toBe("completed");
   });
+
+  it("strictly protects against symlink ancestor traversal and symlinks inside quarantine", () => {
+    const db = getGalleryDb();
+    const jobId = "11111111-2222-3333-4444-555555555555";
+    const galleryId = "66666666-7777-8888-9999-000000000000";
+
+    // Create an outside sensitive folder
+    const outsideSecretDir = path.join(tmpDir, "outside-secret-dir");
+    fs.mkdirSync(outsideSecretDir, { recursive: true, mode: 0o700 });
+    const sensitiveFile = path.join(outsideSecretDir, "important.data");
+    fs.writeFileSync(sensitiveFile, "do-not-delete");
+
+    // Case 1: Symlink inside quarantine pointing to outside secret file
+    const trashJobDir = path.join(testMediaPath, ".trash", "gallery-deletions", jobId);
+    fs.mkdirSync(trashJobDir, { recursive: true, mode: 0o700 });
+    const evilSymlink = path.join(trashJobDir, "evil-symlink");
+    fs.symlinkSync(sensitiveFile, evilSymlink);
+
+    db.prepare(`
+      INSERT INTO gallery_deletion_jobs (id, gallery_id, relative_quarantine_path, status, created_at, updated_at)
+      VALUES (?, ?, ?, 'pending', ?, ?)
+    `).run(jobId, galleryId, `.trash/gallery-deletions/${jobId}`, Date.now(), Date.now());
+
+    processGalleryDeletions();
+
+    // Evil symlink removed, but target outside sensitive file remains untouched!
+    expect(fs.existsSync(trashJobDir)).toBe(false);
+    expect(fs.existsSync(sensitiveFile)).toBe(true);
+    expect(fs.readFileSync(sensitiveFile, "utf-8")).toBe("do-not-delete");
+
+    // Case 2: Ancestor .trash/gallery-deletions replaced by a symlink pointing outside
+    const evilJobId = "22222222-3333-4444-5555-666666666666";
+    const deletionsParent = path.join(testMediaPath, ".trash", "gallery-deletions");
+    fs.rmSync(deletionsParent, { recursive: true, force: true });
+    fs.symlinkSync(outsideSecretDir, deletionsParent);
+
+    db.prepare(`
+      INSERT INTO gallery_deletion_jobs (id, gallery_id, relative_quarantine_path, status, created_at, updated_at)
+      VALUES (?, ?, ?, 'pending', ?, ?)
+    `).run(evilJobId, galleryId, `.trash/gallery-deletions/${evilJobId}`, Date.now(), Date.now());
+
+    processGalleryDeletions();
+
+    // Ancestor symlink rejected: outside secret directory and file remain completely intact!
+    expect(fs.existsSync(sensitiveFile)).toBe(true);
+    expect(fs.readFileSync(sensitiveFile, "utf-8")).toBe("do-not-delete");
+
+    // Clean up symlink so next tests are isolated
+    fs.unlinkSync(deletionsParent);
+    fs.mkdirSync(deletionsParent, { recursive: true, mode: 0o700 });
+  });
+
+  it("recovers and cleans unrenamed orphan media folders in crash window", () => {
+    const db = getGalleryDb();
+    const jobId = "33333333-4444-5555-6666-777777777777";
+    const galleryId = "44444444-5555-6666-7777-888888888888";
+
+    // Simulate crash where job was recorded in SQLite, but folder rename to .trash crashed
+    // so folder still exists as gallery-media/:galleryId
+    const orphanGalDir = path.join(testMediaPath, galleryId);
+    fs.mkdirSync(orphanGalDir, { recursive: true, mode: 0o700 });
+    fs.writeFileSync(path.join(orphanGalDir, "unmoved-photo.jpg"), "unmoved-bytes");
+
+    db.prepare(`
+      INSERT INTO gallery_deletion_jobs (id, gallery_id, relative_quarantine_path, status, created_at, updated_at)
+      VALUES (?, ?, ?, 'pending', ?, ?)
+    `).run(jobId, galleryId, `.trash/gallery-deletions/${jobId}`, Date.now(), Date.now());
+
+    processGalleryDeletions();
+
+    // Orphan gallery media folder has been recovered and deleted safely
+    expect(fs.existsSync(orphanGalDir)).toBe(false);
+
+    const job = db.prepare("SELECT status FROM gallery_deletion_jobs WHERE id = ?").get(jobId) as { status: string };
+    expect(job.status).toBe("completed");
+  });
 });

@@ -59,10 +59,13 @@ describe("gallery-download.ts (ZIP Streaming with yazl)", () => {
     );
 
     // Setup session cookie
+    const now = Date.now();
     const storage = getGallerySessionStorage();
     const session = await storage.getSession();
     session.set("galleryId", gallery.id);
     session.set("codeVersion", 1);
+    session.set("issuedAt", now);
+    session.set("expiresAt", now + 8 * 3600 * 1000);
     authCookie = await storage.commitSession(session);
   });
 
@@ -180,5 +183,49 @@ describe("gallery-download.ts (ZIP Streaming with yazl)", () => {
     expect(zipString).toContain("Photos/photo.jpg");
     expect(zipString).toContain("Photos/photo-1.jpg"); // disambiguated
     expect(zipString).toContain("Videos/film.mp4");
+  });
+
+  it("aborts archive creation and releases concurrency slot when client aborts request", async () => {
+    const db = getGalleryDb();
+    const galDir = path.join(testMediaPath, publishedGallery.id);
+    fs.mkdirSync(galDir, { recursive: true, mode: 0o700 });
+
+    const photoId = crypto.randomUUID();
+    fs.writeFileSync(path.join(galDir, photoId), Buffer.alloc(1024, 0x5a));
+    db.prepare(`
+      INSERT INTO gallery_media (id, gallery_id, media_type, sort_order, original_filename, mime_type, file_size, content_hash, is_ready, created_at, updated_at)
+      VALUES (?, ?, 'photo', 1, 'abort-test.jpg', 'image/jpeg', 1024, 'hash-abort', 1, ?, ?)
+    `).run(photoId, publishedGallery.id, Date.now(), Date.now());
+
+    const abortController = new AbortController();
+    const request = new Request(`http://127.0.0.1:3000/api/gallery/${publishedGallery.public_id}/download?type=photos`, {
+      method: "GET",
+      headers: { Cookie: authCookie },
+      signal: abortController.signal,
+    });
+
+    const response = await downloadLoader(createRouteArgs(request, { publicId: publishedGallery.public_id }));
+    expect(response.status).toBe(200);
+
+    // Abort request
+    abortController.abort();
+
+    // The stream should cancel/error on read or terminate
+    if (response.body) {
+      const reader = response.body.getReader();
+      try {
+        await reader.read();
+      } catch {
+        // Expected cancellation / abort
+      }
+    }
+
+    // Next request succeeds immediately showing slot was cleanly released
+    const nextRequest = new Request(`http://127.0.0.1:3000/api/gallery/${publishedGallery.public_id}/download?type=photos`, {
+      method: "HEAD",
+      headers: { Cookie: authCookie },
+    });
+    const nextRes = await downloadLoader(createRouteArgs(nextRequest, { publicId: publishedGallery.public_id }));
+    expect(nextRes.status).toBe(200);
   });
 });

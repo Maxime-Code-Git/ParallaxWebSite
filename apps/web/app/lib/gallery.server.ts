@@ -262,7 +262,11 @@ export function updateGallery(
     expiresAt?: number | null;
   }
 ): Gallery {
-  const db = getGalleryDb();
+  const current = getGalleryById(id);
+  if (!current) {
+    throw new GalleryValidationError("Galerie introuvable.");
+  }
+
   const now = Date.now();
 
   const title = (data.title || "").trim();
@@ -273,6 +277,26 @@ export function updateGallery(
   if (!clientName) throw new GalleryValidationError("Le nom du client est obligatoire.");
   if (!projectDate) throw new GalleryValidationError("La date du projet est obligatoire.");
 
+  // For published galleries, expiration must be finite, valid, and strictly in the future.
+  if (current.status === "published") {
+    if (
+      data.expiresAt === null ||
+      data.expiresAt === undefined ||
+      typeof data.expiresAt !== "number" ||
+      !Number.isFinite(data.expiresAt) ||
+      data.expiresAt <= now
+    ) {
+      throw new GalleryValidationError(
+        "Une galerie publiée doit obligatoirement avoir une date d'expiration future et valide."
+      );
+    }
+  } else if (data.expiresAt !== undefined && data.expiresAt !== null) {
+    if (typeof data.expiresAt !== "number" || !Number.isFinite(data.expiresAt) || data.expiresAt <= 0) {
+      throw new GalleryValidationError("Date d'expiration invalide.");
+    }
+  }
+
+  const db = getGalleryDb();
   const res = db.prepare(`
     UPDATE galleries
     SET title = ?,
@@ -464,7 +488,7 @@ export function archiveGallery(galleryId: string, expectedRevision: number): Gal
 /**
  * Sets the cover photo for a gallery.
  */
-export function setCoverPhoto(galleryId: string, mediaId: string): void {
+export function setCoverPhoto(galleryId: string, mediaId: string, expectedRevision?: number): Gallery {
   const db = getGalleryDb();
   const photo = db.prepare(`
     SELECT id FROM gallery_media WHERE id = ? AND gallery_id = ? AND media_type = 'photo' AND is_ready = 1
@@ -474,7 +498,26 @@ export function setCoverPhoto(galleryId: string, mediaId: string): void {
     throw new GalleryValidationError("La photo de couverture doit etre une photo prete de la meme galerie.");
   }
 
-  db.prepare("UPDATE galleries SET cover_media_id = ?, updated_at = ? WHERE id = ?").run(mediaId, Date.now(), galleryId);
+  const now = Date.now();
+  if (typeof expectedRevision === "number") {
+    const res = db.prepare(`
+      UPDATE galleries
+      SET cover_media_id = ?, revision = revision + 1, updated_at = ?
+      WHERE id = ? AND revision = ?
+    `).run(mediaId, now, galleryId, expectedRevision);
+
+    if (res.changes === 0) {
+      throw new GalleryConflictError();
+    }
+  } else {
+    db.prepare(`
+      UPDATE galleries
+      SET cover_media_id = ?, revision = revision + 1, updated_at = ?
+      WHERE id = ?
+    `).run(mediaId, now, galleryId);
+  }
+
+  return getGalleryById(galleryId)!;
 }
 
 /**
@@ -548,4 +591,37 @@ export function formatPublicGalleryDto(gallery: Gallery, lang: "fr" | "en"): Pub
     hasVideos: videoCount > 0,
     coverMediaId: gallery.cover_media_id,
   };
+}
+
+/**
+ * Extracts public variant dimensions from preview_data for accurate client srcset generation.
+ * Strips internal details, file paths, or private configuration.
+ */
+export function parsePreviewVariants(
+  previewDataRaw: string | null | undefined
+): Record<number, { width: number; height: number }> | null {
+  if (!previewDataRaw) return null;
+  try {
+    const parsed = JSON.parse(previewDataRaw);
+    if (!parsed || typeof parsed !== "object") return null;
+    const variants: Record<number, { width: number; height: number }> = {};
+    for (const [key, val] of Object.entries(parsed)) {
+      const numKey = Number.parseInt(key, 10);
+      if (
+        Number.isFinite(numKey) &&
+        val &&
+        typeof val === "object" &&
+        "width" in val &&
+        "height" in val
+      ) {
+        variants[numKey] = {
+          width: Number((val as { width: unknown }).width) || numKey,
+          height: Number((val as { height: unknown }).height) || 0,
+        };
+      }
+    }
+    return Object.keys(variants).length > 0 ? variants : null;
+  } catch {
+    return null;
+  }
 }

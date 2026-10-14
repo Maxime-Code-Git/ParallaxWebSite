@@ -258,5 +258,38 @@ describe("gallery-import.server.ts (Folder Analysis, Magic Bytes, Lease Worker)"
       expect(status.lease_worker_id).toBe(worker2Id);
       expect(status.lease_token).toBe("token-2");
     });
+
+    it("rejects photos exceeding maximum dimension limits (12,000px) and records them in rejection report", async () => {
+      const folderName = "batch-oversized";
+      const folderPath = path.join(testImportPath, folderName);
+      const photosDir = path.join(folderPath, "photos");
+      fs.mkdirSync(photosDir, { recursive: true, mode: 0o700 });
+
+      // Valid standard photo
+      await sharp({
+        create: { width: 100, height: 100, channels: 3, background: { r: 10, g: 20, b: 30 } },
+      })
+        .jpeg()
+        .toFile(path.join(photosDir, "valid.jpg"));
+
+      // Oversized dimension photo: 12,500px wide (exceeds 12,000px limit)
+      await sharp({
+        create: { width: 12500, height: 50, channels: 3, background: { r: 255, g: 0, b: 0 } },
+      })
+        .jpeg()
+        .toFile(path.join(photosDir, "too-wide.jpg"));
+
+      const jobId = startImportJob(testGallery.id, folderName);
+      await processImportJob(jobId);
+
+      const job = getImportJobStatus(jobId);
+      expect(job?.status).toBe("completed");
+      expect(job?.rejection_report).toContain("Dimensions hors limites");
+
+      // Only valid.jpg is imported into gallery media
+      const mediaList = getGalleryMediaList(testGallery.id);
+      expect(mediaList.length).toBe(1);
+      expect(mediaList[0].original_filename).toBe("valid.jpg");
+    });
   });
 });

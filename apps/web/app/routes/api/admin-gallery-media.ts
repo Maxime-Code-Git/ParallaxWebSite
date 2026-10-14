@@ -1,4 +1,3 @@
-import fs from "node:fs";
 import { Readable } from "node:stream";
 import type { LoaderFunctionArgs } from "react-router";
 import {
@@ -9,15 +8,25 @@ import { getGalleryDb } from "../../lib/gallery-db.server";
 import {
   getGalleryOriginalPath,
   ensurePreview,
-  getGalleryPosterPath,
 } from "../../lib/gallery-preview.server";
-import { parseRangeHeader, parseWidth } from "../../lib/media-utils.server";
+import { parseRangeHeader, parseWidth, openSecureMediaFile } from "../../lib/media-utils.server";
+import { ENV } from "../../lib/env.server";
+
+function makeAdminHeaders(extra?: Record<string, string>): Headers {
+  const headers = createAdminHeaders();
+  if (extra) {
+    for (const [k, v] of Object.entries(extra)) {
+      headers.set(k, v);
+    }
+  }
+  return headers;
+}
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   if (request.method !== "GET" && request.method !== "HEAD") {
     return new Response("Method Not Allowed", {
       status: 405,
-      headers: { ...createAdminHeaders(), Allow: "GET, HEAD" },
+      headers: makeAdminHeaders({ Allow: "GET, HEAD" }),
     });
   }
 
@@ -27,7 +36,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const mediaId = params.mediaId;
 
   if (!galleryId || !mediaId) {
-    return new Response("Bad Request", { status: 400, headers: createAdminHeaders() });
+    return new Response("Bad Request", { status: 400, headers: makeAdminHeaders() });
   }
 
   const db = getGalleryDb();
@@ -47,7 +56,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     | undefined;
 
   if (!media) {
-    return new Response("Media not found", { status: 404, headers: createAdminHeaders() });
+    return new Response("Media not found", { status: 404, headers: makeAdminHeaders() });
   }
 
   const url = new URL(request.url);
@@ -56,70 +65,69 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // Poster request
   if (isPosterRequest) {
     if (media.media_type !== "video" || !media.poster_revision || media.poster_revision <= 0) {
-      return new Response("Poster not found", { status: 404, headers: createAdminHeaders() });
+      return new Response("Poster not found", { status: 404, headers: makeAdminHeaders() });
     }
 
-    let posterPath: string;
+    let handle: ReturnType<typeof openSecureMediaFile>;
     try {
-      posterPath = getGalleryPosterPath(galleryId, mediaId, media.poster_revision, "webp");
+      handle = openSecureMediaFile(ENV.GALLERY_MEDIA_PATH, [
+        galleryId,
+        ".posters",
+        mediaId,
+        `${media.poster_revision}.webp`,
+      ]);
     } catch {
-      return new Response("Poster not found", { status: 404, headers: createAdminHeaders() });
+      return new Response("Poster not found", { status: 404, headers: makeAdminHeaders() });
     }
 
-    if (!fs.existsSync(posterPath)) {
-      return new Response("Poster not found", { status: 404, headers: createAdminHeaders() });
-    }
-
-    const stats = fs.statSync(posterPath);
     if (request.method === "HEAD") {
+      const sizeStr = handle.size.toString();
+      handle.close();
       return new Response(null, {
         status: 200,
-        headers: {
-          ...createAdminHeaders(),
+        headers: makeAdminHeaders({
           "Content-Type": "image/webp",
-          "Content-Length": stats.size.toString(),
-        },
+          "Content-Length": sizeStr,
+        }),
       });
     }
 
-    const stream = fs.createReadStream(posterPath, { flags: "r", mode: 0o600 });
+    const stream = handle.createReadStream();
+    request.signal.addEventListener("abort", () => {
+      handle.close();
+    });
+
     return new Response(Readable.toWeb(stream) as ReadableStream, {
       status: 200,
-      headers: {
-        ...createAdminHeaders(),
+      headers: makeAdminHeaders({
         "Content-Type": "image/webp",
-        "Content-Length": stats.size.toString(),
-      },
+        "Content-Length": handle.size.toString(),
+      }),
     });
   }
 
   // Video request
   if (media.media_type === "video") {
-    let videoPath: string;
+    let handle: ReturnType<typeof openSecureMediaFile>;
     try {
-      videoPath = getGalleryOriginalPath(galleryId, mediaId);
+      handle = openSecureMediaFile(ENV.GALLERY_MEDIA_PATH, [galleryId, mediaId]);
     } catch {
-      return new Response("File not found", { status: 404, headers: createAdminHeaders() });
+      return new Response("File not found", { status: 404, headers: makeAdminHeaders() });
     }
 
-    if (!fs.existsSync(videoPath)) {
-      return new Response("File not found", { status: 404, headers: createAdminHeaders() });
-    }
-
-    const stats = fs.statSync(videoPath);
-    const totalSize = stats.size;
+    const totalSize = handle.size;
     const rangeHeader = request.headers.get("Range");
 
     if (rangeHeader !== null) {
       const parsedRange = parseRangeHeader(rangeHeader, totalSize);
       if (!parsedRange) {
+        handle.close();
         return new Response(null, {
           status: 416,
-          headers: {
-            ...createAdminHeaders(),
+          headers: makeAdminHeaders({
             "Content-Range": `bytes */${totalSize}`,
             "Accept-Ranges": "bytes",
-          },
+          }),
         });
       }
 
@@ -127,52 +135,58 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       const chunkSize = end - start + 1;
 
       if (request.method === "HEAD") {
+        handle.close();
         return new Response(null, {
           status: 206,
-          headers: {
-            ...createAdminHeaders(),
+          headers: makeAdminHeaders({
             "Content-Range": `bytes ${start}-${end}/${totalSize}`,
             "Accept-Ranges": "bytes",
             "Content-Length": chunkSize.toString(),
             "Content-Type": media.mime_type,
-          },
+          }),
         });
       }
 
-      const stream = fs.createReadStream(videoPath, { start, end, flags: "r", mode: 0o600 });
+      const stream = handle.createReadStream({ start, end });
+      request.signal.addEventListener("abort", () => {
+        handle.close();
+      });
+
       return new Response(Readable.toWeb(stream) as ReadableStream, {
         status: 206,
-        headers: {
-          ...createAdminHeaders(),
+        headers: makeAdminHeaders({
           "Content-Range": `bytes ${start}-${end}/${totalSize}`,
           "Accept-Ranges": "bytes",
           "Content-Length": chunkSize.toString(),
           "Content-Type": media.mime_type,
-        },
+        }),
       });
     }
 
     if (request.method === "HEAD") {
+      handle.close();
       return new Response(null, {
         status: 200,
-        headers: {
-          ...createAdminHeaders(),
+        headers: makeAdminHeaders({
           "Accept-Ranges": "bytes",
           "Content-Length": totalSize.toString(),
           "Content-Type": media.mime_type,
-        },
+        }),
       });
     }
 
-    const stream = fs.createReadStream(videoPath, { flags: "r", mode: 0o600 });
+    const stream = handle.createReadStream();
+    request.signal.addEventListener("abort", () => {
+      handle.close();
+    });
+
     return new Response(Readable.toWeb(stream) as ReadableStream, {
       status: 200,
-      headers: {
-        ...createAdminHeaders(),
+      headers: makeAdminHeaders({
         "Accept-Ranges": "bytes",
         "Content-Length": totalSize.toString(),
         "Content-Type": media.mime_type,
-      },
+      }),
     });
   }
 
@@ -183,38 +197,43 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   try {
     originalPath = getGalleryOriginalPath(galleryId, mediaId);
   } catch {
-    return new Response("File not found", { status: 404, headers: createAdminHeaders() });
-  }
-
-  if (!fs.existsSync(originalPath)) {
-    return new Response("File not found", { status: 404, headers: createAdminHeaders() });
+    return new Response("File not found", { status: 404, headers: makeAdminHeaders() });
   }
 
   try {
-    const previewResult = await ensurePreview(galleryId, mediaId, originalPath, widthParam);
-    const stats = fs.statSync(previewResult.path);
+    await ensurePreview(galleryId, mediaId, originalPath, widthParam);
+    const handle = openSecureMediaFile(ENV.GALLERY_MEDIA_PATH, [
+      galleryId,
+      ".previews",
+      mediaId,
+      `${widthParam}.webp`,
+    ]);
 
     if (request.method === "HEAD") {
+      const sizeStr = handle.size.toString();
+      handle.close();
       return new Response(null, {
         status: 200,
-        headers: {
-          ...createAdminHeaders(),
+        headers: makeAdminHeaders({
           "Content-Type": "image/webp",
-          "Content-Length": stats.size.toString(),
-        },
+          "Content-Length": sizeStr,
+        }),
       });
     }
 
-    const stream = fs.createReadStream(previewResult.path, { flags: "r", mode: 0o600 });
+    const stream = handle.createReadStream();
+    request.signal.addEventListener("abort", () => {
+      handle.close();
+    });
+
     return new Response(Readable.toWeb(stream) as ReadableStream, {
       status: 200,
-      headers: {
-        ...createAdminHeaders(),
+      headers: makeAdminHeaders({
         "Content-Type": "image/webp",
-        "Content-Length": stats.size.toString(),
-      },
+        "Content-Length": handle.size.toString(),
+      }),
     });
   } catch {
-    return new Response("Service Unavailable", { status: 503, headers: createAdminHeaders() });
+    return new Response("Service Unavailable", { status: 503, headers: makeAdminHeaders() });
   }
 }

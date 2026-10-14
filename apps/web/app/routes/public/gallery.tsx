@@ -16,15 +16,18 @@ import {
   getGalleryPhotosPaginated,
   getGalleryMediaList,
   formatPublicGalleryDto,
+  parsePreviewVariants,
   type GalleryMediaRow,
 } from "../../lib/gallery.server";
+import { buildPhotoSrcSet } from "../../lib/gallery-media.shared";
 import styles from "./gallery.module.css";
 
-interface ClientPhotoItem {
+export interface ClientPhotoItem {
   id: string;
   originalFilename: string;
   width: number | null;
   height: number | null;
+  variants?: Record<number, { width: number; height: number }> | null;
 }
 
 interface ClientVideoItem {
@@ -86,6 +89,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     originalFilename: m.original_filename,
     width: m.width,
     height: m.height,
+    variants: parsePreviewVariants(m.preview_data),
   }));
 
   const videos: ClientVideoItem[] = videoRows.map((m: GalleryMediaRow) => ({
@@ -143,6 +147,9 @@ export default function GalleryPage() {
   const [lightboxLoading, setLightboxLoading] = useState(true);
   const [lightboxError, setLightboxError] = useState(false);
   const lastActiveElementRef = useRef<HTMLElement | null>(null);
+  const pageContentRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const closeBtnRef = useRef<HTMLButtonElement>(null);
 
   // Pagination handler
   const loadMorePhotos = useCallback(async () => {
@@ -154,11 +161,19 @@ export default function GalleryPage() {
       if (res.ok) {
         const data = await res.json();
         const incoming: ClientPhotoItem[] = (data.photos || []).map(
-          (m: { id: string; original_filename?: string; originalFilename?: string; width: number | null; height: number | null }) => ({
+          (m: {
+            id: string;
+            original_filename?: string;
+            originalFilename?: string;
+            width: number | null;
+            height: number | null;
+            variants?: Record<number, { width: number; height: number }> | null;
+          }) => ({
             id: m.id,
             originalFilename: m.original_filename || m.originalFilename || "photo",
             width: m.width,
             height: m.height,
+            variants: m.variants,
           })
         );
 
@@ -183,6 +198,9 @@ export default function GalleryPage() {
     setLightboxLoading(true);
     setLightboxError(false);
     document.body.classList.add("lightbox-open");
+    setTimeout(() => {
+      closeBtnRef.current?.focus();
+    }, 0);
   };
 
   // Close Lightbox
@@ -194,21 +212,46 @@ export default function GalleryPage() {
     }
   }, []);
 
-  // Keyboard controls for lightbox
+  // Keyboard controls for lightbox: focus trap, Escape and arrow keys
   useEffect(() => {
     if (lightboxIndex === null) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         closeLightbox();
-      } else if (e.key === "ArrowLeft" && lightboxIndex > 0) {
+        return;
+      }
+      if (e.key === "ArrowLeft" && lightboxIndex > 0) {
         setLightboxIndex(lightboxIndex - 1);
         setLightboxLoading(true);
         setLightboxError(false);
-      } else if (e.key === "ArrowRight" && lightboxIndex < photos.length - 1) {
+        return;
+      }
+      if (e.key === "ArrowRight" && lightboxIndex < photos.length - 1) {
         setLightboxIndex(lightboxIndex + 1);
         setLightboxLoading(true);
         setLightboxError(false);
+        return;
+      }
+      if (e.key === "Tab" && dialogRef.current) {
+        const focusable = dialogRef.current.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href]:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        );
+        if (focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+
+        if (e.shiftKey) {
+          if (document.activeElement === first) {
+            e.preventDefault();
+            last.focus();
+          }
+        } else {
+          if (document.activeElement === last) {
+            e.preventDefault();
+            first.focus();
+          }
+        }
       }
     };
 
@@ -229,7 +272,8 @@ export default function GalleryPage() {
 
   return (
     <div className={styles.container}>
-      <Header
+      <div ref={pageContentRef} inert={lightboxIndex !== null ? true : undefined}>
+        <Header
         common={common}
         lang={lang}
         currentRoute="gallery"
@@ -356,35 +400,42 @@ export default function GalleryPage() {
         {photos.length > 0 && (
           <>
             <div id="photos" className={styles.photosGrid}>
-              {photos.map((photo, idx) => (
-                <div key={photo.id} className={styles.photoCard}>
-                  <button
-                    type="button"
-                    className={styles.photoButton}
-                    onClick={() => openLightbox(idx)}
-                    aria-label={
-                      isEn
-                        ? `Enlarge photo ${idx + 1} of ${totalPhotos}`
-                        : `Agrandir la photo ${idx + 1} sur ${totalPhotos}`
-                    }
-                  >
-                    <picture>
-                      <source
-                        srcSet={`/api/gallery/${gallery.publicId}/media/${photo.id}?width=480&format=webp 480w, /api/gallery/${gallery.publicId}/media/${photo.id}?width=960&format=webp 960w`}
-                        sizes="(max-width: 600px) 100vw, (max-width: 900px) 50vw, 33vw"
-                        type="image/webp"
-                      />
-                      <img
-                        src={`/api/gallery/${gallery.publicId}/media/${photo.id}?width=960&format=webp`}
-                        alt={photo.originalFilename}
-                        loading="lazy"
-                        decoding="async"
-                        className={styles.photoImg}
-                        width={photo.width || undefined}
-                        height={photo.height || undefined}
-                      />
-                    </picture>
-                  </button>
+              {photos.map((photo, idx) => {
+                const { srcSet, src } = buildPhotoSrcSet(
+                  `/api/gallery/${gallery.publicId}/media`,
+                  photo.id,
+                  photo.variants,
+                  photo.width
+                );
+                return (
+                  <div key={photo.id} className={styles.photoCard}>
+                    <button
+                      type="button"
+                      className={styles.photoButton}
+                      onClick={() => openLightbox(idx)}
+                      aria-label={
+                        isEn
+                          ? `Enlarge photo ${idx + 1} of ${totalPhotos}`
+                          : `Agrandir la photo ${idx + 1} sur ${totalPhotos}`
+                      }
+                    >
+                      <picture>
+                        <source
+                          srcSet={srcSet}
+                          sizes="(max-width: 600px) 100vw, (max-width: 900px) 50vw, 33vw"
+                          type="image/webp"
+                        />
+                        <img
+                          src={src}
+                          alt={photo.originalFilename}
+                          loading="lazy"
+                          decoding="async"
+                          className={styles.photoImg}
+                          width={photo.width || undefined}
+                          height={photo.height || undefined}
+                        />
+                      </picture>
+                    </button>
 
                   <a
                     href={`/api/gallery/${gallery.publicId}/download/original/${photo.id}`}
@@ -414,7 +465,8 @@ export default function GalleryPage() {
                     </svg>
                   </a>
                 </div>
-              ))}
+              );
+            })}
             </div>
 
             {hasMore && (
@@ -500,118 +552,121 @@ export default function GalleryPage() {
         </Form>
       </section>
 
-      {/* Lightbox Dialog */}
-      {activePhoto && (
-        <div
-          className={styles.lightboxOverlay}
-          role="dialog"
-          aria-modal="true"
-          aria-label={
-            isEn
-              ? `Photo ${lightboxIndex! + 1} of ${photos.length}`
-              : `Photo ${lightboxIndex! + 1} sur ${photos.length}`
-          }
-          onClick={closeLightbox}
-        >
-          <button
-            type="button"
-            className={styles.lightboxClose}
-            onClick={closeLightbox}
-            aria-label={isEn ? "Close preview" : "Fermer l'aperçu"}
-          >
-            ✕
-          </button>
-
-          {lightboxIndex! > 0 && (
-            <button
-              type="button"
-              className={`${styles.lightboxNavBtn} ${styles.lightboxPrev}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                setLightboxIndex(lightboxIndex! - 1);
-                setLightboxLoading(true);
-                setLightboxError(false);
-              }}
-              aria-label={isEn ? "Previous photo" : "Photo précédente"}
-            >
-              ‹
-            </button>
-          )}
-
-          {lightboxIndex! < photos.length - 1 && (
-            <button
-              type="button"
-              className={`${styles.lightboxNavBtn} ${styles.lightboxNext}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                setLightboxIndex(lightboxIndex! + 1);
-                setLightboxLoading(true);
-                setLightboxError(false);
-              }}
-              aria-label={isEn ? "Next photo" : "Photo suivante"}
-            >
-              ›
-            </button>
-          )}
-
-          <div className={styles.lightboxContent} onClick={(e) => e.stopPropagation()}>
-            {lightboxLoading && !lightboxError && (
-              <div className={styles.lightboxStatus} role="status" aria-live="polite">
-                {isEn ? "Loading high-resolution preview..." : "Chargement de la prévisualisation..."}
-              </div>
-            )}
-
-            {lightboxError && (
-              <div className={styles.lightboxError} role="alert">
-                {isEn
-                  ? "Unable to load preview image."
-                  : "Impossible de charger la prévisualisation."}
-              </div>
-            )}
-
-            {!lightboxError && (
-              <img
-                src={`/api/gallery/${gallery.publicId}/media/${activePhoto.id}?width=1920&format=webp`}
-                alt={activePhoto.originalFilename}
-                className={styles.lightboxImage}
-                onLoad={() => setLightboxLoading(false)}
-                onError={() => {
-                  setLightboxLoading(false);
-                  setLightboxError(true);
-                }}
-              />
-            )}
-
-            <div className={styles.lightboxFooter}>
-              <a
-                href={`/api/gallery/${gallery.publicId}/download/original/${activePhoto.id}`}
-                download
-                className={styles.lightboxDownloadBtn}
-              >
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  <path d="M12 4 V15" />
-                  <path d="M7 11 L12 16 L17 11" />
-                  <path d="M5 20 H19" />
-                </svg>
-                <span>{isEn ? "Download original" : "Télécharger l'original"}</span>
-              </a>
-            </div>
-          </div>
-        </div>
-      )}
-
       <ScrollToTop />
       <Footer common={common} lang={lang} />
     </div>
-  );
+
+    {/* Lightbox Dialog */}
+    {activePhoto && (
+      <div
+        ref={dialogRef}
+        className={styles.lightboxOverlay}
+        role="dialog"
+        aria-modal="true"
+        aria-label={
+          isEn
+            ? `Photo ${lightboxIndex! + 1} of ${photos.length}`
+            : `Photo ${lightboxIndex! + 1} sur ${photos.length}`
+        }
+        onClick={closeLightbox}
+      >
+        <button
+          ref={closeBtnRef}
+          type="button"
+          className={styles.lightboxClose}
+          onClick={closeLightbox}
+          aria-label={isEn ? "Close preview" : "Fermer l'aperçu"}
+        >
+          ✕
+        </button>
+
+        {lightboxIndex! > 0 && (
+          <button
+            type="button"
+            className={`${styles.lightboxNavBtn} ${styles.lightboxPrev}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              setLightboxIndex(lightboxIndex! - 1);
+              setLightboxLoading(true);
+              setLightboxError(false);
+            }}
+            aria-label={isEn ? "Previous photo" : "Photo précédente"}
+          >
+            ‹
+          </button>
+        )}
+
+        {lightboxIndex! < photos.length - 1 && (
+          <button
+            type="button"
+            className={`${styles.lightboxNavBtn} ${styles.lightboxNext}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              setLightboxIndex(lightboxIndex! + 1);
+              setLightboxLoading(true);
+              setLightboxError(false);
+            }}
+            aria-label={isEn ? "Next photo" : "Photo suivante"}
+          >
+            ›
+          </button>
+        )}
+
+        <div className={styles.lightboxContent} onClick={(e) => e.stopPropagation()}>
+          {lightboxLoading && !lightboxError && (
+            <div className={styles.lightboxStatus} role="status" aria-live="polite">
+              {isEn ? "Loading high-resolution preview..." : "Chargement de la prévisualisation..."}
+            </div>
+          )}
+
+          {lightboxError && (
+            <div className={styles.lightboxError} role="alert">
+              {isEn
+                ? "Unable to load preview image."
+                : "Impossible de charger la prévisualisation."}
+            </div>
+          )}
+
+          {!lightboxError && (
+            <img
+              src={`/api/gallery/${gallery.publicId}/media/${activePhoto.id}?width=1920&format=webp`}
+              alt={activePhoto.originalFilename}
+              className={styles.lightboxImage}
+              onLoad={() => setLightboxLoading(false)}
+              onError={() => {
+                setLightboxLoading(false);
+                setLightboxError(true);
+              }}
+            />
+          )}
+
+          <div className={styles.lightboxFooter}>
+            <a
+              href={`/api/gallery/${gallery.publicId}/download/original/${activePhoto.id}`}
+              download
+              className={styles.lightboxDownloadBtn}
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M12 4 V15" />
+                <path d="M7 11 L12 16 L17 11" />
+                <path d="M5 20 H19" />
+              </svg>
+              <span>{isEn ? "Download original" : "Télécharger l'original"}</span>
+            </a>
+          </div>
+        </div>
+      </div>
+    )}
+  </div>
+);
 }

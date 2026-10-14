@@ -1,4 +1,3 @@
-import fs from "node:fs";
 import { Readable } from "node:stream";
 import type { LoaderFunctionArgs } from "react-router";
 import {
@@ -9,7 +8,13 @@ import {
   getGalleryOriginalPath,
   ensurePreview,
 } from "../../lib/gallery-preview.server";
-import { parseRangeHeader, parseWidth, parseFormat } from "../../lib/media-utils.server";
+import {
+  parseRangeHeader,
+  parseWidth,
+  parseFormat,
+  openSecureMediaFile,
+} from "../../lib/media-utils.server";
+import { ENV } from "../../lib/env.server";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   if (request.method !== "GET" && request.method !== "HEAD") {
@@ -31,30 +36,20 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   // 1. Video handling
   if (media.media_type === "video") {
-    let videoPath: string;
+    let handle: ReturnType<typeof openSecureMediaFile>;
     try {
-      videoPath = getGalleryOriginalPath(gallery.id, media.id);
+      handle = openSecureMediaFile(ENV.GALLERY_MEDIA_PATH, [gallery.id, media.id]);
     } catch {
       return new Response("File not found", { status: 404, headers: GALLERY_PRIVATE_HEADERS });
     }
 
-    if (!fs.existsSync(videoPath)) {
-      return new Response("File not found", { status: 404, headers: GALLERY_PRIVATE_HEADERS });
-    }
-
-    let stats: fs.Stats;
-    try {
-      stats = fs.statSync(videoPath);
-    } catch {
-      return new Response("File not found", { status: 404, headers: GALLERY_PRIVATE_HEADERS });
-    }
-
-    const totalSize = stats.size;
+    const totalSize = handle.size;
     const rangeHeader = request.headers.get("Range");
 
     if (rangeHeader !== null) {
       const parsedRange = parseRangeHeader(rangeHeader, totalSize);
       if (!parsedRange) {
+        handle.close();
         return new Response(null, {
           status: 416,
           headers: {
@@ -69,6 +64,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       const chunkSize = end - start + 1;
 
       if (request.method === "HEAD") {
+        handle.close();
         return new Response(null, {
           status: 206,
           headers: {
@@ -81,15 +77,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         });
       }
 
-      const stream = fs.createReadStream(videoPath, {
-        start,
-        end,
-        flags: "r",
-        mode: 0o600,
-      });
-
+      const stream = handle.createReadStream({ start, end });
       request.signal.addEventListener("abort", () => {
-        stream.destroy();
+        handle.close();
       });
 
       const webStream = Readable.toWeb(stream) as ReadableStream;
@@ -108,6 +98,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
     // No range specified
     if (request.method === "HEAD") {
+      handle.close();
       return new Response(null, {
         status: 200,
         headers: {
@@ -119,9 +110,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       });
     }
 
-    const stream = fs.createReadStream(videoPath, { flags: "r", mode: 0o600 });
+    const stream = handle.createReadStream();
     request.signal.addEventListener("abort", () => {
-      stream.destroy();
+      handle.close();
     });
 
     const webStream = Readable.toWeb(stream) as ReadableStream;
@@ -156,31 +147,31 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     return new Response("File not found", { status: 404, headers: GALLERY_PRIVATE_HEADERS });
   }
 
-  if (!fs.existsSync(originalPath)) {
-    return new Response("File not found", { status: 404, headers: GALLERY_PRIVATE_HEADERS });
-  }
-
   try {
-    const previewResult = await ensurePreview(gallery.id, media.id, originalPath, widthParam);
-    const previewPath = previewResult.path;
-
-    const stats = fs.statSync(previewPath);
+    await ensurePreview(gallery.id, media.id, originalPath, widthParam);
+    const handle = openSecureMediaFile(ENV.GALLERY_MEDIA_PATH, [
+      gallery.id,
+      ".previews",
+      media.id,
+      `${widthParam}.webp`,
+    ]);
 
     if (request.method === "HEAD") {
+      const sizeStr = handle.size.toString();
+      handle.close();
       return new Response(null, {
         status: 200,
         headers: {
           ...GALLERY_PRIVATE_HEADERS,
           "Content-Type": "image/webp",
-          "Content-Length": stats.size.toString(),
-          "Cache-Control": "private, max-age=86400, stale-while-revalidate=3600",
+          "Content-Length": sizeStr,
         },
       });
     }
 
-    const stream = fs.createReadStream(previewPath, { flags: "r", mode: 0o600 });
+    const stream = handle.createReadStream();
     request.signal.addEventListener("abort", () => {
-      stream.destroy();
+      handle.close();
     });
 
     const webStream = Readable.toWeb(stream) as ReadableStream;
@@ -190,8 +181,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       headers: {
         ...GALLERY_PRIVATE_HEADERS,
         "Content-Type": "image/webp",
-        "Content-Length": stats.size.toString(),
-        "Cache-Control": "private, max-age=86400, stale-while-revalidate=3600",
+        "Content-Length": handle.size.toString(),
       },
     });
   } catch {

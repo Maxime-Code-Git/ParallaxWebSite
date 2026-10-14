@@ -1,6 +1,5 @@
 import fs from "node:fs";
 import path from "node:path";
-import os from "node:os";
 import crypto from "node:crypto";
 import { once } from "node:events";
 import { finished } from "node:stream/promises";
@@ -170,11 +169,15 @@ async function parseMultipartUpload(
   }
 }
 
+import { imageProcessingLimiter, verifySecurePathChain } from "../../lib/media-image.server";
+
 export async function action({ request, params }: ActionFunctionArgs) {
   if (request.method !== "POST") {
+    const headers = createAdminHeaders();
+    headers.set("Allow", "POST");
     return new Response("Method Not Allowed", {
       status: 405,
-      headers: { ...createAdminHeaders(), Allow: "POST" },
+      headers,
     });
   }
 
@@ -212,15 +215,32 @@ export async function action({ request, params }: ActionFunctionArgs) {
     return Response.json({ error: "Type de contenu non supporté (multipart attendu)." }, { status: 415, headers: createAdminHeaders() });
   }
 
+  const baseMedia = path.resolve(ENV.GALLERY_MEDIA_PATH);
+  try {
+    verifySecurePathChain(baseMedia, [galleryId], "directory");
+  } catch {
+    return Response.json({ error: "Répertoire de galerie inaccessible ou invalide." }, { status: 404, headers: createAdminHeaders() });
+  }
+
   let tempDir: string | null = null;
   try {
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "parallax-poster-upload-"));
+    // Create staging on same volume as GALLERY_MEDIA_PATH
+    const stagingBase = path.join(baseMedia, ".staging");
+    if (!fs.existsSync(stagingBase)) {
+      fs.mkdirSync(stagingBase, { recursive: true, mode: 0o700 });
+    }
+    verifySecurePathChain(baseMedia, [".staging"], "directory");
+
+    tempDir = fs.mkdtempSync(path.join(stagingBase, "poster-upload-"));
     fs.chmodSync(tempDir, 0o700);
 
     const uploadedPath = await parseMultipartUpload(request, contentType, tempDir, expectedCsrfToken);
 
-    // Validate image dimensions and format with sharp
-    const meta = await sharp(uploadedPath, { limitInputPixels: 40_000_000 }).metadata();
+    // Validate image dimensions and format with sharp under limiter
+    const meta = await imageProcessingLimiter.run(async () => {
+      return sharp(uploadedPath, { limitInputPixels: 40_000_000 }).metadata();
+    });
+
     if (!meta.format || !["jpeg", "png", "webp", "avif"].includes(meta.format)) {
       return Response.json({ error: "Contenu de fichier image invalide." }, { status: 415, headers: createAdminHeaders() });
     }
@@ -233,23 +253,36 @@ export async function action({ request, params }: ActionFunctionArgs) {
     const tempWebp = path.join(tempDir, `${nextRevision}.webp`);
     const tempAvif = path.join(tempDir, `${nextRevision}.avif`);
 
-    // Process and strip metadata (EXIF auto-orient, max width 1920)
-    await sharp(uploadedPath, { limitInputPixels: 40_000_000 })
-      .rotate()
-      .resize({ width: 1920, withoutEnlargement: true })
-      .webp({ quality: 85, effort: 4 })
-      .toFile(tempWebp);
+    // Process and strip metadata (EXIF auto-orient, max width 1920) under global limiter
+    await imageProcessingLimiter.run(async () => {
+      await sharp(uploadedPath, { limitInputPixels: 40_000_000 })
+        .rotate()
+        .resize({ width: 1920, withoutEnlargement: true })
+        .webp({ quality: 85, effort: 4 })
+        .toFile(tempWebp);
 
-    await sharp(uploadedPath, { limitInputPixels: 40_000_000 })
-      .rotate()
-      .resize({ width: 1920, withoutEnlargement: true })
-      .avif({ quality: 80, effort: 4 })
-      .toFile(tempAvif);
+      await sharp(uploadedPath, { limitInputPixels: 40_000_000 })
+        .rotate()
+        .resize({ width: 1920, withoutEnlargement: true })
+        .avif({ quality: 80, effort: 4 })
+        .toFile(tempAvif);
+    });
 
-    const postersDir = path.join(ENV.GALLERY_MEDIA_PATH, galleryId, ".posters", mediaId);
+    fs.chmodSync(tempWebp, 0o600);
+    fs.chmodSync(tempAvif, 0o600);
+
+    // Securely prepare destination posters directories
+    const postersParent = path.join(baseMedia, galleryId, ".posters");
+    if (!fs.existsSync(postersParent)) {
+      fs.mkdirSync(postersParent, { recursive: true, mode: 0o700 });
+    }
+    verifySecurePathChain(baseMedia, [galleryId, ".posters"], "directory");
+
+    const postersDir = path.join(postersParent, mediaId);
     if (!fs.existsSync(postersDir)) {
       fs.mkdirSync(postersDir, { recursive: true, mode: 0o700 });
     }
+    verifySecurePathChain(baseMedia, [galleryId, ".posters", mediaId], "directory");
 
     const finalWebp = path.join(postersDir, `${nextRevision}.webp`);
     const finalAvif = path.join(postersDir, `${nextRevision}.avif`);
@@ -264,24 +297,44 @@ export async function action({ request, params }: ActionFunctionArgs) {
     fs.chmodSync(finalWebp, 0o600);
     if (fs.existsSync(finalAvif)) fs.chmodSync(finalAvif, 0o600);
 
-    // Update revision in DB
-    db.prepare(`
+    // Update revision in DB with optimistic concurrency check
+    const updateRes = db.prepare(`
       UPDATE gallery_media
       SET poster_revision = ?, updated_at = ?
-      WHERE id = ? AND gallery_id = ?
-    `).run(nextRevision, Date.now(), mediaId, galleryId);
+      WHERE id = ? AND gallery_id = ? AND poster_revision = ?
+    `).run(nextRevision, Date.now(), mediaId, galleryId, media.poster_revision);
 
-    // Clean up old revisions
-    if (media.poster_revision > 0) {
+    if (updateRes.changes === 0) {
       try {
-        fs.unlinkSync(path.join(postersDir, `${media.poster_revision}.webp`));
+        fs.unlinkSync(finalWebp);
       } catch {
         // Ignored
       }
       try {
-        fs.unlinkSync(path.join(postersDir, `${media.poster_revision}.avif`));
+        fs.unlinkSync(finalAvif);
       } catch {
         // Ignored
+      }
+      return Response.json(
+        { error: "Conflit de révision (409) : le poster a été modifié par une autre opération en arrière-plan." },
+        { status: 409, headers: createAdminHeaders() }
+      );
+    }
+
+    // Clean up old revisions without following symlinks
+    if (media.poster_revision > 0) {
+      for (const ext of ["webp", "avif"]) {
+        const oldFile = path.join(postersDir, `${media.poster_revision}.${ext}`);
+        if (fs.existsSync(oldFile)) {
+          try {
+            const stat = fs.lstatSync(oldFile);
+            if (!stat.isSymbolicLink()) {
+              fs.unlinkSync(oldFile);
+            }
+          } catch {
+            // Ignored
+          }
+        }
       }
     }
 

@@ -660,5 +660,12 @@ export function validateServerStartup(): void {
       validateAdminConfig();
     }
     hasValidatedStartup = true;
+    import("./gallery-import.server")
+      .then((m) => {
+        m.startGalleryBackgroundSupervisor();
+      })
+      .catch(() => {
+        // Ignored
+      });
   }
 }

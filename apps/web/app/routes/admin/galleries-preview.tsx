@@ -13,7 +13,9 @@ import {
   getGalleryPhotosPaginated,
   getGalleryMediaList,
   formatPublicGalleryDto,
+  parsePreviewVariants,
 } from "../../lib/gallery.server";
+import { buildPhotoSrcSet } from "../../lib/gallery-media.shared";
 import { getSiteContent } from "../../lib/site-content.server";
 import { Header } from "../../components/public/Header";
 import { Footer } from "../../components/public/Footer";
@@ -22,7 +24,13 @@ import styles from "../public/gallery.module.css";
 interface LoaderData {
   gallery: ReturnType<typeof formatPublicGalleryDto>;
   galleryId: string;
-  photos: { id: string; originalFilename: string; width: number | null; height: number | null }[];
+  photos: {
+    id: string;
+    originalFilename: string;
+    width: number | null;
+    height: number | null;
+    variants?: Record<number, { width: number; height: number }> | null;
+  }[];
   videos: { id: string; originalFilename: string; mimeType: string; posterRevision: number }[];
   common: ReturnType<typeof getSiteContent>["common"];
 }
@@ -52,6 +60,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     originalFilename: m.original_filename,
     width: m.width,
     height: m.height,
+    variants: parsePreviewVariants(m.preview_data),
   }));
 
   const videos = videoRows.map((m) => ({
@@ -134,24 +143,39 @@ export default function AdminGalleryPreviewPage() {
           </p>
         ) : (
           <div className={styles.photosGrid}>
-            {photos.map((p, idx) => (
-              <div key={p.id} className={styles.photoCard}>
-                <button
-                  type="button"
-                  className={styles.photoButton}
-                  onClick={() => setActivePhotoIndex(idx)}
-                >
-                  <img
-                    src={`/api/admin/galleries/${galleryId}/media/${p.id}?width=960&format=webp`}
-                    alt={p.originalFilename}
-                    loading="lazy"
-                    className={styles.photoImg}
-                    width={p.width || undefined}
-                    height={p.height || undefined}
-                  />
-                </button>
-              </div>
-            ))}
+            {photos.map((p, idx) => {
+              const { srcSet, src } = buildPhotoSrcSet(
+                `/api/admin/galleries/${galleryId}/media`,
+                p.id,
+                p.variants,
+                p.width
+              );
+              return (
+                <div key={p.id} className={styles.photoCard}>
+                  <button
+                    type="button"
+                    className={styles.photoButton}
+                    onClick={() => setActivePhotoIndex(idx)}
+                  >
+                    <picture>
+                      <source
+                        srcSet={srcSet}
+                        sizes="(max-width: 600px) 100vw, (max-width: 900px) 50vw, 33vw"
+                        type="image/webp"
+                      />
+                      <img
+                        src={src}
+                        alt={p.originalFilename}
+                        loading="lazy"
+                        className={styles.photoImg}
+                        width={p.width || undefined}
+                        height={p.height || undefined}
+                      />
+                    </picture>
+                  </button>
+                </div>
+              );
+            })}
           </div>
         )}
       </section>

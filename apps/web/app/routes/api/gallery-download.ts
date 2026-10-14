@@ -1,19 +1,119 @@
-import fs from "node:fs";
 import path from "node:path";
 import { Readable } from "node:stream";
 import type { LoaderFunctionArgs } from "react-router";
 import yazl from "yazl";
+import { ENV } from "../../lib/env.server";
 import {
   requireGalleryAccess,
   GALLERY_PRIVATE_HEADERS,
 } from "../../lib/gallery-auth.server";
 import { getGalleryMediaList } from "../../lib/gallery.server";
-import { getGalleryOriginalPath } from "../../lib/gallery-preview.server";
-import { buildContentDisposition } from "../../lib/media-utils.server";
+import {
+  openSecureMediaFile,
+  buildContentDisposition,
+  type SecureMediaHandle,
+} from "../../lib/media-utils.server";
 
-// Concurrency limiter for ZIP operations to avoid file descriptor / CPU exhaustion
+// Concurrency limiter for ZIP operations to avoid file descriptor / memory exhaustion
 let activeZipCount = 0;
 const MAX_CONCURRENT_ZIPS = 3;
+
+/**
+ * Creates a lazy Readable stream that only verifies path chain and opens file descriptor
+ * when yazl actually begins pulling bytes for that specific entry.
+ * Strictly enforces O_NOFOLLOW and guarantees immediate descriptor closure on abort.
+ */
+function createLazySecureEntryStream(
+  baseMedia: string,
+  galleryId: string,
+  mediaId: string,
+  expectedSize: number,
+  signal: AbortSignal
+): Readable {
+  let handle: SecureMediaHandle | null = null;
+  let fileStream: ReturnType<SecureMediaHandle["createReadStream"]> | null = null;
+  let isClosed = false;
+
+  const cleanup = () => {
+    if (!isClosed) {
+      isClosed = true;
+      if (fileStream && !fileStream.destroyed) {
+        fileStream.destroy();
+      }
+      fileStream = null;
+      if (handle) {
+        handle.close();
+        handle = null;
+      }
+    }
+  };
+
+  const stream = new Readable({
+    read() {
+      if (isClosed || signal.aborted) {
+        cleanup();
+        this.push(null);
+        return;
+      }
+
+      if (!handle) {
+        try {
+          handle = openSecureMediaFile(baseMedia, [galleryId, mediaId]);
+          if (expectedSize > 0 && handle.size !== expectedSize) {
+            cleanup();
+            this.destroy(new Error("File size mismatch"));
+            return;
+          }
+
+          fileStream = handle.createReadStream();
+          fileStream.on("data", (chunk) => {
+            if (!this.push(chunk)) {
+              fileStream?.pause();
+            }
+          });
+          fileStream.on("end", () => {
+            cleanup();
+            this.push(null);
+          });
+          fileStream.on("error", (err) => {
+            cleanup();
+            if (!this.destroyed) {
+              this.destroy(err);
+            }
+          });
+        } catch (err) {
+          cleanup();
+          if (!this.destroyed) {
+            this.destroy(err instanceof Error ? err : new Error(String(err)));
+          }
+          return;
+        }
+      } else if (fileStream?.isPaused()) {
+        fileStream.resume();
+      }
+    },
+    destroy(err, cb) {
+      cleanup();
+      cb(err);
+    },
+  });
+
+  if (signal.aborted) {
+    cleanup();
+    stream.destroy();
+  } else {
+    signal.addEventListener(
+      "abort",
+      () => {
+        cleanup();
+        stream.destroy();
+      },
+      { once: true }
+    );
+  }
+
+  return stream;
+}
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   if (request.method !== "GET" && request.method !== "HEAD") {
@@ -53,42 +153,29 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     });
   }
 
-  const filesToAdd: { filePath: string; safeName: string }[] = [];
+  const baseMedia = path.resolve(ENV.GALLERY_MEDIA_PATH);
+  const filesToAdd: { mediaId: string; safeName: string; size: number }[] = [];
   const usedNames = new Set<string>();
 
   for (const item of mediaItems) {
-    try {
-      const filePath = getGalleryOriginalPath(gallery.id, item.id);
-      if (fs.existsSync(filePath)) {
-        const folder = item.media_type === "photo" ? "Photos" : "Videos";
-        const rawBase = path.basename(item.original_filename || "media");
-        let safeBase = rawBase.replace(/[\0\r\n/\\]/g, "_").trim();
-        if (!safeBase) safeBase = "media";
+    const folder = item.media_type === "photo" ? "Photos" : "Videos";
+    const rawBase = path.basename(item.original_filename || "media");
+    let safeBase = rawBase.replace(/[\0\r\n/\\]/g, "_").trim();
+    if (!safeBase) safeBase = "media";
 
-        let archivePath = `${folder}/${safeBase}`;
-        if (usedNames.has(archivePath)) {
-          const ext = path.extname(safeBase);
-          const stem = path.basename(safeBase, ext);
-          let counter = 1;
-          while (usedNames.has(`${folder}/${stem}-${counter}${ext}`)) {
-            counter++;
-          }
-          archivePath = `${folder}/${stem}-${counter}${ext}`;
-        }
-
-        usedNames.add(archivePath);
-        filesToAdd.push({ filePath, safeName: archivePath });
+    let archivePath = `${folder}/${safeBase}`;
+    if (usedNames.has(archivePath)) {
+      const ext = path.extname(safeBase);
+      const stem = path.basename(safeBase, ext);
+      let counter = 1;
+      while (usedNames.has(`${folder}/${stem}-${counter}${ext}`)) {
+        counter++;
       }
-    } catch {
-      // Ignore unconfined or missing files
+      archivePath = `${folder}/${stem}-${counter}${ext}`;
     }
-  }
 
-  if (filesToAdd.length === 0) {
-    return new Response("No valid files found on disk for download", {
-      status: 404,
-      headers: GALLERY_PRIVATE_HEADERS,
-    });
+    usedNames.add(archivePath);
+    filesToAdd.push({ mediaId: item.id, safeName: archivePath, size: item.file_size });
   }
 
   const cleanTitle = (gallery.title || "gallery")
@@ -99,6 +186,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const zipFilename = `Parallax-${cleanTitle}-${typeParam}.zip`;
   const contentDisposition = buildContentDisposition("attachment", zipFilename);
 
+  // HEAD returns headers without acquiring slot or initiating ZIP processing
   if (request.method === "HEAD") {
     return new Response(null, {
       status: 200,
@@ -129,34 +217,52 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     }
   };
 
-  const zipfile = new yazl.ZipFile();
+  try {
+    const zipfile = new yazl.ZipFile();
 
-  for (const f of filesToAdd) {
-    // Media files are already compressed (JPEG, PNG, WebP, AVIF, MP4, WebM) -> compress: false
-    zipfile.addFile(f.filePath, f.safeName, { compress: false });
-  }
+    for (const f of filesToAdd) {
+      const entryStream = createLazySecureEntryStream(
+        baseMedia,
+        gallery.id,
+        f.mediaId,
+        f.size,
+        request.signal
+      );
+      zipfile.addReadStream(entryStream, f.safeName, { compress: false, size: f.size });
+    }
 
-  zipfile.end();
+    zipfile.end();
 
-  const nodeReadable = Readable.from(zipfile.outputStream as Readable);
+    const outputStream = zipfile.outputStream as Readable;
 
-  nodeReadable.on("close", releaseSlot);
-  nodeReadable.on("end", releaseSlot);
-  nodeReadable.on("error", releaseSlot);
+    outputStream.on("close", releaseSlot);
+    outputStream.on("end", releaseSlot);
+    outputStream.on("error", releaseSlot);
 
-  request.signal.addEventListener("abort", () => {
-    nodeReadable.destroy();
+    // Ensure slot release and total producer teardown on abort
+    request.signal.addEventListener(
+      "abort",
+      () => {
+        if (typeof outputStream.destroy === "function") {
+          outputStream.destroy();
+        }
+        releaseSlot();
+      },
+      { once: true }
+    );
+
+    const webStream = Readable.toWeb(outputStream);
+
+    return new Response(webStream as ReadableStream, {
+      status: 200,
+      headers: {
+        ...GALLERY_PRIVATE_HEADERS,
+        "Content-Type": "application/zip",
+        "Content-Disposition": contentDisposition,
+      },
+    });
+  } catch (err) {
     releaseSlot();
-  });
-
-  const webStream = Readable.toWeb(nodeReadable);
-
-  return new Response(webStream as ReadableStream, {
-    status: 200,
-    headers: {
-      ...GALLERY_PRIVATE_HEADERS,
-      "Content-Type": "application/zip",
-      "Content-Disposition": contentDisposition,
-    },
-  });
+    throw err;
+  }
 }

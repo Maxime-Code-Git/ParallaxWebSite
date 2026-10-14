@@ -22,7 +22,11 @@ export function getPreviewPath(galleryId: string, mediaId: string, width: Allowe
   verifySecurePathChain(base, [galleryId], "directory");
   verifySecurePathChain(base, [galleryId, ".previews"], "directory");
   verifySecurePathChain(base, [galleryId, ".previews", mediaId], "directory");
-  return path.join(base, galleryId, ".previews", mediaId, `${width}.webp`);
+  const filePath = path.join(base, galleryId, ".previews", mediaId, `${width}.webp`);
+  if (fs.existsSync(filePath)) {
+    verifySecurePathChain(base, [galleryId, ".previews", mediaId, `${width}.webp`], "file");
+  }
+  return filePath;
 }
 
 /**
@@ -43,7 +47,12 @@ export function getGalleryPosterPath(galleryId: string, mediaId: string, revisio
   verifySecurePathChain(base, [galleryId], "directory");
   verifySecurePathChain(base, [galleryId, ".posters"], "directory");
   verifySecurePathChain(base, [galleryId, ".posters", mediaId], "directory");
-  return path.join(base, galleryId, ".posters", mediaId, `${revision}.${ext}`);
+  const fileName = `${revision}.${ext}`;
+  const filePath = path.join(base, galleryId, ".posters", mediaId, fileName);
+  if (fs.existsSync(filePath)) {
+    verifySecurePathChain(base, [galleryId, ".posters", mediaId, fileName], "file");
+  }
+  return filePath;
 }
 
 /**
@@ -56,15 +65,41 @@ export async function ensurePreview(
   width: AllowedWidth
 ): Promise<{ path: string; width: number; height: number }> {
   const base = path.resolve(ENV.GALLERY_MEDIA_PATH);
-  const previewsDir = path.join(base, galleryId, ".previews", mediaId);
+  const galleryPath = path.join(base, galleryId);
+  if (!fs.existsSync(galleryPath)) {
+    fs.mkdirSync(galleryPath, { recursive: true, mode: 0o700 });
+  }
+  verifySecurePathChain(base, [galleryId], "directory");
+
+  const previewsParent = path.join(base, galleryId, ".previews");
+  if (!fs.existsSync(previewsParent)) {
+    fs.mkdirSync(previewsParent, { recursive: true, mode: 0o700 });
+  }
+  verifySecurePathChain(base, [galleryId, ".previews"], "directory");
+
+  const previewsDir = path.join(previewsParent, mediaId);
+  if (!fs.existsSync(previewsDir)) {
+    fs.mkdirSync(previewsDir, { recursive: true, mode: 0o700 });
+  }
+  verifySecurePathChain(base, [galleryId, ".previews", mediaId], "directory");
+
   const targetPath = path.join(previewsDir, `${width}.webp`);
 
   if (fs.existsSync(targetPath)) {
-    try {
-      const meta = await sharp(targetPath).metadata();
-      return { path: targetPath, width: meta.width || width, height: meta.height || 0 };
-    } catch {
-      // Re-generate if corrupted
+    const stat = fs.lstatSync(targetPath);
+    if (stat.isSymbolicLink() || !stat.isFile()) {
+      try {
+        fs.unlinkSync(targetPath);
+      } catch {
+        // Ignored
+      }
+    } else {
+      try {
+        const meta = await sharp(targetPath).metadata();
+        return { path: targetPath, width: meta.width || width, height: meta.height || 0 };
+      } catch {
+        // Re-generate if corrupted
+      }
     }
   }
 
@@ -76,12 +111,21 @@ export async function ensurePreview(
   const generationPromise = (async () => {
     return imageProcessingLimiter.run(async () => {
       if (fs.existsSync(targetPath)) {
-        const meta = await sharp(targetPath).metadata();
-        return { path: targetPath, width: meta.width || width, height: meta.height || 0 };
-      }
-
-      if (!fs.existsSync(previewsDir)) {
-        fs.mkdirSync(previewsDir, { recursive: true, mode: 0o700 });
+        const stat = fs.lstatSync(targetPath);
+        if (stat.isSymbolicLink() || !stat.isFile()) {
+          try {
+            fs.unlinkSync(targetPath);
+          } catch {
+            // Ignored
+          }
+        } else {
+          try {
+            const meta = await sharp(targetPath).metadata();
+            return { path: targetPath, width: meta.width || width, height: meta.height || 0 };
+          } catch {
+            // Re-generate if corrupted
+          }
+        }
       }
 
       let quality = 80;
@@ -141,14 +185,26 @@ export async function generateAllPreviews(
 }
 
 /**
- * Removes all previews for a media item.
+ * Removes all previews for a media item safely without following symlinks.
  */
 export function removePreviews(galleryId: string, mediaId: string): void {
   const base = path.resolve(ENV.GALLERY_MEDIA_PATH);
+  try {
+    verifySecurePathChain(base, [galleryId], "directory");
+    verifySecurePathChain(base, [galleryId, ".previews"], "directory");
+  } catch {
+    return;
+  }
+
   const previewsDir = path.join(base, galleryId, ".previews", mediaId);
   if (fs.existsSync(previewsDir)) {
     try {
-      fs.rmSync(previewsDir, { recursive: true, force: true });
+      const stat = fs.lstatSync(previewsDir);
+      if (stat.isSymbolicLink()) {
+        fs.unlinkSync(previewsDir);
+      } else {
+        fs.rmSync(previewsDir, { recursive: true, force: true });
+      }
     } catch {
       // Ignored
     }

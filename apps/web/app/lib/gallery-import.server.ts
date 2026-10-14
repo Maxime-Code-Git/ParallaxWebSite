@@ -3,20 +3,28 @@ import path from "node:path";
 import crypto from "node:crypto";
 import sharp from "sharp";
 import { ENV } from "./env.server";
-import { getGalleryDb } from "./gallery-db.server";
+import { getGalleryDb, processGalleryDeletions } from "./gallery-db.server";
 import { generateAllPreviews, removePreviews } from "./gallery-preview.server";
-import { verifySecurePathChain } from "./media-image.server";
+import { verifySecurePathChain, imageProcessingLimiter, ConcurrencyLimitError } from "./media-image.server";
 
 export const MAX_MEDIA_COUNT = 2000;
 export const MAX_PHOTO_FILE_SIZE = 50 * 1024 * 1024; // 50 MiB
 export const MAX_VIDEO_FILE_SIZE = 5 * 1024 * 1024 * 1024; // 5 GiB
 export const MAX_TOTAL_IMPORT_SIZE = 100 * 1024 * 1024 * 1024; // 100 GiB
 export const MAX_IMAGE_DIMENSION = 12000;
+export const MAX_IMAGE_PIXELS = 80_000_000; // 80 MP
 
 const PHOTO_MIMES = new Set(["image/jpeg", "image/png", "image/webp", "image/avif"]);
 const VIDEO_MIMES = new Set(["video/mp4", "video/webm"]);
 
 const LEASE_DURATION_MS = 60 * 1000; // 60 seconds
+
+export class DeposedWorkerError extends Error {
+  constructor(message = "Bail d'importation expiré ou transféré.") {
+    super(message);
+    this.name = "DeposedWorkerError";
+  }
+}
 
 export interface RejectedFileItem {
   file: string;
@@ -121,14 +129,15 @@ export function detectMimeFromBuffer(buf: Buffer): string | null {
 function scanSubFolder(
   folderPath: string,
   subName: "photos" | "videos",
-  rejected: RejectedFileItem[]
+  rejected: RejectedFileItem[],
+  runningTotalCount: { count: number }
 ): ScannedCandidate[] {
   const subDir = path.join(folderPath, subName);
   if (!fs.existsSync(subDir)) return [];
 
   const subStat = fs.lstatSync(subDir);
   if (subStat.isSymbolicLink() || !subStat.isDirectory()) {
-    rejected.push({ file: subName, reason: "Le sous-dossier ne doit pas etre un lien symbolique." });
+    rejected.push({ file: subName, reason: "Le sous-dossier ne doit pas être un lien symbolique." });
     return [];
   }
 
@@ -147,6 +156,15 @@ function scanSubFolder(
       }
       if (!stat.isFile()) {
         rejected.push({ file: relativeName, reason: "Ce n'est pas un fichier standard." });
+        continue;
+      }
+
+      // Check max media count limit
+      if (runningTotalCount.count >= MAX_MEDIA_COUNT) {
+        rejected.push({
+          file: relativeName,
+          reason: `Limite maximale de ${MAX_MEDIA_COUNT} fichiers par import dépassée.`,
+        });
         continue;
       }
 
@@ -179,19 +197,20 @@ function scanSubFolder(
       }
 
       if (!mime) {
-        rejected.push({ file: relativeName, reason: "Format de fichier non reconnu ou non supporte." });
+        rejected.push({ file: relativeName, reason: "Format de fichier non reconnu ou non supporté." });
         continue;
       }
 
       if (isPhoto && !PHOTO_MIMES.has(mime)) {
-        rejected.push({ file: relativeName, reason: `Format ${mime} non autorise dans le dossier photos.` });
+        rejected.push({ file: relativeName, reason: `Format ${mime} non autorisé dans le dossier photos.` });
         continue;
       }
       if (!isPhoto && !VIDEO_MIMES.has(mime)) {
-        rejected.push({ file: relativeName, reason: `Format ${mime} non autorise dans le dossier videos.` });
+        rejected.push({ file: relativeName, reason: `Format ${mime} non autorisé dans le dossier vidéos.` });
         continue;
       }
 
+      runningTotalCount.count++;
       results.push({
         fullPath,
         relativeName,
@@ -200,7 +219,7 @@ function scanSubFolder(
         size: stat.size,
       });
     } catch (err) {
-      rejected.push({ file: relativeName, reason: `Erreur d'acces au fichier: ${err instanceof Error ? err.message : String(err)}` });
+      rejected.push({ file: relativeName, reason: `Erreur d'accès au fichier: ${err instanceof Error ? err.message : String(err)}` });
     }
   }
 
@@ -213,9 +232,10 @@ function scanSubFolder(
 export function analyzeImportFolder(folderName: string): ImportAnalysisResult {
   const folderPath = resolveImportFolder(folderName);
   const rejectedFiles: RejectedFileItem[] = [];
+  const runningTotalCount = { count: 0 };
 
-  const photos = scanSubFolder(folderPath, "photos", rejectedFiles);
-  const videos = scanSubFolder(folderPath, "videos", rejectedFiles);
+  const photos = scanSubFolder(folderPath, "photos", rejectedFiles, runningTotalCount);
+  const videos = scanSubFolder(folderPath, "videos", rejectedFiles, runningTotalCount);
 
   const totalSize = [...photos, ...videos].reduce((acc, f) => acc + f.size, 0);
 
@@ -230,13 +250,19 @@ export function analyzeImportFolder(folderName: string): ImportAnalysisResult {
 
 /**
  * Creates a persistent import job in the database.
- * Enforces that only one active import job exists per gallery.
+ * Enforces limits and atomic uniqueness per gallery.
  */
 export function startImportJob(galleryId: string, folderName: string): string {
   resolveImportFolder(folderName);
   const db = getGalleryDb();
 
-  // Check if an active import job already exists
+  // Check if gallery exists
+  const gallery = db.prepare("SELECT id FROM galleries WHERE id = ?").get(galleryId);
+  if (!gallery) {
+    throw new Error("Galerie introuvable.");
+  }
+
+  // Pre-check for active import job
   const activeJob = db.prepare(`
     SELECT id, status FROM gallery_import_jobs
     WHERE gallery_id = ? AND status IN ('pending', 'scanning', 'importing')
@@ -247,33 +273,61 @@ export function startImportJob(galleryId: string, folderName: string): string {
   }
 
   const analysis = analyzeImportFolder(folderName);
-  if (analysis.validPhotosCount === 0 && analysis.validVideosCount === 0) {
-    throw new Error("Le dossier d'import ne contient aucun fichier photo ou video valide.");
+  const totalFiles = analysis.validPhotosCount + analysis.validVideosCount;
+  if (totalFiles === 0) {
+    throw new Error("Le dossier d'import ne contient aucun fichier photo ou vidéo valide.");
+  }
+
+  if (totalFiles > MAX_MEDIA_COUNT) {
+    throw new Error(`Le lot d'importation contient ${totalFiles} fichiers, dépassant la limite autorisée de ${MAX_MEDIA_COUNT} médias.`);
+  }
+
+  if (analysis.totalSize > MAX_TOTAL_IMPORT_SIZE) {
+    throw new Error(
+      `Le volume total du lot (${(analysis.totalSize / (1024 * 1024 * 1024)).toFixed(1)} Go) dépasse la limite autorisée de ${(MAX_TOTAL_IMPORT_SIZE / (1024 * 1024 * 1024)).toFixed(0)} Go.`
+    );
+  }
+
+  const existingCountRow = db.prepare(`
+    SELECT COUNT(*) as count FROM gallery_media WHERE gallery_id = ?
+  `).get(galleryId) as { count: number };
+  const existingCount = existingCountRow?.count ?? 0;
+
+  if (existingCount + totalFiles > MAX_MEDIA_COUNT) {
+    throw new Error(
+      `La galerie contient déjà ${existingCount} médias. L'import de ${totalFiles} médias dépasserait la limite maximale de ${MAX_MEDIA_COUNT} médias par galerie.`
+    );
   }
 
   const jobId = crypto.randomUUID();
   const now = Date.now();
-  const totalFiles = analysis.validPhotosCount + analysis.validVideosCount;
 
-  db.prepare(`
-    INSERT INTO gallery_import_jobs (
-      id, gallery_id, import_folder, status,
-      progress_total, progress_current,
-      scanned_photos, scanned_videos, rejected_files, rejection_report,
-      created_at, updated_at
-    ) VALUES (?, ?, ?, 'pending', ?, 0, ?, ?, ?, ?, ?, ?)
-  `).run(
-    jobId,
-    galleryId,
-    folderName,
-    totalFiles,
-    analysis.validPhotosCount,
-    analysis.validVideosCount,
-    analysis.rejectedFiles.length,
-    JSON.stringify(analysis.rejectedFiles),
-    now,
-    now
-  );
+  try {
+    db.prepare(`
+      INSERT INTO gallery_import_jobs (
+        id, gallery_id, import_folder, status,
+        progress_total, progress_current,
+        scanned_photos, scanned_videos, rejected_files, rejection_report,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, 'pending', ?, 0, ?, ?, ?, ?, ?, ?)
+    `).run(
+      jobId,
+      galleryId,
+      folderName,
+      totalFiles,
+      analysis.validPhotosCount,
+      analysis.validVideosCount,
+      analysis.rejectedFiles.length,
+      JSON.stringify(analysis.rejectedFiles),
+      now,
+      now
+    );
+  } catch (err: unknown) {
+    if (err instanceof Error && (err.message.includes("UNIQUE") || err.message.includes("constraint"))) {
+      throw new Error("Un import est deja en cours pour cette galerie.", { cause: err });
+    }
+    throw err;
+  }
 
   return jobId;
 }
@@ -303,20 +357,26 @@ export function getImportJobStatus(jobId: string) {
 }
 
 /**
- * Streams file content and computes SHA-256 hash from a securely opened file descriptor.
+ * Streams file content and computes SHA-256 hash securely.
+ * Closes descriptors reliably and yields periodically for large files.
  */
 async function streamCopyAndHash(
   sourcePath: string,
-  destPath: string
+  destPath: string,
+  heartbeat?: () => void
 ): Promise<{ hash: string; size: number }> {
-  const fd = fs.openSync(sourcePath, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
-  const outFd = fs.openSync(destPath, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o600);
-
-  const hashStream = crypto.createHash("sha256");
-  const buffer = Buffer.alloc(64 * 1024);
-  let totalSize = 0;
+  let fd: number | null = null;
+  let outFd: number | null = null;
 
   try {
+    fd = fs.openSync(sourcePath, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+    outFd = fs.openSync(destPath, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o600);
+
+    const hashStream = crypto.createHash("sha256");
+    const buffer = Buffer.alloc(64 * 1024);
+    let totalSize = 0;
+    let bytesSinceYield = 0;
+
     while (true) {
       const bytesRead = fs.readSync(fd, buffer, 0, buffer.length, null);
       if (bytesRead === 0) break;
@@ -324,13 +384,96 @@ async function streamCopyAndHash(
       hashStream.update(chunk);
       fs.writeSync(outFd, chunk);
       totalSize += bytesRead;
+      bytesSinceYield += bytesRead;
+
+      // Yield event loop every 16MB for large files and verify heartbeat
+      if (bytesSinceYield >= 16 * 1024 * 1024) {
+        bytesSinceYield = 0;
+        heartbeat?.();
+        await new Promise((resolve) => setImmediate(resolve));
+      }
     }
+
+    return { hash: hashStream.digest("hex"), size: totalSize };
+  } catch (err) {
+    try {
+      if (fs.existsSync(destPath)) {
+        fs.unlinkSync(destPath);
+      }
+    } catch {
+      // Ignored
+    }
+    throw err;
   } finally {
-    fs.closeSync(fd);
-    fs.closeSync(outFd);
+    if (fd !== null) {
+      try {
+        fs.closeSync(fd);
+      } catch {
+        // Ignored
+      }
+    }
+    if (outFd !== null) {
+      try {
+        fs.closeSync(outFd);
+      } catch {
+        // Ignored
+      }
+    }
+  }
+}
+
+/**
+ * Confines and verifies the gallery media directory, strictly rejecting symlinks.
+ */
+function ensureGalleryDirectory(baseMedia: string, galleryId: string): string {
+  if (!/^[0-9a-fA-F-]{36}$/.test(galleryId)) {
+    throw new Error("Identifiant de galerie invalide.");
   }
 
-  return { hash: hashStream.digest("hex"), size: totalSize };
+  const canonicalBase = fs.realpathSync(baseMedia);
+  const target = path.join(canonicalBase, galleryId);
+
+  if (fs.existsSync(target)) {
+    const stat = fs.lstatSync(target);
+    if (stat.isSymbolicLink() || !stat.isDirectory()) {
+      throw new Error("Le dossier média de la galerie ne doit pas être un lien symbolique.");
+    }
+    const realTarget = fs.realpathSync(target);
+    const rel = path.relative(canonicalBase, realTarget);
+    if (rel.startsWith("..") || path.isAbsolute(rel)) {
+      throw new Error("Confinement strict non respecté pour le dossier galerie.");
+    }
+  } else {
+    fs.mkdirSync(target, { recursive: true, mode: 0o700 });
+  }
+
+  return target;
+}
+
+/**
+ * Safely removes a directory without following symlinks.
+ */
+function safeRemoveDirectory(dirPath: string): void {
+  if (!fs.existsSync(dirPath)) return;
+  try {
+    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+    for (const entry of entries) {
+      const p = path.join(dirPath, entry.name);
+      try {
+        if (entry.isSymbolicLink() || entry.isFile()) {
+          fs.unlinkSync(p);
+        } else if (entry.isDirectory()) {
+          safeRemoveDirectory(p);
+          fs.rmdirSync(p);
+        }
+      } catch {
+        // Ignored
+      }
+    }
+    fs.rmdirSync(dirPath);
+  } catch {
+    // Ignored
+  }
 }
 
 /**
@@ -361,10 +504,24 @@ export async function processImportJob(jobId: string, workerId = crypto.randomUU
     gallery_id: string;
     import_folder: string;
     rejection_report: string | null;
-  };
+  } | undefined;
+
+  if (!job) return;
 
   const galleryId = job.gallery_id;
   const folderPath = resolveImportFolder(job.import_folder);
+
+  const baseMedia = path.resolve(ENV.GALLERY_MEDIA_PATH);
+  const canonicalBase = fs.realpathSync(baseMedia);
+
+  // Staging folder for this worker on the exact same media volume
+  const stagingRoot = path.join(canonicalBase, ".staging", "imports");
+  fs.mkdirSync(stagingRoot, { recursive: true, mode: 0o700 });
+  const workerStagingDir = path.join(stagingRoot, `${jobId}-${workerId}`);
+  fs.mkdirSync(workerStagingDir, { recursive: true, mode: 0o700 });
+
+  // Confinement check & directory creation on destination directory
+  const galleryDir = ensureGalleryDirectory(canonicalBase, galleryId);
 
   const rejected: RejectedFileItem[] = [];
   if (job.rejection_report) {
@@ -376,29 +533,26 @@ export async function processImportJob(jobId: string, workerId = crypto.randomUU
   }
 
   // Scan candidates
-  const photos = scanSubFolder(folderPath, "photos", rejected);
-  const videos = scanSubFolder(folderPath, "videos", rejected);
+  const runningTotalCount = { count: 0 };
+  const photos = scanSubFolder(folderPath, "photos", rejected, runningTotalCount);
+  const videos = scanSubFolder(folderPath, "videos", rejected, runningTotalCount);
   const allCandidates = [...photos, ...videos];
-
-  const baseMedia = path.resolve(ENV.GALLERY_MEDIA_PATH);
-  const galleryDir = path.join(baseMedia, galleryId);
-
-  if (!fs.existsSync(galleryDir)) {
-    fs.mkdirSync(galleryDir, { recursive: true, mode: 0o700 });
-  }
 
   let processedCount = 0;
 
-  // Heartbeat helper
+  // Lease renewal helper with strict expiration check
   const renewLease = () => {
+    const currentNow = Date.now();
+    const nextExpiry = currentNow + LEASE_DURATION_MS;
     const res = db.prepare(`
       UPDATE gallery_import_jobs
       SET lease_expires_at = ?, updated_at = ?
       WHERE id = ? AND lease_worker_id = ? AND lease_token = ?
-    `).run(Date.now() + LEASE_DURATION_MS, Date.now(), jobId, workerId, leaseToken);
+        AND status = 'importing' AND lease_expires_at > ?
+    `).run(nextExpiry, currentNow, jobId, workerId, leaseToken, currentNow);
 
     if (res.changes === 0) {
-      throw new Error("Perte du bail d'importation : travail abandonne.");
+      throw new DeposedWorkerError("Bail d'importation expiré ou transféré : travail abandonné.");
     }
   };
 
@@ -406,13 +560,21 @@ export async function processImportJob(jobId: string, workerId = crypto.randomUU
     for (const candidate of allCandidates) {
       renewLease();
 
-      const mediaId = crypto.randomUUID();
-      const tmpDest = path.join(galleryDir, `.tmp.${mediaId}`);
-      const finalDest = path.join(galleryDir, mediaId);
+      // Check if gallery was deleted during processing
+      const galleryStillExists = db.prepare("SELECT id FROM galleries WHERE id = ?").get(galleryId);
+      if (!galleryStillExists) {
+        throw new DeposedWorkerError("La galerie a été supprimée pendant l'importation.");
+      }
 
-      // Stream copy and calculate hash
-      const { hash: contentHash, size: fileSize } = await streamCopyAndHash(candidate.fullPath, tmpDest);
-      fs.renameSync(tmpDest, finalDest);
+      const mediaId = crypto.randomUUID();
+      const stagedOriginal = path.join(workerStagingDir, `${mediaId}.orig`);
+
+      // 1. Stream copy and calculate hash in worker's private staging directory
+      const { hash: contentHash, size: fileSize } = await streamCopyAndHash(
+        candidate.fullPath,
+        stagedOriginal,
+        renewLease
+      );
 
       // Check deduplication within gallery
       const existing = db.prepare(`
@@ -420,14 +582,20 @@ export async function processImportJob(jobId: string, workerId = crypto.randomUU
       `).get(galleryId, contentHash) as { id: string } | undefined;
 
       if (existing) {
-        fs.rmSync(finalDest, { force: true });
-        rejected.push({ file: candidate.relativeName, reason: "Fichier ignore : contenu en double dans la galerie." });
+        try {
+          fs.unlinkSync(stagedOriginal);
+        } catch {
+          // Ignored
+        }
+        rejected.push({ file: candidate.relativeName, reason: "Fichier ignoré : contenu en double dans la galerie." });
         processedCount++;
+        renewLease();
         db.prepare(`
           UPDATE gallery_import_jobs
           SET progress_current = ?, updated_at = ?
           WHERE id = ? AND lease_worker_id = ? AND lease_token = ?
-        `).run(processedCount, Date.now(), jobId, workerId, leaseToken);
+            AND status = 'importing' AND lease_expires_at > ?
+        `).run(processedCount, Date.now(), jobId, workerId, leaseToken, Date.now());
         continue;
       }
 
@@ -436,32 +604,101 @@ export async function processImportJob(jobId: string, workerId = crypto.randomUU
       let previewData: string | null = null;
 
       if (candidate.mediaType === "photo") {
-        try {
-          const meta = await sharp(finalDest).metadata();
-          width = meta.width || null;
-          height = meta.height || null;
+        let sharpSuccess = false;
+        let attempts = 0;
+        const MAX_SHARP_RETRIES = 20;
 
-          if (width && height && (width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION)) {
-            fs.rmSync(finalDest, { force: true });
-            rejected.push({ file: candidate.relativeName, reason: `Dimensions hors limites (${width}x${height}, max ${MAX_IMAGE_DIMENSION}px).` });
-            processedCount++;
-            continue;
+        while (!sharpSuccess && attempts < MAX_SHARP_RETRIES) {
+          renewLease();
+
+          try {
+            // Read metadata using limiter
+            const meta = await imageProcessingLimiter.run(async () => {
+              return await sharp(stagedOriginal).metadata();
+            });
+
+            width = meta.width || null;
+            height = meta.height || null;
+
+            if (meta.pages && meta.pages > 1) {
+              rejected.push({
+                file: candidate.relativeName,
+                reason: "Les images animées ou multipages ne sont pas acceptées.",
+              });
+              break;
+            }
+
+            if (width && height) {
+              if (width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION) {
+                rejected.push({
+                  file: candidate.relativeName,
+                  reason: `Dimensions hors limites (${width}x${height}, max ${MAX_IMAGE_DIMENSION}px).`,
+                });
+                break;
+              }
+              if (width * height > MAX_IMAGE_PIXELS) {
+                rejected.push({
+                  file: candidate.relativeName,
+                  reason: `Nombre de pixels hors limites (${((width * height) / 1_000_000).toFixed(1)} MP, max ${(MAX_IMAGE_PIXELS / 1_000_000).toFixed(0)} MP).`,
+                });
+                break;
+              }
+            }
+
+            // Generate previews (ensurePreview uses imageProcessingLimiter)
+            const previews = await generateAllPreviews(galleryId, mediaId, stagedOriginal);
+            previewData = JSON.stringify(previews);
+            sharpSuccess = true;
+          } catch (imgErr) {
+            if (imgErr instanceof ConcurrencyLimitError) {
+              attempts++;
+              if (attempts >= MAX_SHARP_RETRIES) {
+                throw new Error("Saturation prolongée du traitement d'images; l'import sera repris au prochain cycle.", { cause: imgErr });
+              }
+              renewLease();
+              await new Promise((resolve) => setTimeout(resolve, 100 * Math.min(attempts, 5)));
+              continue;
+            }
+
+            // Genuine corruption / decoding failure
+            try {
+              fs.unlinkSync(stagedOriginal);
+            } catch {
+              // Ignored
+            }
+            removePreviews(galleryId, mediaId);
+            rejected.push({
+              file: candidate.relativeName,
+              reason: `Image corrompue ou décodage Sharp impossible: ${imgErr instanceof Error ? imgErr.message : String(imgErr)}`,
+            });
+            break;
           }
+        }
 
-          // Generate previews
-          const previews = await generateAllPreviews(galleryId, mediaId, finalDest);
-          previewData = JSON.stringify(previews);
-        } catch (imgErr) {
-          fs.rmSync(finalDest, { force: true });
-          removePreviews(galleryId, mediaId);
-          rejected.push({ file: candidate.relativeName, reason: `Image corrompue ou decodage Sharp impossible: ${imgErr instanceof Error ? imgErr.message : String(imgErr)}` });
+        if (!sharpSuccess) {
           processedCount++;
+          renewLease();
+          db.prepare(`
+            UPDATE gallery_import_jobs
+            SET progress_current = ?, updated_at = ?
+            WHERE id = ? AND lease_worker_id = ? AND lease_token = ?
+              AND status = 'importing' AND lease_expires_at > ?
+          `).run(processedCount, Date.now(), jobId, workerId, leaseToken, Date.now());
           continue;
         }
       }
 
-      // Check lease before inserting into database
+      // Check lease and gallery existence before persistent publication
       renewLease();
+      if (!db.prepare("SELECT id FROM galleries WHERE id = ?").get(galleryId)) {
+        throw new DeposedWorkerError("Galerie supprimée avant la publication du média.");
+      }
+
+      // Confinement check on destination directory
+      const finalDest = path.join(galleryDir, mediaId);
+
+      // Publish staged original to final destination
+      fs.renameSync(stagedOriginal, finalDest);
 
       const maxSortRow = db.prepare(`
         SELECT COALESCE(MAX(sort_order), -1) as maxSort FROM gallery_media WHERE gallery_id = ?
@@ -470,38 +707,63 @@ export async function processImportJob(jobId: string, workerId = crypto.randomUU
       const sortOrder = maxSortRow.maxSort + 1;
       const originalFilename = path.basename(candidate.relativeName);
       const createdAt = Date.now();
-
-      db.prepare(`
-        INSERT INTO gallery_media (
-          id, gallery_id, media_type, sort_order, original_filename,
-          mime_type, file_size, content_hash, width, height,
-          is_ready, preview_data, poster_revision, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 0, ?, ?)
-      `).run(
-        mediaId,
-        galleryId,
-        candidate.mediaType,
-        sortOrder,
-        originalFilename,
-        candidate.mimeType,
-        fileSize,
-        contentHash,
-        width,
-        height,
-        previewData,
-        createdAt,
-        createdAt
-      );
-
       processedCount++;
-      db.prepare(`
-        UPDATE gallery_import_jobs
-        SET progress_current = ?, updated_at = ?
-        WHERE id = ? AND lease_worker_id = ? AND lease_token = ?
-      `).run(processedCount, Date.now(), jobId, workerId, leaseToken);
+
+      // Atomic persistence under active lease
+      db.exec("BEGIN EXCLUSIVE TRANSACTION;");
+      try {
+        const leaseCheck = db.prepare(`
+          UPDATE gallery_import_jobs
+          SET progress_current = ?, updated_at = ?
+          WHERE id = ? AND lease_worker_id = ? AND lease_token = ?
+            AND status = 'importing' AND lease_expires_at > ?
+        `).run(processedCount, createdAt, jobId, workerId, leaseToken, createdAt);
+
+        if (leaseCheck.changes === 0) {
+          throw new DeposedWorkerError("Perte du bail lors de l'enregistrement en base de données.");
+        }
+
+        db.prepare(`
+          INSERT INTO gallery_media (
+            id, gallery_id, media_type, sort_order, original_filename,
+            mime_type, file_size, content_hash, width, height,
+            is_ready, preview_data, poster_revision, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 0, ?, ?)
+        `).run(
+          mediaId,
+          galleryId,
+          candidate.mediaType,
+          sortOrder,
+          originalFilename,
+          candidate.mimeType,
+          fileSize,
+          contentHash,
+          width,
+          height,
+          previewData,
+          createdAt,
+          createdAt
+        );
+
+        db.exec("COMMIT;");
+      } catch (txErr) {
+        try {
+          db.exec("ROLLBACK;");
+        } catch {
+          // Ignored
+        }
+        // Rollback published disk files if transaction failed or lease lost
+        try {
+          fs.unlinkSync(finalDest);
+        } catch {
+          // Ignored
+        }
+        removePreviews(galleryId, mediaId);
+        throw txErr;
+      }
     }
 
-    // Finalize job
+    // Finalize job under valid lease
     renewLease();
     db.prepare(`
       UPDATE gallery_import_jobs
@@ -514,8 +776,15 @@ export async function processImportJob(jobId: string, workerId = crypto.randomUU
           lease_expires_at = NULL,
           updated_at = ?
       WHERE id = ? AND lease_worker_id = ? AND lease_token = ?
-    `).run(rejected.length, JSON.stringify(rejected), Date.now(), jobId, workerId, leaseToken);
+        AND status = 'importing' AND lease_expires_at > ?
+    `).run(rejected.length, JSON.stringify(rejected), Date.now(), jobId, workerId, leaseToken, Date.now());
   } catch (err) {
+    if (err instanceof DeposedWorkerError) {
+      // Deposed worker leaves job intact for the new owner
+      return;
+    }
+
+    // Record failure only if lease is still held
     db.prepare(`
       UPDATE gallery_import_jobs
       SET status = 'failed',
@@ -525,19 +794,46 @@ export async function processImportJob(jobId: string, workerId = crypto.randomUU
           lease_expires_at = NULL,
           updated_at = ?
       WHERE id = ? AND lease_worker_id = ? AND lease_token = ?
-    `).run(err instanceof Error ? err.message : String(err), Date.now(), jobId, workerId, leaseToken);
+        AND status = 'importing' AND lease_expires_at > ?
+    `).run(err instanceof Error ? err.message : String(err), Date.now(), jobId, workerId, leaseToken, Date.now());
     throw err;
+  } finally {
+    // Worker always cleans up its own staging directory
+    safeRemoveDirectory(workerStagingDir);
   }
 }
 
 /**
- * Recovers interrupted import jobs on server startup.
+ * Recovers and processes the next pending or expired-lease import job.
+ */
+export async function processNextPendingImport(): Promise<boolean> {
+  const db = getGalleryDb();
+  const now = Date.now();
+
+  const candidate = db.prepare(`
+    SELECT id FROM gallery_import_jobs
+    WHERE status = 'pending' OR (status = 'importing' AND lease_expires_at < ?)
+    ORDER BY created_at ASC
+    LIMIT 1
+  `).get(now) as { id: string } | undefined;
+
+  if (!candidate) return false;
+
+  try {
+    await processImportJob(candidate.id);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Recovers interrupted import jobs by marking expired ones pending.
  */
 export function resumeInterruptedImports(): void {
   const db = getGalleryDb();
   const now = Date.now();
 
-  // Reset expired leases so they can be picked up or inspected
   db.prepare(`
     UPDATE gallery_import_jobs
     SET status = 'pending',
@@ -547,4 +843,51 @@ export function resumeInterruptedImports(): void {
         updated_at = ?
     WHERE status = 'importing' AND lease_expires_at < ?
   `).run(now, now);
+}
+
+let backgroundTimer: NodeJS.Timeout | null = null;
+let isRunningBackground = false;
+
+/**
+ * Starts the single-instance background worker supervisor.
+ * Recovers pending imports and quarantine deletions automatically.
+ */
+export function startGalleryBackgroundSupervisor(intervalMs = 3000): void {
+  if (backgroundTimer) return;
+
+  const runCycle = async () => {
+    if (isRunningBackground) return;
+    isRunningBackground = true;
+    try {
+      processGalleryDeletions();
+      await processNextPendingImport();
+    } catch {
+      // Suppress background errors
+    } finally {
+      isRunningBackground = false;
+    }
+  };
+
+  backgroundTimer = setInterval(runCycle, intervalMs);
+  backgroundTimer.unref();
+
+  const cleanup = () => {
+    if (backgroundTimer) {
+      clearInterval(backgroundTimer);
+      backgroundTimer = null;
+    }
+  };
+
+  process.once("SIGTERM", cleanup);
+  process.once("SIGINT", cleanup);
+}
+
+/**
+ * Stops the background supervisor cleanly.
+ */
+export function stopGalleryBackgroundSupervisor(): void {
+  if (backgroundTimer) {
+    clearInterval(backgroundTimer);
+    backgroundTimer = null;
+  }
 }

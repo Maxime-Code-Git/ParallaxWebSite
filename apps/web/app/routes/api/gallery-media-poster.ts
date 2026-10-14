@@ -1,11 +1,11 @@
-import fs from "node:fs";
 import { Readable } from "node:stream";
 import type { LoaderFunctionArgs } from "react-router";
 import {
   requireGalleryAccess,
   GALLERY_PRIVATE_HEADERS,
 } from "../../lib/gallery-auth.server";
-import { getGalleryPosterPath } from "../../lib/gallery-preview.server";
+import { openSecureMediaFile } from "../../lib/media-utils.server";
+import { ENV } from "../../lib/env.server";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   if (request.method !== "GET" && request.method !== "HEAD") {
@@ -32,59 +32,54 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const acceptHeader = request.headers.get("Accept") || "";
   const preferAvif = acceptHeader.includes("image/avif");
 
-  let posterPath = "";
+  let handle: ReturnType<typeof openSecureMediaFile> | null = null;
   let contentType = "image/webp";
 
   if (preferAvif) {
     try {
-      const candidatePath = getGalleryPosterPath(gallery.id, media.id, media.poster_revision, "avif");
-      if (fs.existsSync(candidatePath)) {
-        posterPath = candidatePath;
-        contentType = "image/avif";
-      }
+      handle = openSecureMediaFile(ENV.GALLERY_MEDIA_PATH, [
+        gallery.id,
+        ".posters",
+        media.id,
+        `${media.poster_revision}.avif`,
+      ]);
+      contentType = "image/avif";
     } catch {
       // Fallback to webp
     }
   }
 
-  if (!posterPath) {
+  if (!handle) {
     try {
-      const candidatePath = getGalleryPosterPath(gallery.id, media.id, media.poster_revision, "webp");
-      if (fs.existsSync(candidatePath)) {
-        posterPath = candidatePath;
-        contentType = "image/webp";
-      }
+      handle = openSecureMediaFile(ENV.GALLERY_MEDIA_PATH, [
+        gallery.id,
+        ".posters",
+        media.id,
+        `${media.poster_revision}.webp`,
+      ]);
+      contentType = "image/webp";
     } catch {
       return new Response("Poster file not found", { status: 404, headers: GALLERY_PRIVATE_HEADERS });
     }
   }
 
-  if (!posterPath || !fs.existsSync(posterPath)) {
-    return new Response("Poster file not found", { status: 404, headers: GALLERY_PRIVATE_HEADERS });
-  }
-
-  let stats: fs.Stats;
-  try {
-    stats = fs.statSync(posterPath);
-  } catch {
-    return new Response("Poster file not found", { status: 404, headers: GALLERY_PRIVATE_HEADERS });
-  }
-
   if (request.method === "HEAD") {
+    const sizeStr = handle.size.toString();
+    handle.close();
     return new Response(null, {
       status: 200,
       headers: {
         ...GALLERY_PRIVATE_HEADERS,
         "Content-Type": contentType,
-        "Content-Length": stats.size.toString(),
-        "Vary": "Accept",
+        "Content-Length": sizeStr,
+        Vary: "Accept",
       },
     });
   }
 
-  const stream = fs.createReadStream(posterPath, { flags: "r", mode: 0o600 });
+  const stream = handle.createReadStream();
   request.signal.addEventListener("abort", () => {
-    stream.destroy();
+    handle?.close();
   });
 
   const webStream = Readable.toWeb(stream) as ReadableStream;
@@ -94,8 +89,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     headers: {
       ...GALLERY_PRIVATE_HEADERS,
       "Content-Type": contentType,
-      "Content-Length": stats.size.toString(),
-      "Vary": "Accept",
+      "Content-Length": handle.size.toString(),
+      Vary: "Accept",
     },
   });
 }

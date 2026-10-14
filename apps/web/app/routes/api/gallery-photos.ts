@@ -3,7 +3,7 @@ import {
   requireGalleryAccess,
   GALLERY_PRIVATE_HEADERS,
 } from "../../lib/gallery-auth.server";
-import { getGalleryPhotosPaginated } from "../../lib/gallery.server";
+import { getGalleryPhotosPaginated, parsePreviewVariants } from "../../lib/gallery.server";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   if (request.method !== "GET" && request.method !== "HEAD") {
@@ -46,6 +46,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     width: m.width,
     height: m.height,
     mimeType: m.mime_type,
+    variants: parsePreviewVariants(m.preview_data),
   }));
 
   if (request.method === "HEAD") {
