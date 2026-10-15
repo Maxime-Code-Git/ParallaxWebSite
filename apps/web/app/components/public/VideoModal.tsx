@@ -1,5 +1,14 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import styles from "./videoModal.module.css";
+import {
+  detectVideoProvider,
+  type VideoProvider,
+} from "../../lib/privacy-preferences.shared";
+import {
+  hasProviderConsent,
+  setClientOneTimeConsent,
+  persistProviderPreferences,
+} from "../../lib/privacy-client";
 
 interface VideoModalProps {
   isOpen: boolean;
@@ -63,38 +72,96 @@ export function parseVideoEmbedUrl(url: string | null | undefined): string | nul
 
 export function VideoModal({ isOpen, onClose, videoUrl, lang }: VideoModalProps) {
   const [consented, setConsented] = useState(false);
+  const [rememberChoice, setRememberChoice] = useState(false);
+
+  const provider: VideoProvider | null = detectVideoProvider(videoUrl);
+
+  const checkConsentStatus = useCallback(() => {
+    if (!provider) {
+      setConsented(false);
+      return;
+    }
+    const hasConsent = hasProviderConsent(provider);
+    setConsented(hasConsent);
+  }, [provider]);
 
   useEffect(() => {
     if (!isOpen) {
       setConsented(false);
+      setRememberChoice(false);
       return;
     }
+
+    checkConsentStatus();
+
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") {
         e.stopPropagation();
         onClose();
       }
     }
+
+    function handlePrivacyUpdate(e: Event) {
+      const customEvent = e as CustomEvent<{ youtube?: boolean; vimeo?: boolean; provider?: VideoProvider; granted?: boolean }>;
+      if (provider) {
+        // If event specifies revocation for our provider, immediately revoke
+        if (customEvent.detail) {
+          if (customEvent.detail.provider === provider && customEvent.detail.granted === false) {
+            setConsented(false);
+            return;
+          }
+          if (customEvent.detail[provider] === false) {
+            setConsented(false);
+            return;
+          }
+        }
+        // Re-check consent
+        if (!hasProviderConsent(provider)) {
+          setConsented(false);
+        }
+      }
+    }
+
     window.addEventListener("keydown", handleKeyDown, true);
-    return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, [isOpen, onClose]);
+    window.addEventListener("parallax:privacy-updated", handlePrivacyUpdate);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown, true);
+      window.removeEventListener("parallax:privacy-updated", handlePrivacyUpdate);
+    };
+  }, [isOpen, onClose, checkConsentStatus, provider]);
 
   if (!isOpen) return null;
 
   const embedUrl = parseVideoEmbedUrl(videoUrl);
 
+  const providerLabel = provider === "youtube" ? "YouTube" : provider === "vimeo" ? "Vimeo" : "externe";
+
   const texts = {
-    title: lang === "fr" ? "Affichage de contenu externe" : "External Content Display",
+    title: lang === "fr" ? `Lecture externe (${providerLabel})` : `External player (${providerLabel})`,
     notice:
       lang === "fr"
-        ? "Cette vidéo est hébergée par un service externe (YouTube ou Vimeo). Pour respecter votre vie privée, aucun élément tiers n'est chargé automatiquement. En cliquant sur Accepter, vous chargez le lecteur tiers."
-        : "This video is hosted by an external service (YouTube or Vimeo). To protect your privacy, no third-party element is loaded automatically. By clicking Accept, you load the third-party player.",
+        ? `Cette vidéo est hébergée par ${providerLabel}. Pour respecter votre vie privée, aucun lecteur tiers n'est chargé automatiquement. En acceptant, vous autorisez le chargement du lecteur.`
+        : `This video is hosted by ${providerLabel}. To protect your privacy, no third-party player is loaded automatically. By accepting, you allow the player to load.`,
+    remember:
+      lang === "fr"
+        ? `Mémoriser mon accord pour ${providerLabel} (6 mois)`
+        : `Remember my choice for ${providerLabel} (6 months)`,
     accept: lang === "fr" ? "Accepter et lire" : "Accept and play",
-    cancel: lang === "fr" ? "Annuler" : "Cancel",
+    cancel: lang === "fr" ? "Refuser" : "Refuse",
     noVideo:
       lang === "fr"
-        ? "Aucun lien vidéo externe n'a été configuré pour ce showreel."
-        : "No external video URL has been configured for this showreel.",
+        ? "Aucun lien vidéo valide n'a été configuré."
+        : "No valid video URL has been configured.",
+  };
+
+  const handleAccept = () => {
+    if (!provider) return;
+    if (rememberChoice) {
+      void persistProviderPreferences({ [provider]: true });
+    }
+    setClientOneTimeConsent(provider, true);
+    setConsented(true);
   };
 
   return (
@@ -104,7 +171,7 @@ export function VideoModal({ isOpen, onClose, videoUrl, lang }: VideoModalProps)
           type="button"
           onClick={onClose}
           className={styles.closeButton}
-          aria-label="Fermer la vidéo"
+          aria-label={lang === "fr" ? "Fermer la vidéo" : "Close video"}
         >
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M18 6 L6 18" />
@@ -114,9 +181,9 @@ export function VideoModal({ isOpen, onClose, videoUrl, lang }: VideoModalProps)
 
         {!embedUrl ? (
           <div className={styles.consentContainer}>
-            <h3 className={styles.consentTitle}>Showreel 2026</h3>
+            <h3 className={styles.consentTitle}>Showreel</h3>
             <p className={styles.consentText}>{texts.noVideo}</p>
-            <button type="button" onClick={onClose} className={styles.consentConfirm}>
+            <button type="button" onClick={onClose} className={styles.consentCancel}>
               {lang === "fr" ? "Fermer" : "Close"}
             </button>
           </div>
@@ -124,15 +191,30 @@ export function VideoModal({ isOpen, onClose, videoUrl, lang }: VideoModalProps)
           <div className={styles.consentContainer}>
             <h3 className={styles.consentTitle}>{texts.title}</h3>
             <p className={styles.consentText}>{texts.notice}</p>
+
+            <label className={styles.checkboxContainer}>
+              <input
+                type="checkbox"
+                checked={rememberChoice}
+                onChange={(e) => setRememberChoice(e.target.checked)}
+                className={styles.checkboxInput}
+              />
+              <span>{texts.remember}</span>
+            </label>
+
             <div className={styles.consentButtons}>
               <button
                 type="button"
-                onClick={() => setConsented(true)}
+                onClick={handleAccept}
                 className={styles.consentConfirm}
               >
                 {texts.accept}
               </button>
-              <button type="button" onClick={onClose} className={styles.consentCancel}>
+              <button
+                type="button"
+                onClick={onClose}
+                className={styles.consentCancel}
+              >
                 {texts.cancel}
               </button>
             </div>
@@ -141,7 +223,7 @@ export function VideoModal({ isOpen, onClose, videoUrl, lang }: VideoModalProps)
           <div className={styles.videoWrapper}>
             <iframe
               src={embedUrl}
-              title="Showreel Parallax"
+              title={`Vidéo ${providerLabel} Parallax`}
               className={styles.iframe}
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
               allowFullScreen

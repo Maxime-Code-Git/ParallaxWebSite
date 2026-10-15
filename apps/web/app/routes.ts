@@ -18,12 +18,32 @@ export default [
   // Public portfolio EN (Persistent single route container)
   route("en/projects/:category?/:slugEn?", "routes/public/portfolio.tsx", { id: "en-portfolio" }),
 
+  // Public Legal Pages FR/EN
+  route("fr/mentions-legales", "routes/public/legal-page.tsx", { id: "fr-mentions" }),
+  route("en/legal-notice", "routes/public/legal-page.tsx", { id: "en-mentions" }),
+  route("fr/confidentialite", "routes/public/legal-page.tsx", { id: "fr-privacy" }),
+  route("en/privacy-policy", "routes/public/legal-page.tsx", { id: "en-privacy" }),
+  route("fr/cgv", "routes/public/legal-page.tsx", { id: "fr-terms" }),
+  route("en/terms", "routes/public/legal-page.tsx", { id: "en-terms" }),
+  route("fr/cookies", "routes/public/legal-page.tsx", { id: "fr-cookies" }),
+  route("en/cookies", "routes/public/legal-page.tsx", { id: "en-cookies" }),
+
+  // Legacy Legal Redirects (301)
+  route("en/mentions-legales", "routes/public/legal-redirect.tsx", { id: "redirect-en-mentions" }),
+  route("en/confidentialite", "routes/public/legal-redirect.tsx", { id: "redirect-en-privacy" }),
+  route("en/cgv", "routes/public/legal-redirect.tsx", { id: "redirect-en-terms" }),
+  route("fr/politique-de-confidentialite", "routes/public/legal-redirect.tsx", { id: "redirect-fr-privacy-alias" }),
+
   // Administration
   route("admin", "routes/admin/login.tsx"),
   route("admin/dashboard", "routes/admin/dashboard.tsx"),
   route("admin/home", "routes/admin/home.tsx"),
   route("admin/studio", "routes/admin/studio.tsx"),
   route("admin/contact", "routes/admin/contact.tsx"),
+  route("admin/company", "routes/admin/company.tsx"),
+  route("admin/legal", "routes/admin/legal-list.tsx"),
+  route("admin/legal/:pageKey", "routes/admin/legal-edit.tsx"),
+  route("admin/legal/:pageKey/preview", "routes/admin/legal-preview.tsx"),
   route("admin/portfolio", "routes/admin/portfolio.tsx"),
   route("admin/portfolio/:id", "routes/admin/portfolio-edit.tsx"),
   route("admin/portfolio/section/:category", "routes/admin/portfolio-section.tsx"),
@@ -34,6 +54,9 @@ export default [
   route("admin/data-retention", "routes/admin/data-retention.tsx"),
   route("admin/data-retention/settings", "routes/admin/data-retention-settings.tsx"),
   route("admin/logout", "routes/admin/logout.tsx"),
+
+  // Privacy Preferences API
+  route("api/privacy/preferences", "routes/api/privacy-preferences.ts"),
 
   // Client Area Login FR/EN
   route("fr/espace-client", "routes/public/client-login.tsx", { id: "fr-client-login" }),

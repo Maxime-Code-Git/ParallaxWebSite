@@ -13,6 +13,7 @@ import {
   type LocalizedString,
   type SiteContent,
   type SiteContentV1,
+  type SiteContentV2,
   type StudioContent,
   type StudioMember,
   type ContactPageContent,
@@ -24,12 +25,27 @@ import {
   DEFAULT_LOCATION_IMAGES,
   type MediaVariantInfo,
   type UploadedMediaMetadata,
+  type CompanyContent,
+  DEFAULT_COMPANY_CONTENT,
+  type LegalPageKey,
+  LEGAL_PAGE_KEYS,
+  type LegalSection,
+  type CookieInventoryItem,
+  type LegalDocument,
+  type LegalPageRecord,
+  type LegalPagesContent,
+  DEFAULT_LEGAL_PAGES_CONTENT,
 } from "./site-content.shared";
 
 export class RevisionConflictError extends Error {
-  constructor(message = "Conflit de révision. Le contenu a été modifié par un autre processus.") {
+  public serverRevision?: string;
+  constructor(
+    message = "Conflit de révision. Le contenu a été modifié par un autre processus.",
+    serverRevision?: string
+  ) {
     super(message);
     this.name = "RevisionConflictError";
+    this.serverRevision = serverRevision;
   }
 }
 
@@ -530,7 +546,267 @@ export function validateContactPageContent(val: unknown): ContactPageContent {
   };
 }
 
-export function migrateSiteContentV1ToV2(v1: SiteContentV1): SiteContent {
+export function validateCompanyContent(val: unknown): CompanyContent {
+  const obj = assertObject(val, "company");
+  assertExactKeys(
+    obj,
+    [
+      "tradeName",
+      "legalName",
+      "legalForm",
+      "address",
+      "enterpriseNumber",
+      "vatNumber",
+      "vatRegime",
+      "publicationDirector",
+      "privacyContact",
+      "hostingProvider",
+      "hostingAddress",
+      "phone",
+      "email",
+      "instagramUrl",
+      "youtubeUrl",
+      "isPublished",
+    ],
+    "company"
+  );
+
+  const stringFields = [
+    "tradeName",
+    "legalName",
+    "legalForm",
+    "address",
+    "enterpriseNumber",
+    "vatNumber",
+    "publicationDirector",
+    "privacyContact",
+    "hostingProvider",
+    "hostingAddress",
+    "phone",
+    "email",
+    "instagramUrl",
+    "youtubeUrl",
+  ] as const;
+
+  for (const field of stringFields) {
+    if (typeof obj[field] !== "string") {
+      throw new ValidationError(`company.${field} doit être une chaîne de caractères.`);
+    }
+  }
+
+  if (obj.vatRegime !== undefined && typeof obj.vatRegime !== "string") {
+    throw new ValidationError("company.vatRegime doit être une chaîne de caractères.");
+  }
+
+  if (obj.isPublished !== undefined && typeof obj.isPublished !== "boolean") {
+    throw new ValidationError("company.isPublished doit être un booléen.");
+  }
+
+  const emailTrim = (obj.email as string).trim();
+  if (emailTrim && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailTrim)) {
+    throw new ValidationError("company.email doit être une adresse e-mail valide.");
+  }
+
+  const phoneTrim = (obj.phone as string).trim();
+  if (phoneTrim) {
+    const digits = phoneTrim.replace(/\D/g, "");
+    if (phoneTrim.length > 50 || !/^[+]?[\d\s()./-]{6,50}$/.test(phoneTrim) || digits.length < 6) {
+      throw new ValidationError("company.phone doit être un numéro de téléphone valide.");
+    }
+  }
+
+  const igTrim = (obj.instagramUrl as string).trim();
+  if (igTrim && !/^https?:\/\//i.test(igTrim)) {
+    throw new ValidationError("company.instagramUrl doit être une URL HTTP(S) valide.");
+  }
+
+  const ytTrim = (obj.youtubeUrl as string).trim();
+  if (ytTrim && !/^https?:\/\//i.test(ytTrim)) {
+    throw new ValidationError("company.youtubeUrl doit être une URL HTTP(S) valide.");
+  }
+
+  return {
+    tradeName: (obj.tradeName as string).trim(),
+    legalName: (obj.legalName as string).trim(),
+    legalForm: (obj.legalForm as string).trim(),
+    address: (obj.address as string).trim(),
+    enterpriseNumber: (obj.enterpriseNumber as string).trim(),
+    vatNumber: (obj.vatNumber as string).trim(),
+    vatRegime: obj.vatRegime !== undefined ? (obj.vatRegime as string).trim() : "",
+    publicationDirector: (obj.publicationDirector as string).trim(),
+    privacyContact: (obj.privacyContact as string).trim(),
+    hostingProvider: (obj.hostingProvider as string).trim(),
+    hostingAddress: (obj.hostingAddress as string).trim(),
+    phone: phoneTrim,
+    email: emailTrim,
+    instagramUrl: igTrim,
+    youtubeUrl: ytTrim,
+    isPublished: Boolean(obj.isPublished),
+  };
+}
+
+export function validateLegalSection(val: unknown, context: string): LegalSection {
+  const obj = assertObject(val, context);
+  assertExactKeys(obj, ["id", "title", "paragraphs", "listItems"], context);
+
+  if (typeof obj.id !== "string" || !obj.id.trim()) {
+    throw new ValidationError(`${context}.id doit être une chaîne non vide.`);
+  }
+
+  const title = validateLocalizedString(obj.title, `${context}.title`);
+
+  if (!Array.isArray(obj.paragraphs)) {
+    throw new ValidationError(`${context}.paragraphs doit être une liste.`);
+  }
+  const paragraphs = obj.paragraphs.map((p, i) =>
+    validateLocalizedString(p, `${context}.paragraphs[${i}]`)
+  );
+
+  let listItems: LocalizedString[] | undefined;
+  if (obj.listItems !== undefined) {
+    if (!Array.isArray(obj.listItems)) {
+      throw new ValidationError(`${context}.listItems doit être une liste.`);
+    }
+    listItems = obj.listItems.map((li, i) =>
+      validateLocalizedString(li, `${context}.listItems[${i}]`)
+    );
+  }
+
+  return {
+    id: (obj.id as string).trim(),
+    title,
+    paragraphs,
+    ...(listItems !== undefined ? { listItems } : {}),
+  };
+}
+
+export function validateCookieInventoryItem(val: unknown, context: string): CookieInventoryItem {
+  const obj = assertObject(val, context);
+  assertExactKeys(
+    obj,
+    ["id", "name", "provider", "category", "purpose", "duration", "exemptionJustification"],
+    context
+  );
+
+  if (typeof obj.id !== "string" || !obj.id.trim()) {
+    throw new ValidationError(`${context}.id doit être une chaîne non vide.`);
+  }
+
+  const name = validateLocalizedString(obj.name, `${context}.name`);
+  const provider = validateLocalizedString(obj.provider, `${context}.provider`);
+
+  if (obj.category !== "technical" && obj.category !== "preferences") {
+    throw new ValidationError(
+      `${context}.category doit être soit 'technical' soit 'preferences'.`
+    );
+  }
+
+  const purpose = validateLocalizedString(obj.purpose, `${context}.purpose`);
+  const duration = validateLocalizedString(obj.duration, `${context}.duration`);
+
+  let exemptionJustification: LocalizedString | undefined;
+  if (obj.exemptionJustification !== undefined) {
+    exemptionJustification = validateLocalizedString(
+      obj.exemptionJustification,
+      `${context}.exemptionJustification`
+    );
+  }
+
+  return {
+    id: (obj.id as string).trim(),
+    name,
+    provider,
+    category: obj.category,
+    purpose,
+    duration,
+    ...(exemptionJustification !== undefined ? { exemptionJustification } : {}),
+  };
+}
+
+export function validateLegalDocument(val: unknown, context: string): LegalDocument {
+  const obj = assertObject(val, context);
+  assertExactKeys(
+    obj,
+    ["seoTitle", "seoDescription", "publicTitle", "intro", "effectiveDate", "version", "sections", "inventory"],
+    context
+  );
+
+  const seoTitle = validateLocalizedString(obj.seoTitle, `${context}.seoTitle`);
+  const seoDescription = validateLocalizedString(obj.seoDescription, `${context}.seoDescription`);
+  const publicTitle = validateLocalizedString(obj.publicTitle, `${context}.publicTitle`);
+  const intro = validateLocalizedString(obj.intro, `${context}.intro`);
+
+  if (typeof obj.effectiveDate !== "string") {
+    throw new ValidationError(`${context}.effectiveDate doit être une chaîne.`);
+  }
+  if (typeof obj.version !== "number" || obj.version < 1) {
+    throw new ValidationError(`${context}.version doit être un entier positif.`);
+  }
+
+  if (!Array.isArray(obj.sections)) {
+    throw new ValidationError(`${context}.sections doit être une liste.`);
+  }
+
+  const sections = obj.sections.map((s, i) =>
+    validateLegalSection(s, `${context}.sections[${i}]`)
+  );
+
+  let inventory: CookieInventoryItem[] | undefined;
+  if (obj.inventory !== undefined) {
+    if (!Array.isArray(obj.inventory)) {
+      throw new ValidationError(`${context}.inventory doit être une liste.`);
+    }
+    inventory = obj.inventory.map((inv, i) =>
+      validateCookieInventoryItem(inv, `${context}.inventory[${i}]`)
+    );
+  }
+
+  return {
+    seoTitle,
+    seoDescription,
+    publicTitle,
+    intro,
+    effectiveDate: (obj.effectiveDate as string).trim(),
+    version: obj.version,
+    sections,
+    ...(inventory !== undefined ? { inventory } : {}),
+  };
+}
+
+export function validateLegalPageRecord(val: unknown, context: string): LegalPageRecord {
+  const obj = assertObject(val, context);
+  assertExactKeys(obj, ["draft", "published", "lastUpdated"], context);
+
+  const draft = validateLegalDocument(obj.draft, `${context}.draft`);
+  let published: LegalDocument | null = null;
+  if (obj.published !== null && obj.published !== undefined) {
+    published = validateLegalDocument(obj.published, `${context}.published`);
+  }
+
+  if (typeof obj.lastUpdated !== "string") {
+    throw new ValidationError(`${context}.lastUpdated doit être une chaîne ISO-8601.`);
+  }
+
+  return {
+    draft,
+    published,
+    lastUpdated: obj.lastUpdated,
+  };
+}
+
+export function validateLegalPagesContent(val: unknown): LegalPagesContent {
+  const obj = assertObject(val, "legalPages");
+  assertExactKeys(obj, ["mentions", "privacy", "terms", "cookies"], "legalPages");
+
+  return {
+    mentions: validateLegalPageRecord(obj.mentions, "legalPages.mentions"),
+    privacy: validateLegalPageRecord(obj.privacy, "legalPages.privacy"),
+    terms: validateLegalPageRecord(obj.terms, "legalPages.terms"),
+    cookies: validateLegalPageRecord(obj.cookies, "legalPages.cookies"),
+  };
+}
+
+export function migrateSiteContentV1ToV2(v1: SiteContentV1): SiteContentV2 {
   return {
     schemaVersion: 2,
     revision: v1.revision,
@@ -540,6 +816,28 @@ export function migrateSiteContentV1ToV2(v1: SiteContentV1): SiteContent {
     studio: structuredClone(v1.studio),
     contactPage: structuredClone(DEFAULT_CONTACT_PAGE_CONTENT),
     media: v1.media ? structuredClone(v1.media) : {},
+  };
+}
+
+export function migrateSiteContentV2ToV3(v2: SiteContentV2): SiteContent {
+  const company = structuredClone(DEFAULT_COMPANY_CONTENT);
+  if (v2.home?.contact?.email) company.email = v2.home.contact.email;
+  if (v2.contactPage?.card?.phone) company.phone = v2.contactPage.card.phone;
+  if (v2.home?.contact?.instagramUrl) company.instagramUrl = v2.home.contact.instagramUrl;
+  if (v2.home?.contact?.youtubeUrl) company.youtubeUrl = v2.home.contact.youtubeUrl;
+  if (v2.common?.brandName) company.tradeName = v2.common.brandName;
+
+  return {
+    schemaVersion: 3,
+    revision: v2.revision,
+    updatedAt: v2.updatedAt,
+    common: structuredClone(v2.common),
+    home: structuredClone(v2.home),
+    studio: structuredClone(v2.studio),
+    contactPage: structuredClone(v2.contactPage),
+    company,
+    legalPages: structuredClone(DEFAULT_LEGAL_PAGES_CONTENT),
+    media: v2.media ? structuredClone(v2.media) : {},
   };
 }
 
@@ -564,12 +862,14 @@ export function validateSiteContent(val: unknown): SiteContent {
     }
   }
 
-  if (obj.schemaVersion === 1) {
-    assertExactKeys(
-      obj,
-      ["schemaVersion", "revision", "updatedAt", "common", "home", "studio", "media"],
-      "siteContent"
-    );
+  const rawVersion = obj.schemaVersion === undefined ? 1 : obj.schemaVersion;
+
+  if (rawVersion === 1) {
+    const allowedKeys =
+      obj.schemaVersion !== undefined
+        ? ["schemaVersion", "revision", "updatedAt", "common", "home", "studio", "media"]
+        : ["revision", "updatedAt", "common", "home", "studio", "media"];
+    assertExactKeys(obj, allowedKeys, "siteContent");
     const v1Content: SiteContentV1 = {
       schemaVersion: 1,
       revision: obj.revision.toLowerCase(),
@@ -579,7 +879,8 @@ export function validateSiteContent(val: unknown): SiteContent {
       studio: validateStudioContent(obj.studio),
       media,
     };
-    return migrateSiteContentV1ToV2(v1Content);
+    const v2Content = migrateSiteContentV1ToV2(v1Content);
+    return migrateSiteContentV2ToV3(v2Content);
   }
 
   if (obj.schemaVersion === 2) {
@@ -588,7 +889,7 @@ export function validateSiteContent(val: unknown): SiteContent {
       ["schemaVersion", "revision", "updatedAt", "common", "home", "studio", "contactPage", "media"],
       "siteContent"
     );
-    return {
+    const v2Content: SiteContentV2 = {
       schemaVersion: 2,
       revision: obj.revision.toLowerCase(),
       updatedAt: obj.updatedAt,
@@ -598,9 +899,30 @@ export function validateSiteContent(val: unknown): SiteContent {
       contactPage: validateContactPageContent(obj.contactPage),
       media,
     };
+    return migrateSiteContentV2ToV3(v2Content);
   }
 
-  throw new ValidationError(`schemaVersion non supporté: ${String(obj.schemaVersion)}. Attendu: 1 ou 2`);
+  if (obj.schemaVersion === 3) {
+    assertExactKeys(
+      obj,
+      ["schemaVersion", "revision", "updatedAt", "common", "home", "studio", "contactPage", "company", "legalPages", "media"],
+      "siteContent"
+    );
+    return {
+      schemaVersion: 3,
+      revision: obj.revision.toLowerCase(),
+      updatedAt: obj.updatedAt,
+      common: validateCommonContent(obj.common),
+      home: validateHomeContent(obj.home),
+      studio: validateStudioContent(obj.studio),
+      contactPage: validateContactPageContent(obj.contactPage),
+      company: validateCompanyContent(obj.company),
+      legalPages: validateLegalPagesContent(obj.legalPages),
+      media,
+    };
+  }
+
+  throw new ValidationError(`schemaVersion non supporté: ${String(obj.schemaVersion)}. Attendu: 1, 2 ou 3`);
 }
 
 export function ensureSiteContentFileInitialized(): string {
@@ -618,11 +940,11 @@ export function getRawSiteContent(): { content: SiteContent; isCorrupted: boolea
     const content = fs.readFileSync(filePath, "utf-8");
     const parsed = JSON.parse(content);
     const validated = validateSiteContent(parsed);
-    if (parsed.schemaVersion === 1) {
+    if (parsed.schemaVersion === 1 || parsed.schemaVersion === 2) {
       try {
         atomicWriteJson(filePath, validated);
       } catch (writeErr) {
-        console.warn("Notice: Impossible d'écrire la migration V2 sur le disque:", writeErr);
+        console.warn("Notice: Impossible d'écrire la migration V3 sur le disque:", writeErr);
       }
     }
     return { content: validated, isCorrupted: false };
@@ -1001,17 +1323,341 @@ export function saveContactPageContent(
     }
   }
 
+  const updatedCompany = structuredClone(current.content.company);
+  updatedCompany.phone = validatedContact.card.phone;
+  if (canonicalCoordinates?.email) updatedCompany.email = canonicalCoordinates.email.trim();
+  if (canonicalCoordinates?.instagramUrl) updatedCompany.instagramUrl = canonicalCoordinates.instagramUrl.trim();
+  if (canonicalCoordinates?.youtubeUrl) updatedCompany.youtubeUrl = canonicalCoordinates.youtubeUrl.trim();
+
   const nextContent: SiteContent = {
     ...current.content,
-    schemaVersion: 2,
+    schemaVersion: 3,
     revision: nextRevision,
     updatedAt: new Date().toISOString(),
     home: updatedHome,
     contactPage: validatedContact,
+    company: updatedCompany,
     media: prunedMedia,
   };
 
   const filePath = getSiteContentFilePath();
   atomicWriteJson(filePath, nextContent);
   return nextRevision;
+}
+
+export function saveCompanyContent(
+  newCompany: CompanyContent,
+  previousRevision: string
+): string {
+  const current = getRawSiteContent();
+  if (current.isCorrupted) {
+    throw new CorruptedContentError();
+  }
+  if (current.content.revision !== previousRevision) {
+    throw new RevisionConflictError(undefined, current.content.revision);
+  }
+
+  const validatedCompany = validateCompanyContent(newCompany);
+
+  // Synchronize canonical coordinates
+  const updatedCommon = structuredClone(current.content.common);
+  if (validatedCompany.tradeName) {
+    updatedCommon.brandName = validatedCompany.tradeName;
+  }
+
+  const updatedHome = structuredClone(current.content.home);
+  if (validatedCompany.email) {
+    updatedHome.contact.email = validatedCompany.email;
+  }
+  if (validatedCompany.instagramUrl) {
+    updatedHome.contact.instagramUrl = validatedCompany.instagramUrl;
+  }
+  if (validatedCompany.youtubeUrl) {
+    updatedHome.contact.youtubeUrl = validatedCompany.youtubeUrl;
+  }
+
+  const updatedContactPage = structuredClone(current.content.contactPage);
+  if (validatedCompany.phone !== undefined) {
+    updatedContactPage.card.phone = validatedCompany.phone;
+  }
+
+  const nextRevision = crypto.randomBytes(16).toString("hex");
+
+  // Prune media registry to retain only currently active locations
+  const activeMediaIds = new Set<string>();
+  if (isUuid(updatedHome.showreel.coverImageId)) {
+    activeMediaIds.add(updatedHome.showreel.coverImageId.toLowerCase());
+  }
+  if (isUuid(updatedHome.duo.imageId)) {
+    activeMediaIds.add(updatedHome.duo.imageId.toLowerCase());
+  }
+  for (const member of current.content.studio.team.members) {
+    if (isUuid(member.imageId)) {
+      activeMediaIds.add(member.imageId.toLowerCase());
+    }
+  }
+
+  const prunedMedia: Record<string, UploadedMediaMetadata> = {};
+  for (const id of activeMediaIds) {
+    if (current.content.media?.[id]) {
+      prunedMedia[id] = current.content.media[id];
+    }
+  }
+
+  const nextContent: SiteContent = {
+    ...current.content,
+    schemaVersion: 3,
+    revision: nextRevision,
+    updatedAt: new Date().toISOString(),
+    common: updatedCommon,
+    home: updatedHome,
+    contactPage: updatedContactPage,
+    company: validatedCompany,
+    media: prunedMedia,
+  };
+
+  const filePath = getSiteContentFilePath();
+  atomicWriteJson(filePath, nextContent);
+  return nextRevision;
+}
+
+export function saveLegalPageDraft(
+  pageKey: LegalPageKey,
+  draft: LegalDocument,
+  previousRevision: string
+): string {
+  if (!LEGAL_PAGE_KEYS.includes(pageKey)) {
+    throw new ValidationError(`Clé de page légale invalide: '${String(pageKey)}'`);
+  }
+  const current = getRawSiteContent();
+  if (current.isCorrupted) {
+    throw new CorruptedContentError();
+  }
+  if (current.content.revision !== previousRevision) {
+    throw new RevisionConflictError(undefined, current.content.revision);
+  }
+
+  const validatedDraft = validateLegalDocument(draft, `legalPages.${pageKey}.draft`);
+
+  const nextRevision = crypto.randomBytes(16).toString("hex");
+  const updatedLegalPages = structuredClone(current.content.legalPages);
+  const now = new Date().toISOString();
+
+  updatedLegalPages[pageKey] = {
+    ...updatedLegalPages[pageKey],
+    draft: validatedDraft,
+    lastUpdated: now,
+  };
+
+  const nextContent: SiteContent = {
+    ...current.content,
+    schemaVersion: 3,
+    revision: nextRevision,
+    updatedAt: now,
+    legalPages: updatedLegalPages,
+  };
+
+  const filePath = getSiteContentFilePath();
+  atomicWriteJson(filePath, nextContent);
+  return nextRevision;
+}
+
+function containsUnresolvedPlaceholders(text: string): boolean {
+  const placeholderRegex = /\[(à compléter|to complete|date|nom|adresse|nom et adresse de l'hébergeur|ton prénom|your name)\]/i;
+  return placeholderRegex.test(text);
+}
+
+export function publishLegalPage(
+  pageKey: LegalPageKey,
+  previousRevision: string,
+  effectiveDateOverride?: string
+): string {
+  if (!LEGAL_PAGE_KEYS.includes(pageKey)) {
+    throw new ValidationError(`Clé de page légale invalide: '${String(pageKey)}'`);
+  }
+  const current = getRawSiteContent();
+  if (current.isCorrupted) {
+    throw new CorruptedContentError();
+  }
+  if (current.content.revision !== previousRevision) {
+    throw new RevisionConflictError(undefined, current.content.revision);
+  }
+
+  const pageRecord = current.content.legalPages[pageKey];
+  const draft = pageRecord.draft;
+
+  // Strict server-side validation for publication
+  if (!draft.seoTitle.fr?.trim() || !draft.seoTitle.en?.trim()) {
+    throw new ValidationError("Le titre SEO (FR et EN) est obligatoire pour publier.");
+  }
+  if (!draft.seoDescription.fr?.trim() || !draft.seoDescription.en?.trim()) {
+    throw new ValidationError("La description SEO (FR et EN) est obligatoire pour publier.");
+  }
+  if (!draft.publicTitle.fr?.trim() || !draft.publicTitle.en?.trim()) {
+    throw new ValidationError("Le titre public (FR et EN) est obligatoire pour publier.");
+  }
+  if (!draft.intro.fr?.trim() || !draft.intro.en?.trim()) {
+    throw new ValidationError("L'introduction (FR et EN) est obligatoire pour publier.");
+  }
+
+  const effectiveDate = (effectiveDateOverride?.trim() || draft.effectiveDate?.trim() || "").trim();
+  if (!effectiveDate) {
+    throw new ValidationError("Une date d'entrée en vigueur est obligatoire pour publier le document.");
+  }
+
+  if (draft.sections.length === 0) {
+    throw new ValidationError("Au moins une section de contenu est requise pour publier.");
+  }
+
+  const sectionIds = new Set<string>();
+  for (const [idx, s] of draft.sections.entries()) {
+    if (sectionIds.has(s.id)) {
+      throw new ValidationError(`Identifiant de section dupliqué: '${s.id}'.`);
+    }
+    sectionIds.add(s.id);
+
+    if (!s.title.fr?.trim() || !s.title.en?.trim()) {
+      throw new ValidationError(`La section #${idx + 1} ('${s.id}') manque d'un titre FR ou EN.`);
+    }
+
+    if (containsUnresolvedPlaceholders(s.title.fr) || containsUnresolvedPlaceholders(s.title.en)) {
+      throw new ValidationError(`La section '${s.id}' contient des mentions non complétées (placeholders).`);
+    }
+
+    if (!Array.isArray(s.paragraphs) || s.paragraphs.length === 0) {
+      throw new ValidationError(`La section '${s.id}' doit contenir au moins un paragraphe.`);
+    }
+
+    for (const [pIdx, p] of s.paragraphs.entries()) {
+      if (!p.fr?.trim() || !p.en?.trim()) {
+        throw new ValidationError(`Le paragraphe #${pIdx + 1} de la section '${s.id}' est vide.`);
+      }
+      if (containsUnresolvedPlaceholders(p.fr) || containsUnresolvedPlaceholders(p.en)) {
+        throw new ValidationError(`Le paragraphe #${pIdx + 1} de la section '${s.id}' contient des mentions non complétées.`);
+      }
+    }
+
+    for (const li of s.listItems || []) {
+      if (containsUnresolvedPlaceholders(li.fr) || containsUnresolvedPlaceholders(li.en)) {
+        throw new ValidationError(`Un élément de liste de la section '${s.id}' contient des mentions non complétées.`);
+      }
+    }
+  }
+
+  if (pageKey === "cookies") {
+    if (!draft.inventory || draft.inventory.length === 0) {
+      throw new ValidationError("La politique cookies requiert un inventaire technique documenté pour publication.");
+    }
+    const cookieIds = new Set<string>();
+    for (const c of draft.inventory) {
+      if (cookieIds.has(c.id)) {
+        throw new ValidationError(`Identifiant de cookie dupliqué dans l'inventaire: '${c.id}'.`);
+      }
+      cookieIds.add(c.id);
+    }
+  }
+
+  if (pageKey === "mentions") {
+    const comp = current.content.company;
+    if (!comp.legalName || !comp.address || !comp.enterpriseNumber || !comp.hostingProvider) {
+      throw new ValidationError(
+        "Les mentions d'entreprise indispensables (dénomination, adresse, BCE, hébergeur) doivent être renseignées dans les paramètres d'entreprise avant de publier les mentions légales."
+      );
+    }
+  }
+
+  const nextVersion = pageRecord.published ? pageRecord.published.version + 1 : 1;
+  const now = new Date().toISOString();
+
+  const publishedDoc: LegalDocument = {
+    ...structuredClone(draft),
+    effectiveDate,
+    version: nextVersion,
+  };
+
+  const nextRevision = crypto.randomBytes(16).toString("hex");
+  const updatedLegalPages = structuredClone(current.content.legalPages);
+
+  updatedLegalPages[pageKey] = {
+    draft: { ...structuredClone(draft), effectiveDate, version: nextVersion },
+    published: publishedDoc,
+    lastUpdated: now,
+  };
+
+  const nextContent: SiteContent = {
+    ...current.content,
+    schemaVersion: 3,
+    revision: nextRevision,
+    updatedAt: now,
+    legalPages: updatedLegalPages,
+  };
+
+  const filePath = getSiteContentFilePath();
+  atomicWriteJson(filePath, nextContent);
+  return nextRevision;
+}
+
+export function unpublishLegalPage(
+  pageKey: LegalPageKey,
+  previousRevision: string
+): string {
+  if (!LEGAL_PAGE_KEYS.includes(pageKey)) {
+    throw new ValidationError(`Clé de page légale invalide: '${String(pageKey)}'`);
+  }
+  const current = getRawSiteContent();
+  if (current.isCorrupted) {
+    throw new CorruptedContentError();
+  }
+  if (current.content.revision !== previousRevision) {
+    throw new RevisionConflictError(undefined, current.content.revision);
+  }
+
+  const nextRevision = crypto.randomBytes(16).toString("hex");
+  const updatedLegalPages = structuredClone(current.content.legalPages);
+  const now = new Date().toISOString();
+
+  updatedLegalPages[pageKey] = {
+    ...updatedLegalPages[pageKey],
+    published: null,
+    lastUpdated: now,
+  };
+
+  const nextContent: SiteContent = {
+    ...current.content,
+    schemaVersion: 3,
+    revision: nextRevision,
+    updatedAt: now,
+    legalPages: updatedLegalPages,
+  };
+
+  const filePath = getSiteContentFilePath();
+  atomicWriteJson(filePath, nextContent);
+  return nextRevision;
+}
+
+export function getPublicLegalDocument(pageKey: LegalPageKey): LegalDocument | null {
+  if (!LEGAL_PAGE_KEYS.includes(pageKey)) return null;
+  const content = getSiteContent();
+  return content.legalPages?.[pageKey]?.published ?? null;
+}
+
+export function getPublicCompanyContent(): Partial<CompanyContent> {
+  const content = getSiteContent();
+  const c = content.company;
+  if (!c) return {};
+
+  if (c.isPublished) {
+    return structuredClone(c);
+  }
+
+  // If not confirmed for public publication, only return public-facing brand coordinates
+  return {
+    tradeName: c.tradeName,
+    email: c.email,
+    phone: c.phone,
+    instagramUrl: c.instagramUrl,
+    youtubeUrl: c.youtubeUrl,
+    publicationDirector: c.publicationDirector,
+    isPublished: false,
+  };
 }

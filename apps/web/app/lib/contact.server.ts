@@ -14,7 +14,12 @@ import {
   type ContactClaimAcquireResult,
 } from "./rate-limit.server";
 import { getSiteContent } from "./site-content.server";
-import { type SiteContent, DEFAULT_CONTACT_PAGE_MESSAGES } from "./site-content.shared";
+import {
+  type CommonContent,
+  type ContactPageContent,
+  type SiteContent,
+  DEFAULT_CONTACT_PAGE_MESSAGES,
+} from "./site-content.shared";
 import { sendContactEmail, getSmtpDiagnostic, SmtpConfigError, SmtpDeliveryError } from "./mailer.server";
 
 const FLASH_COOKIE_NAME = "__parallax_contact_flash";
@@ -25,7 +30,17 @@ const MAX_BODY_BYTES = 64 * 1024; // 64 KiB
 
 export interface ContactLoaderData {
   lang: "fr" | "en";
-  content: SiteContent;
+  content: {
+    common: CommonContent;
+    contactPage: ContactPageContent;
+    home: {
+      contact: {
+        email: string;
+        instagramUrl: string;
+        youtubeUrl: string;
+      };
+    };
+  };
   token: string;
   prefillType: string;
   flashSuccess: boolean;
@@ -365,7 +380,17 @@ export async function handleContactLoader(args: LoaderFunctionArgs, forcedLang?:
   return data<ContactLoaderData>(
     {
       lang,
-      content,
+      content: {
+        common: content.common,
+        contactPage: content.contactPage,
+        home: {
+          contact: {
+            email: content.home.contact.email,
+            instagramUrl: content.home.contact.instagramUrl,
+            youtubeUrl: content.home.contact.youtubeUrl,
+          },
+        },
+      },
       token,
       prefillType,
       flashSuccess: hasFlash,
