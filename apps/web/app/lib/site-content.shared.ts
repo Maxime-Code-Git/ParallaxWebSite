@@ -219,6 +219,21 @@ export interface ContactPageContent {
     successMessage: LocalizedString;
     unavailableMessage: LocalizedString;
     genericError: LocalizedString;
+    errorSummary?: LocalizedString;
+    nameRequired?: LocalizedString;
+    nameTooLong?: LocalizedString;
+    emailRequired?: LocalizedString;
+    emailInvalid?: LocalizedString;
+    phoneInvalid?: LocalizedString;
+    timelineInvalid?: LocalizedString;
+    typeRequired?: LocalizedString;
+    messageRequired?: LocalizedString;
+    messageTooLong?: LocalizedString;
+    sessionExpired?: LocalizedString;
+    rateLimit?: LocalizedString;
+    inProgress?: LocalizedString;
+    uncertain?: LocalizedString;
+    conflict?: LocalizedString;
   };
 }
 
@@ -249,6 +264,85 @@ export const DEFAULT_PROJECT_TYPES: readonly ProjectTypeOption[] = [
     label: { fr: "Autre", en: "Other" },
   },
 ] as const;
+
+export const DEFAULT_CONTACT_PAGE_MESSAGES = {
+  successTitle: {
+    fr: "Message envoyé avec succès",
+    en: "Message sent successfully",
+  },
+  successMessage: {
+    fr: "Merci pour votre message. Nous reviendrons vers vous dans les meilleurs délais.",
+    en: "Thank you for your message. We will get back to you as soon as possible.",
+  },
+  unavailableMessage: {
+    fr: "Le formulaire de contact est temporairement indisponible. Veuillez nous écrire directement par e-mail.",
+    en: "The contact form is temporarily unavailable. Please write to us directly by email.",
+  },
+  genericError: {
+    fr: "Une erreur est survenue lors de l'envoi de votre message. Veuillez vérifier vos informations et réessayer.",
+    en: "An error occurred while sending your message. Please check your information and try again.",
+  },
+  errorSummary: {
+    fr: "Veuillez corriger les erreurs ci-dessous.",
+    en: "Please correct the errors below.",
+  },
+  nameRequired: {
+    fr: "Le nom ou la raison sociale est obligatoire.",
+    en: "Name or company is required.",
+  },
+  nameTooLong: {
+    fr: "Le nom ne doit pas dépasser 120 caractères.",
+    en: "Name cannot exceed 120 characters.",
+  },
+  emailRequired: {
+    fr: "L'adresse email est obligatoire.",
+    en: "Email address is required.",
+  },
+  emailInvalid: {
+    fr: "L'adresse email est invalide.",
+    en: "Email address is invalid.",
+  },
+  phoneInvalid: {
+    fr: "Le format du numéro de téléphone est invalide.",
+    en: "Phone number format is invalid.",
+  },
+  timelineInvalid: {
+    fr: "L'échéance ne doit pas dépasser 100 caractères.",
+    en: "Timeline cannot exceed 100 characters.",
+  },
+  typeRequired: {
+    fr: "Veuillez sélectionner un type de projet valide.",
+    en: "Please select a valid project type.",
+  },
+  messageRequired: {
+    fr: "Le message est obligatoire.",
+    en: "Message is required.",
+  },
+  messageTooLong: {
+    fr: "Le message ne doit pas dépasser 5 000 caractères.",
+    en: "Message cannot exceed 5,000 characters.",
+  },
+  sessionExpired: {
+    fr: "Votre session de formulaire a expiré ou n'est plus valide. Veuillez recharger la page.",
+    en: "Your form session has expired or is invalid. Please reload the page.",
+  },
+  rateLimit: {
+    fr: "Trop de tentatives. Veuillez réessayer dans {seconds} secondes.",
+    en: "Too many attempts. Please try again in {seconds} seconds.",
+  },
+  inProgress: {
+    fr: "Un envoi identique est déjà en cours de traitement. Veuillez patienter.",
+    en: "A matching submission is already being processed. Please wait.",
+  },
+  uncertain: {
+    fr: "Le statut de transmission de votre message n'a pas pu être confirmé en raison d'un délai de communication. Pour éviter tout doublon, veuillez patienter quelques instants avant de renouveler votre demande.",
+    en: "The transmission status of your message could not be confirmed due to a connection timeout. To prevent duplicates, please wait a moment before trying again.",
+  },
+  conflict: {
+    fr: "Ce jeton de formulaire a déjà été utilisé avec un contenu différent. Veuillez rafraîchir la page pour une nouvelle soumission.",
+    en: "This form session was already submitted with different content. Please refresh the page to submit a new message.",
+  },
+} as const;
 
 export const DEFAULT_CONTACT_PAGE_CONTENT: ContactPageContent = {
   seo: {
@@ -304,22 +398,7 @@ export const DEFAULT_CONTACT_PAGE_CONTENT: ContactPageContent = {
     },
   },
   messages: {
-    successTitle: {
-      fr: "Message envoyé avec succès",
-      en: "Message sent successfully",
-    },
-    successMessage: {
-      fr: "Merci pour votre message. Nous reviendrons vers vous dans les meilleurs délais.",
-      en: "Thank you for your message. We will get back to you as soon as possible.",
-    },
-    unavailableMessage: {
-      fr: "Le formulaire de contact est temporairement indisponible. Veuillez nous écrire directement par e-mail.",
-      en: "The contact form is temporarily unavailable. Please write to us directly by email.",
-    },
-    genericError: {
-      fr: "Une erreur est survenue lors de l'envoi de votre message. Veuillez vérifier vos informations et réessayer.",
-      en: "An error occurred while sending your message. Please check your information and try again.",
-    },
+    ...DEFAULT_CONTACT_PAGE_MESSAGES,
   },
 };
 

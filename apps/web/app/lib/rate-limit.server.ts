@@ -163,8 +163,11 @@ function initDb(): DatabaseSync {
         content_hash TEXT NOT NULL DEFAULT '',
         status TEXT NOT NULL,
         created_at INTEGER NOT NULL,
-        expires_at INTEGER NOT NULL
+        lease_expires_at INTEGER NOT NULL DEFAULT 0,
+        retention_expires_at INTEGER NOT NULL DEFAULT 0,
+        expires_at INTEGER NOT NULL DEFAULT 0
       );
+      CREATE INDEX IF NOT EXISTS idx_contact_claims_retention ON contact_claims(retention_expires_at);
       CREATE INDEX IF NOT EXISTS idx_contact_claims_expires ON contact_claims(expires_at);
     `);
 
@@ -176,6 +179,12 @@ function initDb(): DatabaseSync {
       }
       if (!colNames.has("content_hash")) {
         localDb.exec("ALTER TABLE contact_claims ADD COLUMN content_hash TEXT NOT NULL DEFAULT ''");
+      }
+      if (!colNames.has("lease_expires_at")) {
+        localDb.exec("ALTER TABLE contact_claims ADD COLUMN lease_expires_at INTEGER NOT NULL DEFAULT 0");
+      }
+      if (!colNames.has("retention_expires_at")) {
+        localDb.exec("ALTER TABLE contact_claims ADD COLUMN retention_expires_at INTEGER NOT NULL DEFAULT 0");
       }
     } catch {
       // Ignored
@@ -319,20 +328,30 @@ export function acquireContactClaim(
 
   const now = Date.now();
   const leaseExpiresAt = now + leaseDurationMs;
+  const retentionExpiresAt = Math.max(now + 60_000, tokenExpiresAt + 60_000);
 
   try {
     database.exec("BEGIN EXCLUSIVE TRANSACTION");
     try {
-      // 1. Purge expired claims (records whose expires_at is strictly in the past)
-      const purgeStmt = database.prepare("DELETE FROM contact_claims WHERE expires_at < ?");
-      purgeStmt.run(now);
+      // 1. Purge claims whose full retention window is strictly in the past
+      const purgeStmt = database.prepare(
+        "DELETE FROM contact_claims WHERE (retention_expires_at > 0 AND retention_expires_at < ?) OR (retention_expires_at = 0 AND expires_at < ?)"
+      );
+      purgeStmt.run(now, now);
 
       // 2. Check existing claim for this tokenHash
       const selectStmt = database.prepare(
-        "SELECT claim_id, content_hash, status, expires_at FROM contact_claims WHERE token_hash = ?"
+        "SELECT claim_id, content_hash, status, lease_expires_at, retention_expires_at, expires_at FROM contact_claims WHERE token_hash = ?"
       );
       const existing = selectStmt.get(tokenHash) as
-        | { claim_id: string; content_hash: string; status: string; expires_at: number }
+        | {
+            claim_id: string;
+            content_hash: string;
+            status: string;
+            lease_expires_at: number;
+            retention_expires_at: number;
+            expires_at: number;
+          }
         | undefined;
 
       if (existing) {
@@ -353,26 +372,38 @@ export function acquireContactClaim(
         }
 
         if (existing.status === "in_progress") {
-          if (existing.expires_at > now) {
+          const effectiveLeaseExpires =
+            existing.lease_expires_at > 0 ? existing.lease_expires_at : existing.expires_at;
+          if (effectiveLeaseExpires > now) {
             database.exec("COMMIT");
             return { status: "in_progress" };
           }
-          // The previous lease expired (worker died/timed out)
-          const newClaimId = crypto.randomUUID();
+          // The previous lease expired without resolution (transport hung, crash, or persistence failure).
+          // Transition to 'uncertain' so no duplicate email is blindly sent.
           const updateStmt = database.prepare(
-            "UPDATE contact_claims SET claim_id = ?, content_hash = ?, status = 'in_progress', created_at = ?, expires_at = ? WHERE token_hash = ? AND claim_id = ?"
+            "UPDATE contact_claims SET status = 'uncertain' WHERE token_hash = ? AND status = 'in_progress'"
           );
-          updateStmt.run(newClaimId, contentHash, now, leaseExpiresAt, tokenHash, existing.claim_id);
+          updateStmt.run(tokenHash);
           database.exec("COMMIT");
-          return { status: "acquired", claimId: newClaimId };
+          return { status: "uncertain" };
         }
 
         if (existing.status === "failed") {
+          // A previous attempt failed definitely (e.g. SMTP config / auth failure).
+          // Allow retry by acquiring a new claim with new claim_id.
           const newClaimId = crypto.randomUUID();
           const updateStmt = database.prepare(
-            "UPDATE contact_claims SET claim_id = ?, content_hash = ?, status = 'in_progress', created_at = ?, expires_at = ? WHERE token_hash = ?"
+            "UPDATE contact_claims SET claim_id = ?, content_hash = ?, status = 'in_progress', created_at = ?, lease_expires_at = ?, retention_expires_at = ?, expires_at = ? WHERE token_hash = ?"
           );
-          updateStmt.run(newClaimId, contentHash, now, leaseExpiresAt, tokenHash);
+          updateStmt.run(
+            newClaimId,
+            contentHash,
+            now,
+            leaseExpiresAt,
+            retentionExpiresAt,
+            retentionExpiresAt,
+            tokenHash
+          );
           database.exec("COMMIT");
           return { status: "acquired", claimId: newClaimId };
         }
@@ -381,9 +412,17 @@ export function acquireContactClaim(
       // 3. Insert new claim
       const newClaimId = crypto.randomUUID();
       const insertStmt = database.prepare(
-        "INSERT INTO contact_claims (token_hash, claim_id, content_hash, status, created_at, expires_at) VALUES (?, ?, ?, 'in_progress', ?, ?)"
+        "INSERT INTO contact_claims (token_hash, claim_id, content_hash, status, created_at, lease_expires_at, retention_expires_at, expires_at) VALUES (?, ?, ?, 'in_progress', ?, ?, ?, ?)"
       );
-      insertStmt.run(tokenHash, newClaimId, contentHash, now, leaseExpiresAt);
+      insertStmt.run(
+        tokenHash,
+        newClaimId,
+        contentHash,
+        now,
+        leaseExpiresAt,
+        retentionExpiresAt,
+        retentionExpiresAt
+      );
 
       database.exec("COMMIT");
       return { status: "acquired", claimId: newClaimId };
@@ -406,9 +445,9 @@ export function completeContactClaim(tokenHash: string, claimId: string, tokenEx
     const database = initDb();
     const receiptExpiresAt = Math.max(Date.now() + 60_000, tokenExpiresAt + 60_000);
     const stmt = database.prepare(
-      "UPDATE contact_claims SET status = 'completed', expires_at = ? WHERE token_hash = ? AND claim_id = ?"
+      "UPDATE contact_claims SET status = 'completed', retention_expires_at = ?, expires_at = ? WHERE token_hash = ? AND claim_id = ?"
     );
-    const info = stmt.run(receiptExpiresAt, tokenHash, claimId);
+    const info = stmt.run(receiptExpiresAt, receiptExpiresAt, tokenHash, claimId);
     if (info.changes === 0) {
       throw new RateLimitStorageError("Perte du bail ou expiration du claim lors de la finalisation");
     }
@@ -423,9 +462,9 @@ export function markUncertainContactClaim(tokenHash: string, claimId: string, to
     const database = initDb();
     const receiptExpiresAt = Math.max(Date.now() + 60_000, tokenExpiresAt + 60_000);
     const stmt = database.prepare(
-      "UPDATE contact_claims SET status = 'uncertain', expires_at = ? WHERE token_hash = ? AND claim_id = ?"
+      "UPDATE contact_claims SET status = 'uncertain', retention_expires_at = ?, expires_at = ? WHERE token_hash = ? AND claim_id = ?"
     );
-    const info = stmt.run(receiptExpiresAt, tokenHash, claimId);
+    const info = stmt.run(receiptExpiresAt, receiptExpiresAt, tokenHash, claimId);
     if (info.changes === 0) {
       throw new RateLimitStorageError("Perte du bail ou expiration du claim lors de la mise en incertitude");
     }

@@ -11,8 +11,15 @@ import {
   createContactFlashCookie,
   readAndClearContactFlash,
   createContactContextCookie,
+  computeFormContentHash,
 } from "../app/lib/contact.server";
-import { closeRateLimitDatabase } from "../app/lib/rate-limit.server";
+import {
+  closeRateLimitDatabase,
+  acquireContactClaim,
+  completeContactClaim,
+  failContactClaim,
+  RateLimitStorageError,
+} from "../app/lib/rate-limit.server";
 import { getSiteContent } from "../app/lib/site-content.server";
 import * as mailerModule from "../app/lib/mailer.server";
 
@@ -461,7 +468,7 @@ describe("Contact Server & Security Pipeline", () => {
       expect(res2.status).toBe(504);
       const json2 = await res2.json();
       expect(json2.ok).toBe(false);
-      expect(json2.error).toContain("incertain");
+      expect(json2.error).toContain("pas pu être confirmé");
       expect(sendSpy).not.toHaveBeenCalled();
     });
 
@@ -510,6 +517,241 @@ describe("Contact Server & Security Pipeline", () => {
       const json = await res.json();
       expect(json.ok).toBe(false);
       expect(json.error).toContain("temporairement indisponible");
+    });
+
+    it("distinguishes ambiguous colon vectors and rejects Vector B with 409 without calling mailer", async () => {
+      // Exact vectors from residual specification
+      const vectorA = {
+        lang: "fr",
+        name: "Synthetic Visitor",
+        email: "visitor@example.test",
+        phone: "",
+        timeline: "Juin",
+        type: "other",
+        message: "documentary:Second message",
+      };
+      const vectorB = {
+        lang: "fr",
+        name: "Synthetic Visitor",
+        email: "visitor@example.test",
+        phone: "",
+        timeline: "Juin:other",
+        type: "documentary",
+        message: "Second message",
+      };
+
+      // 1. Direct hash verification: canonical representation ensures distinct hashes
+      const hashA = computeFormContentHash(vectorA);
+      const hashB = computeFormContentHash(vectorB);
+      expect(hashA).not.toBe(hashB);
+
+      // Verify safe handling of newlines, colons and double-quotes
+      const vectorWithSeparators = {
+        ...vectorA,
+        message: "Line 1\r\nLine 2\nLine 3:with:colons and \"quotes\"",
+      };
+      const hashSeparators = computeFormContentHash(vectorWithSeparators);
+      expect(hashSeparators).not.toBe(hashA);
+      expect(hashSeparators).not.toBe(hashB);
+
+      // 2. Integration via actions:
+      const sendSpy = vi.spyOn(mailerModule, "sendContactEmail").mockResolvedValue(undefined);
+
+      const bodyA = {
+        name: vectorA.name,
+        email: vectorA.email,
+        phone: vectorA.phone,
+        timeline: vectorA.timeline,
+        type: vectorA.type,
+        message: vectorA.message,
+      };
+      const bodyB = {
+        name: vectorB.name,
+        email: vectorB.email,
+        phone: vectorB.phone,
+        timeline: vectorB.timeline,
+        type: vectorB.type,
+        message: vectorB.message,
+      };
+
+      // Submission A succeeds
+      const { req: reqA, token, cookieVal } = createPostRequest(bodyA);
+      const resA = await handleContactAction(createRouteArgs(reqA));
+      expect(resA.status).toBe(303);
+      expect(sendSpy).toHaveBeenCalledTimes(1);
+
+      // Submission B with SAME token and context cookie:
+      // must NOT receive confirmation of A, must return 409 Conflict with preserved B values and NO 2nd mailer call
+      const { req: reqB } = createPostRequest(bodyB, { token, cookieVal });
+      const resB = await handleContactAction(createRouteArgs(reqB));
+      expect(resB.status).toBe(409);
+      const jsonB = await resB.json();
+      expect(jsonB.ok).toBe(false);
+      expect(jsonB.values.timeline).toBe("Juin:other");
+      expect(jsonB.values.type).toBe("documentary");
+      expect(jsonB.values.message).toBe("Second message");
+      expect(sendSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("handles pending SMTP promise past lease expiry: second request returns 504 and mailer is called only once", async () => {
+      const { req: req1, token, cookieVal } = createPostRequest();
+      let resolveSmtp!: () => void;
+      const smtpPromise = new Promise<void>((resolve) => {
+        resolveSmtp = resolve;
+      });
+
+      const sendSpy = vi.spyOn(mailerModule, "sendContactEmail").mockImplementation(async () => {
+        await smtpPromise;
+      });
+
+      // 1. Req 1 takes claim and begins awaiting SMTP transport
+      const req1Promise = handleContactAction(createRouteArgs(req1));
+      await new Promise((r) => setTimeout(r, 40));
+      expect(sendSpy).toHaveBeenCalledTimes(1);
+
+      // 2. Clock advances past 60s lease (61s)
+      const baseNow = Date.now();
+      const dateSpy = vi.spyOn(Date, "now").mockReturnValue(baseNow + 61_000);
+
+      // 3. Same request replayed while 1st is still pending
+      const { req: req2 } = createPostRequest({}, { token, cookieVal });
+      const res2 = await handleContactAction(createRouteArgs(req2));
+      expect(res2.status).toBe(504);
+      const json2 = await res2.json();
+      expect(json2.ok).toBe(false);
+      // Still only 1 call to mailer!
+      expect(sendSpy).toHaveBeenCalledTimes(1);
+
+      // 4. Req 1 resolves
+      dateSpy.mockRestore();
+      resolveSmtp();
+      const res1 = await req1Promise;
+      expect(res1.status).toBe(303);
+      expect(sendSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("prevents replay after SMTP success and persistence failure at both 61s and 121s", async () => {
+      const { req: req1, token, cookieVal } = createPostRequest();
+      const sendSpy = vi.spyOn(mailerModule, "sendContactEmail").mockResolvedValue(undefined);
+      vi.spyOn(console, "error").mockImplementation(() => {});
+
+      const rateLimitModule = await import("../app/lib/rate-limit.server");
+      vi.spyOn(rateLimitModule, "completeContactClaim").mockImplementationOnce(() => {
+        throw new Error("Simulated SQLite write lock timeout");
+      });
+
+      // Req 1 succeeds at SMTP level, fails persistence, returns 303 PRG
+      const res1 = await handleContactAction(createRouteArgs(req1));
+      expect(res1.status).toBe(303);
+      expect(sendSpy).toHaveBeenCalledTimes(1);
+
+      const baseNow = Date.now();
+
+      // Replay after 61s
+      let dateSpy = vi.spyOn(Date, "now").mockReturnValue(baseNow + 61_000);
+      const { req: req2 } = createPostRequest({}, { token, cookieVal });
+      const res2 = await handleContactAction(createRouteArgs(req2));
+      expect(res2.status).toBe(504); // Transitioned to uncertain, NO rearm
+      expect(sendSpy).toHaveBeenCalledTimes(1);
+      dateSpy.mockRestore();
+
+      // Replay after 121s
+      dateSpy = vi.spyOn(Date, "now").mockReturnValue(baseNow + 121_000);
+      const { req: req3 } = createPostRequest({}, { token, cookieVal });
+      const res3 = await handleContactAction(createRouteArgs(req3));
+      expect(res3.status).toBe(504); // Still uncertain
+      expect(sendSpy).toHaveBeenCalledTimes(1);
+      dateSpy.mockRestore();
+    });
+
+    it("handles recovery after SQLite close/reopen with expired in-progress claim safely", async () => {
+      const tokenHash = "dummy-token-hash-1234567890abcdef";
+      const contentHash = "dummy-content-hash-abcdef1234567890";
+      const now = Date.now();
+
+      // Acquire initial claim
+      const initial = acquireContactClaim(tokenHash, contentHash, now + 3600_000);
+      expect(initial.status).toBe("acquired");
+
+      // Simulate process crash / database close and clock advance by 65s
+      closeRateLimitDatabase();
+
+      const dateSpy = vi.spyOn(Date, "now").mockReturnValue(now + 65_000);
+
+      // Reopen and try to acquire again with same token & content
+      const reopenResult = acquireContactClaim(tokenHash, contentHash, now + 3600_000);
+      expect(reopenResult.status).toBe("uncertain");
+
+      dateSpy.mockRestore();
+    });
+
+    it("prevents previous owner from modifying or completing a superseded claim", () => {
+      const tokenHash = "token-ownership-test-1234";
+      const contentHash = "content-ownership-test-1234";
+      const now = Date.now();
+
+      // 1. Initial claim
+      const claim1 = acquireContactClaim(tokenHash, contentHash, now + 3600_000);
+      expect(claim1.status).toBe("acquired");
+      if (claim1.status !== "acquired") throw new Error("Expected claim1 to be acquired");
+      const oldClaimId = claim1.claimId;
+
+      // 2. Definite failure occurs, transitioning to 'failed'
+      failContactClaim(tokenHash, oldClaimId);
+
+      // 3. New attempt acquires claim with a new claim_id
+      const claim2 = acquireContactClaim(tokenHash, contentHash, now + 3600_000);
+      expect(claim2.status).toBe("acquired");
+      if (claim2.status !== "acquired") throw new Error("Expected claim2 to be acquired");
+      expect(claim2.claimId).not.toBe(oldClaimId);
+
+      // 4. Old owner attempts to complete or fail the claim using old claim_id
+      expect(() => {
+        completeContactClaim(tokenHash, oldClaimId, now + 3600_000);
+      }).toThrow(RateLimitStorageError);
+
+      // Old owner fail attempt does not alter new owner's active status
+      failContactClaim(tokenHash, oldClaimId);
+
+      // 5. New owner completes successfully
+      expect(() => {
+        completeContactClaim(tokenHash, claim2.claimId!, now + 3600_000);
+      }).not.toThrow();
+    });
+
+    it("reflects custom validation, rate limit and session messages edited from admin without leaking spam traps", async () => {
+      // Initialize site content
+      const content = getSiteContent();
+      content.contactPage.messages.nameRequired = {
+        fr: "Veuillez préciser votre nom ou structure (sur mesure).",
+        en: "Please specify your name or organization (custom).",
+      };
+      content.contactPage.messages.rateLimit = {
+        fr: "Vitesse excessive ! Veuillez attendre {seconds} secondes.",
+        en: "Too fast! Please wait {seconds} seconds.",
+      };
+      content.contactPage.messages.sessionExpired = {
+        fr: "Formulaire expiré. Rechargez la page.",
+        en: "Form expired. Reload the page.",
+      };
+      fs.writeFileSync(testContentFile, JSON.stringify(content, null, 2));
+
+      // 1. Missing name returns custom message
+      const { req: reqNoName } = createPostRequest({ name: "" });
+      const resNoName = await handleContactAction(createRouteArgs(reqNoName));
+      expect(resNoName.status).toBe(400);
+      const jsonNoName = await resNoName.json();
+      expect(jsonNoName.fieldErrors.name).toBe("Veuillez préciser votre nom ou structure (sur mesure).");
+
+      // 2. Honeypot submission returns neutral custom sessionExpired message without leaking honeypot mechanism
+      const { req: reqBot } = createPostRequest({ website: "https://spam.test" });
+      const resBot = await handleContactAction(createRouteArgs(reqBot));
+      expect(resBot.status).toBe(400);
+      const jsonBot = await resBot.json();
+      expect(jsonBot.error).toBe("Formulaire expiré. Rechargez la page.");
+      expect(JSON.stringify(jsonBot)).not.toContain("honeypot");
+      expect(JSON.stringify(jsonBot)).not.toContain("bot");
+      expect(JSON.stringify(jsonBot)).not.toContain("piège");
     });
   });
 });

@@ -14,7 +14,7 @@ import {
   type ContactClaimAcquireResult,
 } from "./rate-limit.server";
 import { getSiteContent } from "./site-content.server";
-import type { SiteContent } from "./site-content.shared";
+import { type SiteContent, DEFAULT_CONTACT_PAGE_MESSAGES } from "./site-content.shared";
 import { sendContactEmail, getSmtpDiagnostic, SmtpConfigError, SmtpDeliveryError } from "./mailer.server";
 
 const FLASH_COOKIE_NAME = "__parallax_contact_flash";
@@ -29,6 +29,7 @@ export interface ContactLoaderData {
   token: string;
   prefillType: string;
   flashSuccess: boolean;
+  flashSuccessId?: string | null;
   smtpAvailable: boolean;
 }
 
@@ -215,6 +216,22 @@ export function verifyContactToken(
   return { valid: true, contextId: tokenContextId, issuedAt, expiresAt: issuedAt + maxAgeMs };
 }
 
+export function getContactMessage(
+  content: SiteContent,
+  key: keyof typeof DEFAULT_CONTACT_PAGE_MESSAGES,
+  lang: "fr" | "en",
+  params?: Record<string, string | number>
+): string {
+  const custom = content.contactPage?.messages?.[key]?.[lang]?.trim();
+  let text = custom || DEFAULT_CONTACT_PAGE_MESSAGES[key][lang];
+  if (params) {
+    for (const [k, v] of Object.entries(params)) {
+      text = text.replace(new RegExp(`\\{${k}\\}`, "g"), String(v));
+    }
+  }
+  return text;
+}
+
 export function computeFormContentHash(
   params: {
     lang: string;
@@ -227,16 +244,18 @@ export function computeFormContentHash(
   },
   secret = ENV.RATE_LIMIT_SECRET
 ): string {
-  const normalized = [
-    params.lang,
+  const canonicalArray = [
+    "v2",
+    params.lang.trim().toLowerCase(),
     params.name.trim(),
-    params.email.trim(),
+    params.email.trim().toLowerCase(),
     params.phone?.trim() ?? "",
     params.timeline?.trim() ?? "",
     params.type.trim(),
     params.message.trim(),
-  ].join(":");
-  return crypto.createHmac("sha256", secret).update(`contact-content:${normalized}`).digest("hex");
+  ];
+  const canonicalPayload = JSON.stringify(canonicalArray);
+  return crypto.createHmac("sha256", secret).update(`contact-content-v2:${canonicalPayload}`).digest("hex");
 }
 
 function computeTokenClaimHash(token: string, secret = ENV.RATE_LIMIT_SECRET): string {
@@ -257,7 +276,7 @@ export function createContactFlashCookie(secret = ENV.RATE_LIMIT_SECRET): string
 export function readAndClearContactFlash(
   request: Request,
   secret = ENV.RATE_LIMIT_SECRET
-): { hasFlash: boolean; clearCookieHeader?: string } {
+): { hasFlash: boolean; flashId?: string; clearCookieHeader?: string } {
   const cookieHeader = request.headers.get("Cookie");
   if (!cookieHeader) {
     return { hasFlash: false };
@@ -298,7 +317,7 @@ export function readAndClearContactFlash(
     return { hasFlash: false, clearCookieHeader: clearHeader };
   }
 
-  return { hasFlash: true, clearCookieHeader: clearHeader };
+  return { hasFlash: true, flashId: `${tsStr}.${nonce}`, clearCookieHeader: clearHeader };
 }
 
 export function detectRequestLang(request: Request, forcedLang?: "fr" | "en"): "fr" | "en" {
@@ -326,7 +345,7 @@ export async function handleContactLoader(args: LoaderFunctionArgs, forcedLang?:
   const smtpDiag = getSmtpDiagnostic();
   const smtpAvailable = smtpDiag.status === "configured";
 
-  const { hasFlash, clearCookieHeader } = readAndClearContactFlash(request);
+  const { hasFlash, flashId, clearCookieHeader } = readAndClearContactFlash(request);
 
   const url = new URL(request.url);
   const typeParam = url.searchParams.get("type")?.trim() ?? "";
@@ -350,6 +369,7 @@ export async function handleContactLoader(args: LoaderFunctionArgs, forcedLang?:
       token,
       prefillType,
       flashSuccess: hasFlash,
+      flashSuccessId: flashId ?? null,
       smtpAvailable,
     },
     { headers }
@@ -395,7 +415,7 @@ export async function handleContactAction(args: ActionFunctionArgs, forcedLang?:
   if (websiteHoneypot) {
     // Silently reject bot without revealing the honeypot mechanism
     return Response.json(
-      { ok: false, error: isFr ? "Requête non conforme." : "Invalid submission." },
+      { ok: false, error: getContactMessage(siteContent, "sessionExpired", lang) },
       { status: 400, headers: noStoreHeaders }
     );
   }
@@ -404,16 +424,10 @@ export async function handleContactAction(args: ActionFunctionArgs, forcedLang?:
   const token = formData.get("_token");
   const tokenCheck = verifyContactToken(token, request);
   if (!tokenCheck.valid) {
-    const errorMsg =
-      tokenCheck.reason === "TOO_FAST"
-        ? isFr
-          ? "Soumission trop rapide. Veuillez patienter quelques secondes."
-          : "Submission too fast. Please take a few seconds."
-        : isFr
-          ? "Session de formulaire expirée. Veuillez rafraîchir la page."
-          : "Form session expired. Please refresh the page.";
-
-    return Response.json({ ok: false, error: errorMsg }, { status: 400, headers: noStoreHeaders });
+    return Response.json(
+      { ok: false, error: getContactMessage(siteContent, "sessionExpired", lang) },
+      { status: 400, headers: noStoreHeaders }
+    );
   }
 
   // Field extraction & preservation
@@ -437,20 +451,20 @@ export async function handleContactAction(args: ActionFunctionArgs, forcedLang?:
 
   // Validate Name
   if (!rawName) {
-    fieldErrors.name = isFr ? "Le nom ou société est requis." : "Name or company is required.";
+    fieldErrors.name = getContactMessage(siteContent, "nameRequired", lang);
   } else if (rawName.length > 100) {
-    fieldErrors.name = isFr ? "100 caractères maximum." : "Maximum 100 characters.";
+    fieldErrors.name = getContactMessage(siteContent, "nameTooLong", lang);
   } else if (/[\r\n]/.test(rawName)) {
     fieldErrors.name = isFr ? "Caractères invalides." : "Invalid characters.";
   }
 
   // Validate Email
   if (!rawEmail) {
-    fieldErrors.email = isFr ? "L'adresse e-mail est requise." : "Email address is required.";
+    fieldErrors.email = getContactMessage(siteContent, "emailRequired", lang);
   } else if (rawEmail.length > 254) {
     fieldErrors.email = isFr ? "254 caractères maximum." : "Maximum 254 characters.";
   } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rawEmail)) {
-    fieldErrors.email = isFr ? "Format d'adresse e-mail invalide." : "Invalid email address format.";
+    fieldErrors.email = getContactMessage(siteContent, "emailInvalid", lang);
   } else if (/[\r\n]/.test(rawEmail)) {
     fieldErrors.email = isFr ? "Caractères invalides." : "Invalid characters.";
   }
@@ -460,7 +474,7 @@ export async function handleContactAction(args: ActionFunctionArgs, forcedLang?:
     if (rawPhone.length > 50) {
       fieldErrors.phone = isFr ? "50 caractères maximum." : "Maximum 50 characters.";
     } else if (!/^[\d\s\-+().]{4,50}$/.test(rawPhone)) {
-      fieldErrors.phone = isFr ? "Format de téléphone invalide." : "Invalid phone format.";
+      fieldErrors.phone = getContactMessage(siteContent, "phoneInvalid", lang);
     } else if (/[\r\n]/.test(rawPhone)) {
       fieldErrors.phone = isFr ? "Caractères invalides." : "Invalid characters.";
     }
@@ -469,7 +483,7 @@ export async function handleContactAction(args: ActionFunctionArgs, forcedLang?:
   // Validate Timeline (optional)
   if (rawTimeline) {
     if (rawTimeline.length > 120) {
-      fieldErrors.timeline = isFr ? "120 caractères maximum." : "Maximum 120 characters.";
+      fieldErrors.timeline = getContactMessage(siteContent, "timelineInvalid", lang);
     } else if (/[\r\n]/.test(rawTimeline)) {
       fieldErrors.timeline = isFr ? "Caractères invalides." : "Invalid characters.";
     }
@@ -478,20 +492,18 @@ export async function handleContactAction(args: ActionFunctionArgs, forcedLang?:
   // Validate Project Type
   const matchedType = contactPage.form.projectTypes.find((pt) => pt.id === rawType && pt.enabled);
   if (!rawType || !matchedType) {
-    fieldErrors.type = isFr ? "Veuillez sélectionner un type de projet valide." : "Please select a valid project type.";
+    fieldErrors.type = getContactMessage(siteContent, "typeRequired", lang);
   }
 
   // Validate Message
   if (!rawMessage) {
-    fieldErrors.message = isFr ? "Votre message est requis." : "Your message is required.";
+    fieldErrors.message = getContactMessage(siteContent, "messageRequired", lang);
   } else if (rawMessage.length > 5000) {
-    fieldErrors.message = isFr ? "5 000 caractères maximum." : "Maximum 5000 characters.";
+    fieldErrors.message = getContactMessage(siteContent, "messageTooLong", lang);
   }
 
   if (Object.keys(fieldErrors).length > 0) {
-    const errorSummary = isFr
-      ? "Veuillez corriger les erreurs indiquées ci-dessous."
-      : "Please correct the errors indicated below.";
+    const errorSummary = getContactMessage(siteContent, "errorSummary", lang);
     return Response.json(
       { ok: false, error: errorSummary, fieldErrors, values },
       { status: 400, headers: noStoreHeaders }
@@ -511,9 +523,7 @@ export async function handleContactAction(args: ActionFunctionArgs, forcedLang?:
     checkRateLimit(clientIp, "contact");
   } catch (err: unknown) {
     if (err instanceof RateLimitExceededError) {
-      const errorMsg = isFr
-        ? `Trop de tentatives. Veuillez réessayer dans ${err.retryAfter} secondes.`
-        : `Too many attempts. Please try again in ${err.retryAfter} seconds.`;
+      const errorMsg = getContactMessage(siteContent, "rateLimit", lang, { seconds: err.retryAfter });
       const rlHeaders = new Headers(noStoreHeaders);
       rlHeaders.set("Retry-After", String(err.retryAfter));
       return Response.json({ ok: false, error: errorMsg, values }, { status: 429, headers: rlHeaders });
@@ -566,9 +576,7 @@ export async function handleContactAction(args: ActionFunctionArgs, forcedLang?:
     return Response.json(
       {
         ok: false,
-        error: isFr
-          ? "Ce jeton de formulaire a déjà été utilisé avec un contenu différent. Veuillez rafraîchir la page pour une nouvelle soumission."
-          : "This form session was already submitted with different content. Please refresh the page to submit a new message.",
+        error: getContactMessage(siteContent, "conflict", lang),
         values,
       },
       { status: 409, headers: noStoreHeaders }
@@ -579,9 +587,7 @@ export async function handleContactAction(args: ActionFunctionArgs, forcedLang?:
     return Response.json(
       {
         ok: false,
-        error: isFr
-          ? "Un envoi identique est déjà en cours de traitement. Veuillez patienter."
-          : "A matching submission is already being processed. Please wait.",
+        error: getContactMessage(siteContent, "inProgress", lang),
         values,
       },
       { status: 409, headers: noStoreHeaders }
@@ -592,9 +598,7 @@ export async function handleContactAction(args: ActionFunctionArgs, forcedLang?:
     return Response.json(
       {
         ok: false,
-        error: isFr
-          ? "L'envoi précédent est dans un état incertain suite à un délai de transmission. Veuillez rafraîchir la page ou nous contacter par un autre moyen si nécessaire."
-          : "The previous transmission is in an uncertain state due to a connection timeout. Please refresh the page or contact us directly if needed.",
+        error: getContactMessage(siteContent, "uncertain", lang),
         values,
       },
       { status: 504, headers: noStoreHeaders }
@@ -646,9 +650,7 @@ export async function handleContactAction(args: ActionFunctionArgs, forcedLang?:
       return Response.json(
         {
           ok: false,
-          error: isFr
-            ? "Le statut de transmission de votre message n'a pas pu être confirmé en raison d'un délai de communication. Pour éviter tout doublon, veuillez patienter quelques instants avant de renouveler votre demande."
-            : "The transmission status of your message could not be confirmed due to a connection timeout. To prevent duplicates, please wait a moment before trying again.",
+          error: getContactMessage(siteContent, "uncertain", lang),
           values,
         },
         { status: 504, headers: noStoreHeaders }
@@ -674,13 +676,13 @@ export async function handleContactAction(args: ActionFunctionArgs, forcedLang?:
 
     if (err instanceof SmtpDeliveryError) {
       return Response.json(
-        { ok: false, error: contactPage.messages.genericError[lang], values },
+        { ok: false, error: getContactMessage(siteContent, "genericError", lang), values },
         { status: 500, headers: noStoreHeaders }
       );
     }
 
     return Response.json(
-      { ok: false, error: contactPage.messages.genericError[lang], values },
+      { ok: false, error: getContactMessage(siteContent, "genericError", lang), values },
       { status: 500, headers: noStoreHeaders }
     );
   }

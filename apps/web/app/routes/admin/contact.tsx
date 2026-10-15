@@ -22,6 +22,7 @@ import {
 import {
   type ContactPageContent,
   type LocalizedString,
+  DEFAULT_CONTACT_PAGE_MESSAGES,
 } from "../../lib/site-content.shared";
 import { getSmtpDiagnostic, type SmtpDiagnostic } from "../../lib/mailer.server";
 import formStyles from "./adminForms.module.css";
@@ -945,6 +946,180 @@ export default function AdminContactPage() {
                   updateLocalized(
                     ["messages", "genericError"],
                     formData.messages.genericError,
+                    e.target.value
+                  )
+                }
+              />
+            </div>
+
+            <div className={formStyles.fieldGroup}>
+              <label htmlFor="msg-error-summary" className={formStyles.label}>
+                Résumé d'erreurs en cas de saisie invalide
+              </label>
+              <input
+                id="msg-error-summary"
+                type="text"
+                className={formStyles.input}
+                value={
+                  formData.messages.errorSummary?.[activeTab] ??
+                  DEFAULT_CONTACT_PAGE_MESSAGES.errorSummary[activeTab]
+                }
+                onChange={(e) =>
+                  updateLocalized(
+                    ["messages", "errorSummary"],
+                    formData.messages.errorSummary ?? DEFAULT_CONTACT_PAGE_MESSAGES.errorSummary,
+                    e.target.value
+                  )
+                }
+              />
+            </div>
+
+            <div className={formStyles.fieldGroup}>
+              <label htmlFor="msg-name-required" className={formStyles.label}>
+                Message d'erreur : Nom ou société obligatoire
+              </label>
+              <input
+                id="msg-name-required"
+                type="text"
+                className={formStyles.input}
+                value={
+                  formData.messages.nameRequired?.[activeTab] ??
+                  DEFAULT_CONTACT_PAGE_MESSAGES.nameRequired[activeTab]
+                }
+                onChange={(e) =>
+                  updateLocalized(
+                    ["messages", "nameRequired"],
+                    formData.messages.nameRequired ?? DEFAULT_CONTACT_PAGE_MESSAGES.nameRequired,
+                    e.target.value
+                  )
+                }
+              />
+            </div>
+
+            <div className={formStyles.fieldGroup}>
+              <label htmlFor="msg-email-invalid" className={formStyles.label}>
+                Message d'erreur : Adresse email invalide
+              </label>
+              <input
+                id="msg-email-invalid"
+                type="text"
+                className={formStyles.input}
+                value={
+                  formData.messages.emailInvalid?.[activeTab] ??
+                  DEFAULT_CONTACT_PAGE_MESSAGES.emailInvalid[activeTab]
+                }
+                onChange={(e) =>
+                  updateLocalized(
+                    ["messages", "emailInvalid"],
+                    formData.messages.emailInvalid ?? DEFAULT_CONTACT_PAGE_MESSAGES.emailInvalid,
+                    e.target.value
+                  )
+                }
+              />
+            </div>
+
+            <div className={formStyles.fieldGroup}>
+              <label htmlFor="msg-type-required" className={formStyles.label}>
+                Message d'erreur : Type de projet requis
+              </label>
+              <input
+                id="msg-type-required"
+                type="text"
+                className={formStyles.input}
+                value={
+                  formData.messages.typeRequired?.[activeTab] ??
+                  DEFAULT_CONTACT_PAGE_MESSAGES.typeRequired[activeTab]
+                }
+                onChange={(e) =>
+                  updateLocalized(
+                    ["messages", "typeRequired"],
+                    formData.messages.typeRequired ?? DEFAULT_CONTACT_PAGE_MESSAGES.typeRequired,
+                    e.target.value
+                  )
+                }
+              />
+            </div>
+
+            <div className={formStyles.fieldGroup}>
+              <label htmlFor="msg-msg-required" className={formStyles.label}>
+                Message d'erreur : Message obligatoire
+              </label>
+              <input
+                id="msg-msg-required"
+                type="text"
+                className={formStyles.input}
+                value={
+                  formData.messages.messageRequired?.[activeTab] ??
+                  DEFAULT_CONTACT_PAGE_MESSAGES.messageRequired[activeTab]
+                }
+                onChange={(e) =>
+                  updateLocalized(
+                    ["messages", "messageRequired"],
+                    formData.messages.messageRequired ?? DEFAULT_CONTACT_PAGE_MESSAGES.messageRequired,
+                    e.target.value
+                  )
+                }
+              />
+            </div>
+
+            <div className={formStyles.fieldGroup}>
+              <label htmlFor="msg-session-expired" className={formStyles.label}>
+                Message de sécurité : Session expirée ou jeton expiré
+              </label>
+              <textarea
+                id="msg-session-expired"
+                className={formStyles.textarea}
+                value={
+                  formData.messages.sessionExpired?.[activeTab] ??
+                  DEFAULT_CONTACT_PAGE_MESSAGES.sessionExpired[activeTab]
+                }
+                onChange={(e) =>
+                  updateLocalized(
+                    ["messages", "sessionExpired"],
+                    formData.messages.sessionExpired ?? DEFAULT_CONTACT_PAGE_MESSAGES.sessionExpired,
+                    e.target.value
+                  )
+                }
+              />
+            </div>
+
+            <div className={formStyles.fieldGroup}>
+              <label htmlFor="msg-rate-limit" className={formStyles.label}>
+                Message de sécurité : Limite de requêtes atteinte (inclure {"{seconds}"} pour la durée)
+              </label>
+              <input
+                id="msg-rate-limit"
+                type="text"
+                className={formStyles.input}
+                value={
+                  formData.messages.rateLimit?.[activeTab] ??
+                  DEFAULT_CONTACT_PAGE_MESSAGES.rateLimit[activeTab]
+                }
+                onChange={(e) =>
+                  updateLocalized(
+                    ["messages", "rateLimit"],
+                    formData.messages.rateLimit ?? DEFAULT_CONTACT_PAGE_MESSAGES.rateLimit,
+                    e.target.value
+                  )
+                }
+              />
+            </div>
+
+            <div className={formStyles.fieldGroup}>
+              <label htmlFor="msg-uncertain" className={formStyles.label}>
+                Message de sécurité : Statut de transmission incertain
+              </label>
+              <textarea
+                id="msg-uncertain"
+                className={formStyles.textarea}
+                value={
+                  formData.messages.uncertain?.[activeTab] ??
+                  DEFAULT_CONTACT_PAGE_MESSAGES.uncertain[activeTab]
+                }
+                onChange={(e) =>
+                  updateLocalized(
+                    ["messages", "uncertain"],
+                    formData.messages.uncertain ?? DEFAULT_CONTACT_PAGE_MESSAGES.uncertain,
                     e.target.value
                   )
                 }

@@ -50,17 +50,18 @@ export function meta({ data }: { data?: ContactLoaderData }) {
 }
 
 export default function ContactPage() {
-  const { lang, content, token, prefillType, flashSuccess, smtpAvailable } =
+  const { lang, content, token, prefillType, flashSuccess, flashSuccessId, smtpAvailable } =
     useLoaderData<ContactLoaderData>();
   const actionData = useActionData<ContactActionResult>();
   const navigation = useNavigation();
   const errorSummaryRef = useRef<HTMLDivElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
-  const prevFlashSuccessRef = useRef(false);
+  const lastHandledSuccessIdRef = useRef<string | null>(null);
 
-  // Reset form inputs upon confirmed success (PRG transition)
+  // Reset form inputs upon confirmed success (distinct submission identity)
   useEffect(() => {
-    if (flashSuccess && !prevFlashSuccessRef.current) {
+    const successKey = flashSuccessId || (flashSuccess ? "__default_success__" : null);
+    if (flashSuccess && successKey && successKey !== lastHandledSuccessIdRef.current) {
       if (formRef.current) {
         formRef.current.reset();
         const typeSelect = formRef.current.querySelector<HTMLSelectElement>('select[name="type"]');
@@ -68,9 +69,9 @@ export default function ContactPage() {
           typeSelect.value = "";
         }
       }
+      lastHandledSuccessIdRef.current = successKey;
     }
-    prevFlashSuccessRef.current = flashSuccess;
-  }, [flashSuccess]);
+  }, [flashSuccess, flashSuccessId]);
 
   const contactPage = content.contactPage;
   const formContent = contactPage.form;

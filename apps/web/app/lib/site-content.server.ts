@@ -18,6 +18,7 @@ import {
   type ContactPageContent,
   type ProjectTypeOption,
   DEFAULT_CONTACT_PAGE_CONTENT,
+  DEFAULT_CONTACT_PAGE_MESSAGES,
   type AdminUploadLocation,
   ADMIN_UPLOAD_LOCATIONS,
   DEFAULT_LOCATION_IMAGES,
@@ -438,11 +439,54 @@ export function validateContactPageContent(val: unknown): ContactPageContent {
   }
 
   const messages = assertObject(obj.messages, "contactPage.messages");
-  assertExactKeys(
-    messages,
-    ["successTitle", "successMessage", "unavailableMessage", "genericError"],
-    "contactPage.messages"
-  );
+  const knownMessageKeys = [
+    "successTitle",
+    "successMessage",
+    "unavailableMessage",
+    "genericError",
+    "errorSummary",
+    "nameRequired",
+    "nameTooLong",
+    "emailRequired",
+    "emailInvalid",
+    "phoneInvalid",
+    "timelineInvalid",
+    "typeRequired",
+    "messageRequired",
+    "messageTooLong",
+    "sessionExpired",
+    "rateLimit",
+    "inProgress",
+    "uncertain",
+    "conflict",
+  ];
+  for (const k of Object.keys(messages)) {
+    if (!knownMessageKeys.includes(k)) {
+      throw new ValidationError(`contactPage.messages contient une clé inattendue : "${k}".`);
+    }
+  }
+
+  // Required base messages
+  const baseMessages = {
+    successTitle: validateLocalizedString(messages.successTitle, "contactPage.messages.successTitle"),
+    successMessage: validateLocalizedString(messages.successMessage, "contactPage.messages.successMessage"),
+    unavailableMessage: validateLocalizedString(messages.unavailableMessage, "contactPage.messages.unavailableMessage"),
+    genericError: validateLocalizedString(messages.genericError, "contactPage.messages.genericError"),
+  };
+
+  // Optional customized messages
+  const optionalMessages: Record<string, LocalizedString> = {};
+  for (const k of knownMessageKeys) {
+    if (k in messages && !Object.prototype.hasOwnProperty.call(baseMessages, k)) {
+      optionalMessages[k] = validateLocalizedString(messages[k], `contactPage.messages.${k}`);
+    }
+  }
+
+  const mergedMessages = {
+    ...DEFAULT_CONTACT_PAGE_MESSAGES,
+    ...baseMessages,
+    ...optionalMessages,
+  };
 
   return {
     seo: {
@@ -482,12 +526,7 @@ export function validateContactPageContent(val: unknown): ContactPageContent {
       socialLabel: validateLocalizedString(card.socialLabel, "contactPage.card.socialLabel"),
       responseTimeNotice: validateLocalizedString(card.responseTimeNotice, "contactPage.card.responseTimeNotice"),
     },
-    messages: {
-      successTitle: validateLocalizedString(messages.successTitle, "contactPage.messages.successTitle"),
-      successMessage: validateLocalizedString(messages.successMessage, "contactPage.messages.successMessage"),
-      unavailableMessage: validateLocalizedString(messages.unavailableMessage, "contactPage.messages.unavailableMessage"),
-      genericError: validateLocalizedString(messages.genericError, "contactPage.messages.genericError"),
-    },
+    messages: mergedMessages,
   };
 }
 

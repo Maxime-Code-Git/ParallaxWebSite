@@ -339,6 +339,82 @@ describe("Contact UI Components", () => {
       // Saisie must NOT be wiped
       expect(nameInput.value).toBe("Second message draft");
     });
+
+    it("handles two successive successful submissions in the same mounted instance and preserves intermediate draft across revalidation", () => {
+      let loaderDataState = {
+        lang: "fr" as const,
+        content: mockContent,
+        token: "token.1",
+        prefillType: "",
+        flashSuccess: false,
+        flashSuccessId: null as string | null,
+        smtpAvailable: true,
+      };
+      vi.mocked(useLoaderData).mockImplementation(() => loaderDataState);
+      vi.mocked(useActionData).mockReturnValue(undefined);
+
+      const { rerender } = render(<ContactPage />);
+
+      const nameInput = screen.getByLabelText(/Nom \/ société/i) as HTMLInputElement;
+      const typeSelect = screen.getByLabelText(/Type de projet/i) as HTMLSelectElement;
+      const messageTextarea = screen.getByLabelText(/Votre message/i) as HTMLTextAreaElement;
+
+      // 1. First submission input
+      fireEvent.change(nameInput, { target: { value: "First Submitter" } });
+      fireEvent.change(typeSelect, { target: { value: "music-video" } });
+      fireEvent.change(messageTextarea, { target: { value: "First project details." } });
+      expect(nameInput.value).toBe("First Submitter");
+      expect(typeSelect.value).toBe("music-video");
+      expect(messageTextarea.value).toBe("First project details.");
+
+      // 2. PRG redirect back for 1st submission
+      loaderDataState = {
+        ...loaderDataState,
+        token: "token.2",
+        flashSuccess: true,
+        flashSuccessId: "success-id-1",
+      };
+      rerender(<ContactPage />);
+
+      // Fields must be cleared
+      expect(nameInput.value).toBe("");
+      expect(typeSelect.value).toBe("");
+      expect(messageTextarea.value).toBe("");
+
+      // 3. User types a 2nd submission
+      fireEvent.change(nameInput, { target: { value: "Second Submitter" } });
+      fireEvent.change(typeSelect, { target: { value: "documentary" } });
+      fireEvent.change(messageTextarea, { target: { value: "Second project details." } });
+      expect(nameInput.value).toBe("Second Submitter");
+      expect(typeSelect.value).toBe("documentary");
+      expect(messageTextarea.value).toBe("Second project details.");
+
+      // 4. Intermediate loader revalidation occurs (e.g. background polling or token refresh with same successId)
+      loaderDataState = {
+        ...loaderDataState,
+        token: "token.3",
+      };
+      rerender(<ContactPage />);
+
+      // Draft must NOT be cleared by ordinary revalidation
+      expect(nameInput.value).toBe("Second Submitter");
+      expect(typeSelect.value).toBe("documentary");
+      expect(messageTextarea.value).toBe("Second project details.");
+
+      // 5. 2nd submission accepted: PRG redirect back with distinct flashSuccessId
+      loaderDataState = {
+        ...loaderDataState,
+        token: "token.4",
+        flashSuccess: true,
+        flashSuccessId: "success-id-2",
+      };
+      rerender(<ContactPage />);
+
+      // 2nd submission fields must now be cleared!
+      expect(nameInput.value).toBe("");
+      expect(typeSelect.value).toBe("");
+      expect(messageTextarea.value).toBe("");
+    });
   });
 
   describe("Admin ContactPage", () => {
