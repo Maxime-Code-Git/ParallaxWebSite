@@ -2,7 +2,11 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
+import { execSync } from "node:child_process";
+import { pathToFileURL, fileURLToPath } from "node:url";
 import { createRequestHandler, type ServerBuild } from "react-router";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 describe("Compiled SSR Contact Handler", () => {
   let handler: (request: Request) => Promise<Response>;
@@ -16,10 +20,18 @@ describe("Compiled SSR Contact Handler", () => {
     process.env.RATE_LIMIT_SECRET = "01234567890123456789012345678901";
     process.env.PUBLIC_SITE_URL = "http://localhost:3000";
 
-    // @ts-expect-error - Compiled server build bundle has no declaration file
-    const build = (await import("../build/server/index.js")) as unknown as ServerBuild;
+    const serverBuildPath = path.resolve(__dirname, "../build/server/index.js");
+    if (!fs.existsSync(serverBuildPath)) {
+      execSync("npx react-router build", {
+        cwd: path.resolve(__dirname, ".."),
+        stdio: "pipe",
+        timeout: 60000,
+      });
+    }
+
+    const build = (await import(pathToFileURL(serverBuildPath).href)) as unknown as ServerBuild;
     handler = createRequestHandler(build, "production");
-  });
+  }, 90000);
 
   afterAll(() => {
     process.env = originalEnv;
