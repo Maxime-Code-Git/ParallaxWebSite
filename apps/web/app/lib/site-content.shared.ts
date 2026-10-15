@@ -291,8 +291,8 @@ export const DEFAULT_CONTACT_PAGE_MESSAGES = {
     en: "Name or company is required.",
   },
   nameTooLong: {
-    fr: "Le nom ne doit pas dépasser 120 caractères.",
-    en: "Name cannot exceed 120 characters.",
+    fr: "Le nom ne doit pas dépasser 100 caractères.",
+    en: "Name cannot exceed 100 characters.",
   },
   emailRequired: {
     fr: "L'adresse email est obligatoire.",
@@ -307,8 +307,8 @@ export const DEFAULT_CONTACT_PAGE_MESSAGES = {
     en: "Phone number format is invalid.",
   },
   timelineInvalid: {
-    fr: "L'échéance ne doit pas dépasser 100 caractères.",
-    en: "Timeline cannot exceed 100 characters.",
+    fr: "L'échéance ne doit pas dépasser 120 caractères.",
+    en: "Timeline cannot exceed 120 characters.",
   },
   typeRequired: {
     fr: "Veuillez sélectionner un type de projet valide.",

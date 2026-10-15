@@ -4,10 +4,12 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import { DatabaseSync } from "node:sqlite";
+import * as crypto from "node:crypto";
 import {
   checkRateLimit,
   resetRateLimit,
   closeRateLimitDatabase,
+  acquireContactClaim,
   RateLimitExceededError,
   RateLimitStorageError,
 } from "../app/lib/rate-limit.server";
@@ -214,5 +216,338 @@ describe("rate-limit.server.ts", () => {
     expect(() => checkRateLimit("127.0.0.1", "admin")).toThrow(
       "Le fichier auxiliaire"
     );
+  });
+
+  describe("Schema Migration & Legacy Backward Compatibility", () => {
+    function computeTestHash(ip: string, namespace = "admin"): string {
+      return crypto
+        .createHmac("sha256", "mock-rate-limit-secret-32-chars-long!")
+        .update(`${namespace}:${ip}`)
+        .digest("hex");
+    }
+
+    it("1. migrates cleanly from a database without contact_claims (legacy lot 4)", () => {
+      // DB with only requests table from earlier lots
+      const rawDb = new DatabaseSync(dbPath);
+      rawDb.exec(`
+        CREATE TABLE requests (
+          hash TEXT NOT NULL,
+          timestamp INTEGER NOT NULL
+        );
+        CREATE INDEX idx_requests_hash_timestamp ON requests(hash, timestamp);
+      `);
+      const testHash = computeTestHash("127.0.0.1", "admin");
+      rawDb.prepare("INSERT INTO requests (hash, timestamp) VALUES (?, ?)").run(testHash, Date.now() - 1000);
+      rawDb.close();
+      fs.chmodSync(dbPath, 0o600);
+
+      // checkRateLimit should initialize and migrate without error
+      expect(() => checkRateLimit("127.0.0.1", "admin")).not.toThrow();
+
+      closeRateLimitDatabase();
+      const verifyDb = new DatabaseSync(dbPath);
+      const tables = verifyDb.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{ name: string }>;
+      const tableNames = tables.map((t) => t.name);
+      expect(tableNames).toContain("requests");
+      expect(tableNames).toContain("contact_claims");
+
+      const reqCount = verifyDb.prepare("SELECT COUNT(*) as c FROM requests WHERE hash = ?").get(testHash) as { c: number };
+      expect(reqCount.c).toBe(2); // Pre-existing + newly recorded
+      verifyDb.close();
+    });
+
+    it("2. migrates initial 4-column contact_claims schema, backfilling claim_id, retention and lease", () => {
+      const rawDb = new DatabaseSync(dbPath);
+      rawDb.exec(`
+        CREATE TABLE requests (
+          hash TEXT NOT NULL,
+          timestamp INTEGER NOT NULL
+        );
+        CREATE TABLE contact_claims (
+          token_hash TEXT PRIMARY KEY,
+          status TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          expires_at INTEGER NOT NULL
+        );
+      `);
+      const createdAt = Date.now() - 30_000;
+      const expiresAt = Date.now() + 300_000;
+      rawDb.prepare(
+        "INSERT INTO contact_claims (token_hash, status, created_at, expires_at) VALUES (?, ?, ?, ?)"
+      ).run("token-legacy-4col", "completed", createdAt, expiresAt);
+      rawDb.close();
+      fs.chmodSync(dbPath, 0o600);
+
+      expect(() => checkRateLimit("127.0.0.1", "admin")).not.toThrow();
+
+      closeRateLimitDatabase();
+      const verifyDb = new DatabaseSync(dbPath);
+      const row = verifyDb.prepare(
+        "SELECT * FROM contact_claims WHERE token_hash = ?"
+      ).get("token-legacy-4col") as {
+        token_hash: string;
+        claim_id: string;
+        content_hash: string;
+        status: string;
+        created_at: number;
+        lease_expires_at: number;
+        retention_expires_at: number;
+        expires_at: number;
+      };
+      verifyDb.close();
+
+      expect(row).toBeDefined();
+      expect(row.claim_id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+      expect(row.content_hash).toBe("legacy:incompatible");
+      expect(row.status).toBe("completed");
+      expect(row.lease_expires_at).toBeGreaterThanOrEqual(createdAt);
+      expect(row.retention_expires_at).toBeGreaterThanOrEqual(createdAt + 7_260_000);
+      expect(row.expires_at).toBeGreaterThanOrEqual(row.retention_expires_at);
+    });
+
+    it("3. migrates schema with claim_id and content_hash (commit 55d9e6a), preserving existing values", () => {
+      const rawDb = new DatabaseSync(dbPath);
+      rawDb.exec(`
+        CREATE TABLE requests (
+          hash TEXT NOT NULL,
+          timestamp INTEGER NOT NULL
+        );
+        CREATE TABLE contact_claims (
+          token_hash TEXT PRIMARY KEY,
+          claim_id TEXT NOT NULL,
+          content_hash TEXT NOT NULL,
+          status TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          expires_at INTEGER NOT NULL
+        );
+      `);
+      const existingClaimId = "preserved-uuid-12345678";
+      const existingContentHash = "sha256:preexistingcontenthash123";
+      const createdAt = Date.now() - 40_000;
+      const expiresAt = Date.now() + 500_000;
+      rawDb.prepare(
+        "INSERT INTO contact_claims (token_hash, claim_id, content_hash, status, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)"
+      ).run("token-55d9e6a", existingClaimId, existingContentHash, "completed", createdAt, expiresAt);
+      rawDb.close();
+      fs.chmodSync(dbPath, 0o600);
+
+      expect(() => checkRateLimit("127.0.0.1", "admin")).not.toThrow();
+
+      closeRateLimitDatabase();
+      const verifyDb = new DatabaseSync(dbPath);
+      const row = verifyDb.prepare(
+        "SELECT * FROM contact_claims WHERE token_hash = ?"
+      ).get("token-55d9e6a") as {
+        token_hash: string;
+        claim_id: string;
+        content_hash: string;
+        status: string;
+        lease_expires_at: number;
+        retention_expires_at: number;
+      };
+      verifyDb.close();
+
+      expect(row.claim_id).toBe(existingClaimId);
+      expect(row.content_hash).toBe(existingContentHash);
+      expect(row.lease_expires_at).toBeGreaterThan(0);
+      expect(row.retention_expires_at).toBeGreaterThanOrEqual(createdAt + 7_260_000);
+    });
+
+    it("4. handles fresh database creation and second idempotent initialization", () => {
+      expect(() => checkRateLimit("127.0.0.1", "admin")).not.toThrow();
+      expect(() => checkRateLimit("127.0.0.1", "admin")).not.toThrow();
+
+      closeRateLimitDatabase();
+      expect(() => checkRateLimit("127.0.0.1", "admin")).not.toThrow();
+    });
+
+    it("5. preserves requests table rows and active rate limit sliding-window counters across migration", () => {
+      const rawDb = new DatabaseSync(dbPath);
+      rawDb.exec(`
+        CREATE TABLE requests (
+          hash TEXT NOT NULL,
+          timestamp INTEGER NOT NULL
+        );
+        CREATE TABLE contact_claims (
+          token_hash TEXT PRIMARY KEY,
+          status TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          expires_at INTEGER NOT NULL
+        );
+      `);
+      const testIp = "192.168.1.150";
+      const testHash = computeTestHash(testIp, "admin");
+      const now = Date.now();
+      for (let i = 0; i < 4; i++) {
+        rawDb.prepare("INSERT INTO requests (hash, timestamp) VALUES (?, ?)").run(testHash, now - (4 - i) * 1000);
+      }
+      rawDb.close();
+      fs.chmodSync(dbPath, 0o600);
+
+      // 5th attempt after migration: must pass
+      expect(() => checkRateLimit(testIp, "admin")).not.toThrow();
+
+      // 6th attempt: must throw RateLimitExceededError
+      expect(() => checkRateLimit(testIp, "admin")).toThrow(RateLimitExceededError);
+    });
+
+    it("6. preserves historical completed claims against premature purge and protects expired in_progress claims", () => {
+      const rawDb = new DatabaseSync(dbPath);
+      rawDb.exec(`
+        CREATE TABLE requests (hash TEXT NOT NULL, timestamp INTEGER NOT NULL);
+        CREATE TABLE contact_claims (
+          token_hash TEXT PRIMARY KEY,
+          status TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          expires_at INTEGER NOT NULL
+        );
+      `);
+      const now = Date.now();
+      const oneHourAgo = now - 3600_000;
+      // Completed claim: token expired 10 minutes ago, but within the 2-hour retention window
+      rawDb.prepare(
+        "INSERT INTO contact_claims (token_hash, status, created_at, expires_at) VALUES (?, ?, ?, ?)"
+      ).run("token-completed-old", "completed", oneHourAgo, now - 600_000);
+
+      // in_progress claim whose short lease expired 2 minutes ago
+      rawDb.prepare(
+        "INSERT INTO contact_claims (token_hash, status, created_at, expires_at) VALUES (?, ?, ?, ?)"
+      ).run("token-in-progress-expired", "in_progress", now - 120_000, now + 3600_000);
+
+      rawDb.close();
+      fs.chmodSync(dbPath, 0o600);
+
+      // Trigger migration
+      expect(() => checkRateLimit("127.0.0.1", "admin")).not.toThrow();
+
+      closeRateLimitDatabase();
+      const verifyDb = new DatabaseSync(dbPath);
+      const completedRow = verifyDb.prepare("SELECT * FROM contact_claims WHERE token_hash = ?").get("token-completed-old") as {
+        status: string;
+        retention_expires_at: number;
+      } | undefined;
+      const inProgressRow = verifyDb.prepare("SELECT * FROM contact_claims WHERE token_hash = ?").get("token-in-progress-expired") as {
+        status: string;
+      } | undefined;
+      verifyDb.close();
+
+      expect(completedRow).toBeDefined();
+      expect(completedRow?.status).toBe("completed");
+      expect(completedRow!.retention_expires_at).toBeGreaterThan(now);
+
+      expect(inProgressRow).toBeDefined();
+      expect(inProgressRow?.status).toBe("uncertain");
+    });
+
+    it("7. safely rejects missing or incompatible legacy hash with conflict_content_mismatch", () => {
+      const rawDb = new DatabaseSync(dbPath);
+      rawDb.exec(`
+        CREATE TABLE requests (hash TEXT NOT NULL, timestamp INTEGER NOT NULL);
+        CREATE TABLE contact_claims (
+          token_hash TEXT PRIMARY KEY,
+          status TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          expires_at INTEGER NOT NULL
+        );
+      `);
+      const now = Date.now();
+      rawDb.prepare(
+        "INSERT INTO contact_claims (token_hash, status, created_at, expires_at) VALUES (?, ?, ?, ?)"
+      ).run("token-legacy-compat", "completed", now - 60_000, now + 3600_000);
+      rawDb.close();
+      fs.chmodSync(dbPath, 0o600);
+
+      const result = acquireContactClaim("token-legacy-compat", "brand-new-submission-hash-12345", now + 3600_000);
+      expect(result.status).toBe("conflict_content_mismatch");
+      expect(result.status).not.toBe("completed");
+      expect(result.status).not.toBe("acquired");
+    });
+
+    it("8. ensures indexes physically exist in sqlite_master and are utilized after close and reopen", () => {
+      const rawDb = new DatabaseSync(dbPath);
+      rawDb.exec(`
+        CREATE TABLE requests (hash TEXT NOT NULL, timestamp INTEGER NOT NULL);
+        CREATE TABLE contact_claims (
+          token_hash TEXT PRIMARY KEY,
+          status TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          expires_at INTEGER NOT NULL
+        );
+      `);
+      rawDb.close();
+      fs.chmodSync(dbPath, 0o600);
+
+      checkRateLimit("127.0.0.1", "admin");
+      closeRateLimitDatabase();
+
+      const verifyDb = new DatabaseSync(dbPath);
+      const indexes = verifyDb.prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'contact_claims'"
+      ).all() as Array<{ name: string }>;
+      const indexNames = indexes.map((idx) => idx.name);
+
+      expect(indexNames).toContain("idx_contact_claims_retention");
+      expect(indexNames).toContain("idx_contact_claims_expires");
+
+      const queryPlan = verifyDb.prepare(
+        "EXPLAIN QUERY PLAN SELECT * FROM contact_claims WHERE retention_expires_at > ?"
+      ).all(Date.now()) as Array<{ detail: string }>;
+
+      verifyDb.close();
+
+      const planDetails = queryPlan.map((p) => p.detail).join(" ");
+      expect(planDetails).toContain("idx_contact_claims_retention");
+    });
+
+    it("9. guarantees safe transactional rollback on migration failure with zero data loss or database wipe", () => {
+      const rawDb = new DatabaseSync(dbPath);
+      rawDb.exec(`
+        CREATE TABLE requests (hash TEXT NOT NULL, timestamp INTEGER NOT NULL);
+        CREATE TABLE contact_claims (
+          token_hash TEXT PRIMARY KEY,
+          status TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          expires_at INTEGER NOT NULL
+        );
+      `);
+      rawDb.prepare("INSERT INTO requests (hash, timestamp) VALUES (?, ?)").run("precious-request-hash", 123456789);
+      rawDb.prepare(
+        "INSERT INTO contact_claims (token_hash, status, created_at, expires_at) VALUES (?, ?, ?, ?)"
+      ).run("precious-token", "completed", 123456789, 987654321);
+
+      // Force failure during migration backfill
+      rawDb.exec(`
+        CREATE TRIGGER block_migration_test
+        BEFORE UPDATE ON contact_claims
+        BEGIN
+          SELECT RAISE(ABORT, 'controlled_migration_failure');
+        END;
+      `);
+      rawDb.close();
+      fs.chmodSync(dbPath, 0o600);
+
+      expect(() => checkRateLimit("127.0.0.1", "admin")).toThrow(RateLimitStorageError);
+
+      closeRateLimitDatabase();
+      const verifyDb = new DatabaseSync(dbPath);
+      const req = verifyDb.prepare("SELECT * FROM requests WHERE hash = ?").get("precious-request-hash") as {
+        hash: string;
+        timestamp: number;
+      };
+      const claim = verifyDb.prepare("SELECT * FROM contact_claims WHERE token_hash = ?").get("precious-token") as {
+        token_hash: string;
+        status: string;
+        created_at: number;
+        expires_at: number;
+      };
+      verifyDb.close();
+
+      expect(req).toBeDefined();
+      expect(req.timestamp).toBe(123456789);
+      expect(claim).toBeDefined();
+      expect(claim.status).toBe("completed");
+      expect(claim.created_at).toBe(123456789);
+      expect(claim.expires_at).toBe(987654321);
+    });
   });
 });
