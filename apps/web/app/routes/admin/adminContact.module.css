@@ -28,8 +28,23 @@
   border: 1px solid rgba(239, 68, 68, 0.4);
 }
 
+.smtpHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
 .smtpInfoText {
   margin: 12px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--px-text-2);
+}
+
+.smtpSubText {
+  margin: 8px 0 0;
   font-size: 13px;
   line-height: 1.5;
   color: var(--px-text-2);

@@ -7,6 +7,7 @@ import { execSync } from "node:child_process";
 import {
   sendContactEmail,
   getSmtpDiagnostic,
+  parseStrictPort,
   SmtpConfigError,
   SmtpDeliveryError,
 } from "../app/lib/mailer.server";
@@ -328,5 +329,57 @@ IP.1 = 127.0.0.1
         message: "Ce message doit échouer car le destinataire est refusé.",
       })
     ).rejects.toThrow(SmtpDeliveryError);
+  });
+
+  describe("Strict Port Validation & SMTP Diagnostic", () => {
+    it("rejects invalid port values in parseStrictPort", () => {
+      expect(parseStrictPort("587oops")).toBeNull();
+      expect(parseStrictPort("587.5")).toBeNull();
+      expect(parseStrictPort("+587")).toBeNull();
+      expect(parseStrictPort("-587")).toBeNull();
+      expect(parseStrictPort("0")).toBeNull();
+      expect(parseStrictPort("65536")).toBeNull();
+      expect(parseStrictPort("abc")).toBeNull();
+      expect(parseStrictPort("")).toBeNull();
+      expect(parseStrictPort(undefined)).toBeNull();
+      expect(parseStrictPort("587")).toBe(587);
+      expect(parseStrictPort("465")).toBe(465);
+    });
+
+    it("reports invalid port status in getSmtpDiagnostic when port contains non-decimal characters like 587oops", () => {
+      process.env.SMTP_HOST = "mail.parallax.test";
+      process.env.SMTP_PORT = "587oops";
+      process.env.SMTP_USER = "user";
+      process.env.SMTP_PASSWORD = "password";
+      process.env.CONTACT_FROM_EMAIL = "from@parallax.test";
+      process.env.CONTACT_TO_EMAIL = "to@parallax.test";
+
+      const diag = getSmtpDiagnostic();
+      expect(diag.status).toBe("invalid");
+      expect(diag.reason).toContain("entier décimal");
+    });
+
+    it("reports configured status when port is strictly 587 or 465 and all keys are valid", () => {
+      process.env.SMTP_HOST = "mail.parallax.test";
+      process.env.SMTP_USER = "user";
+      process.env.SMTP_PASSWORD = "password";
+      process.env.CONTACT_FROM_EMAIL = "from@parallax.test";
+      process.env.CONTACT_TO_EMAIL = "to@parallax.test";
+
+      process.env.SMTP_PORT = "587";
+      expect(getSmtpDiagnostic().status).toBe("configured");
+
+      process.env.SMTP_PORT = "465";
+      expect(getSmtpDiagnostic().status).toBe("configured");
+    });
+
+    it("reports incomplete when required keys are missing without preventing application startup", () => {
+      delete process.env.SMTP_HOST;
+      delete process.env.SMTP_PORT;
+      const diag = getSmtpDiagnostic();
+      expect(diag.status).toBe("incomplete");
+      expect(diag.missing).toContain("SMTP_HOST");
+      expect(diag.missing).toContain("SMTP_PORT");
+    });
   });
 });

@@ -17,22 +17,32 @@ for (const key of REQUIRED_VARS) {
   }
 }
 
+function parseStrictPort(raw) {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (!/^\d+$/.test(trimmed)) return null;
+  const port = Number(trimmed);
+  if (!Number.isSafeInteger(port) || port < 1 || port > 65535) return null;
+  if (String(port) !== trimmed) return null;
+  return port;
+}
+
 if (missing.length > 0) {
   console.error(`[smtp:verify] ERREUR: Configuration incomplete. Variables manquantes: ${missing.join(", ")}`);
   process.exit(1);
 }
 
 const host = process.env.SMTP_HOST.trim();
-const port = parseInt(process.env.SMTP_PORT.trim(), 10);
+const port = parseStrictPort(process.env.SMTP_PORT);
+if (port === null) {
+  console.error(`[smtp:verify] ERREUR: SMTP_PORT invalide (${process.env.SMTP_PORT ?? ""}). Port attendu : entier décimal entre 1 et 65535.`);
+  process.exit(1);
+}
+
 const user = process.env.SMTP_USER.trim();
 const pass = process.env.SMTP_PASSWORD;
 const fromEmail = process.env.CONTACT_FROM_EMAIL.trim();
 const toEmail = process.env.CONTACT_TO_EMAIL.trim();
-
-if (Number.isNaN(port) || port <= 0 || port > 65535) {
-  console.error(`[smtp:verify] ERREUR: SMTP_PORT invalide (${process.env.SMTP_PORT}). Port 587 ou 465 attendu.`);
-  process.exit(1);
-}
 
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 if (!emailRegex.test(fromEmail)) {
@@ -51,7 +61,7 @@ console.log(`[smtp:verify] Expediteur declare: ${fromEmail}`);
 console.log(`[smtp:verify] Destinataire: ${toEmail}`);
 
 const isDirectTls = port === 465;
-const isStartTls = port === 587;
+const isStartTls = !isDirectTls;
 
 const tlsOptions = {
   rejectUnauthorized: true,

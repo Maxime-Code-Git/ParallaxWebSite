@@ -159,12 +159,27 @@ function initDb(): DatabaseSync {
 
       CREATE TABLE IF NOT EXISTS contact_claims (
         token_hash TEXT PRIMARY KEY,
+        claim_id TEXT NOT NULL DEFAULT '',
+        content_hash TEXT NOT NULL DEFAULT '',
         status TEXT NOT NULL,
         created_at INTEGER NOT NULL,
         expires_at INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_contact_claims_expires ON contact_claims(expires_at);
     `);
+
+    try {
+      const cols = localDb.prepare("PRAGMA table_info(contact_claims)").all() as Array<{ name: string }>;
+      const colNames = new Set(cols.map((c) => c.name));
+      if (!colNames.has("claim_id")) {
+        localDb.exec("ALTER TABLE contact_claims ADD COLUMN claim_id TEXT NOT NULL DEFAULT ''");
+      }
+      if (!colNames.has("content_hash")) {
+        localDb.exec("ALTER TABLE contact_claims ADD COLUMN content_hash TEXT NOT NULL DEFAULT ''");
+      }
+    } catch {
+      // Ignored
+    }
 
     checkAuxiliaryFiles(dbPath);
 
@@ -281,9 +296,19 @@ export function resetRateLimit(ip: string, namespace = "admin"): void {
   }
 }
 
-export type ContactClaimStatus = "acquired" | "in_progress" | "completed";
+export type ContactClaimAcquireResult =
+  | { status: "acquired"; claimId: string }
+  | { status: "in_progress" }
+  | { status: "completed" }
+  | { status: "uncertain" }
+  | { status: "conflict_content_mismatch" };
 
-export function acquireContactClaim(tokenHash: string, ttlMs = 120_000): ContactClaimStatus {
+export function acquireContactClaim(
+  tokenHash: string,
+  contentHash: string,
+  tokenExpiresAt: number,
+  leaseDurationMs = 60_000
+): ContactClaimAcquireResult {
   let database: DatabaseSync;
   try {
     database = initDb();
@@ -293,45 +318,75 @@ export function acquireContactClaim(tokenHash: string, ttlMs = 120_000): Contact
   }
 
   const now = Date.now();
-  const expiresAt = now + ttlMs;
+  const leaseExpiresAt = now + leaseDurationMs;
 
   try {
     database.exec("BEGIN EXCLUSIVE TRANSACTION");
     try {
-      // 1. Purge expired claims
+      // 1. Purge expired claims (records whose expires_at is strictly in the past)
       const purgeStmt = database.prepare("DELETE FROM contact_claims WHERE expires_at < ?");
       purgeStmt.run(now);
 
-      // 2. Check existing claim
-      const selectStmt = database.prepare("SELECT status FROM contact_claims WHERE token_hash = ?");
-      const existing = selectStmt.get(tokenHash) as { status: string } | undefined;
+      // 2. Check existing claim for this tokenHash
+      const selectStmt = database.prepare(
+        "SELECT claim_id, content_hash, status, expires_at FROM contact_claims WHERE token_hash = ?"
+      );
+      const existing = selectStmt.get(tokenHash) as
+        | { claim_id: string; content_hash: string; status: string; expires_at: number }
+        | undefined;
 
       if (existing) {
+        // If content differs from previous attempt with this token: reject with 409
+        if (existing.content_hash && existing.content_hash !== contentHash) {
+          database.exec("COMMIT");
+          return { status: "conflict_content_mismatch" };
+        }
+
         if (existing.status === "completed") {
           database.exec("COMMIT");
-          return "completed";
+          return { status: "completed" };
         }
-        if (existing.status === "in_progress") {
+
+        if (existing.status === "uncertain") {
           database.exec("COMMIT");
-          return "in_progress";
+          return { status: "uncertain" };
         }
-        // If status was 'failed', allow retry by re-claiming
-        const updateStmt = database.prepare(
-          "UPDATE contact_claims SET status = 'in_progress', created_at = ?, expires_at = ? WHERE token_hash = ?"
-        );
-        updateStmt.run(now, expiresAt, tokenHash);
-        database.exec("COMMIT");
-        return "acquired";
+
+        if (existing.status === "in_progress") {
+          if (existing.expires_at > now) {
+            database.exec("COMMIT");
+            return { status: "in_progress" };
+          }
+          // The previous lease expired (worker died/timed out)
+          const newClaimId = crypto.randomUUID();
+          const updateStmt = database.prepare(
+            "UPDATE contact_claims SET claim_id = ?, content_hash = ?, status = 'in_progress', created_at = ?, expires_at = ? WHERE token_hash = ? AND claim_id = ?"
+          );
+          updateStmt.run(newClaimId, contentHash, now, leaseExpiresAt, tokenHash, existing.claim_id);
+          database.exec("COMMIT");
+          return { status: "acquired", claimId: newClaimId };
+        }
+
+        if (existing.status === "failed") {
+          const newClaimId = crypto.randomUUID();
+          const updateStmt = database.prepare(
+            "UPDATE contact_claims SET claim_id = ?, content_hash = ?, status = 'in_progress', created_at = ?, expires_at = ? WHERE token_hash = ?"
+          );
+          updateStmt.run(newClaimId, contentHash, now, leaseExpiresAt, tokenHash);
+          database.exec("COMMIT");
+          return { status: "acquired", claimId: newClaimId };
+        }
       }
 
       // 3. Insert new claim
+      const newClaimId = crypto.randomUUID();
       const insertStmt = database.prepare(
-        "INSERT INTO contact_claims (token_hash, status, created_at, expires_at) VALUES (?, 'in_progress', ?, ?)"
+        "INSERT INTO contact_claims (token_hash, claim_id, content_hash, status, created_at, expires_at) VALUES (?, ?, ?, 'in_progress', ?, ?)"
       );
-      insertStmt.run(tokenHash, now, expiresAt);
+      insertStmt.run(tokenHash, newClaimId, contentHash, now, leaseExpiresAt);
 
       database.exec("COMMIT");
-      return "acquired";
+      return { status: "acquired", claimId: newClaimId };
     } catch (innerErr) {
       try {
         database.exec("ROLLBACK");
@@ -346,22 +401,47 @@ export function acquireContactClaim(tokenHash: string, ttlMs = 120_000): Contact
   }
 }
 
-export function completeContactClaim(tokenHash: string): void {
+export function completeContactClaim(tokenHash: string, claimId: string, tokenExpiresAt: number): void {
   try {
     const database = initDb();
-    const stmt = database.prepare("UPDATE contact_claims SET status = 'completed' WHERE token_hash = ?");
-    stmt.run(tokenHash);
+    const receiptExpiresAt = Math.max(Date.now() + 60_000, tokenExpiresAt + 60_000);
+    const stmt = database.prepare(
+      "UPDATE contact_claims SET status = 'completed', expires_at = ? WHERE token_hash = ? AND claim_id = ?"
+    );
+    const info = stmt.run(receiptExpiresAt, tokenHash, claimId);
+    if (info.changes === 0) {
+      throw new RateLimitStorageError("Perte du bail ou expiration du claim lors de la finalisation");
+    }
   } catch (err) {
     if (err instanceof RateLimitStorageError) throw err;
     throw new RateLimitStorageError("Erreur lors de la finalisation du claim", err);
   }
 }
 
-export function failContactClaim(tokenHash: string): void {
+export function markUncertainContactClaim(tokenHash: string, claimId: string, tokenExpiresAt: number): void {
   try {
     const database = initDb();
-    const stmt = database.prepare("UPDATE contact_claims SET status = 'failed' WHERE token_hash = ?");
-    stmt.run(tokenHash);
+    const receiptExpiresAt = Math.max(Date.now() + 60_000, tokenExpiresAt + 60_000);
+    const stmt = database.prepare(
+      "UPDATE contact_claims SET status = 'uncertain', expires_at = ? WHERE token_hash = ? AND claim_id = ?"
+    );
+    const info = stmt.run(receiptExpiresAt, tokenHash, claimId);
+    if (info.changes === 0) {
+      throw new RateLimitStorageError("Perte du bail ou expiration du claim lors de la mise en incertitude");
+    }
+  } catch (err) {
+    if (err instanceof RateLimitStorageError) throw err;
+    throw new RateLimitStorageError("Erreur lors de la mise en incertitude du claim", err);
+  }
+}
+
+export function failContactClaim(tokenHash: string, claimId: string): void {
+  try {
+    const database = initDb();
+    const stmt = database.prepare(
+      "UPDATE contact_claims SET status = 'failed' WHERE token_hash = ? AND claim_id = ?"
+    );
+    stmt.run(tokenHash, claimId);
   } catch (err) {
     if (err instanceof RateLimitStorageError) throw err;
     throw new RateLimitStorageError("Erreur lors de la mise en echec du claim", err);

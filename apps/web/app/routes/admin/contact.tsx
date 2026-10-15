@@ -257,7 +257,7 @@ export default function AdminContactPage() {
 
         {/* Diagnostic SMTP Card */}
         <div className={formStyles.sectionCard}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+          <div className={contactStyles.smtpHeader}>
             <h2 className={formStyles.sectionTitle}>État du serveur SMTP</h2>
             <div
               className={`${contactStyles.smtpBadge} ${
@@ -299,7 +299,7 @@ export default function AdminContactPage() {
             </p>
           )}
 
-          <p className={contactStyles.smtpInfoText} style={{ marginTop: 8 }}>
+          <p className={contactStyles.smtpSubText}>
             Pour tester la connectivité SMTP sans expédier d'e-mail, exécutez{" "}
             <span className={contactStyles.smtpMissingKey}>npm run smtp:verify</span>.
           </p>

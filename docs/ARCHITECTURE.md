@@ -326,28 +326,30 @@ Depuis la racine du monorepo :
    - **Synchronisation canonique des coordonnées** : Toute modification de l'adresse e-mail de contact ou des réseaux sociaux (`instagramUrl`, `youtubeUrl`) depuis l'administration Contact met à jour canoniquement et de manière atomique le bloc `home.contact` pour garantir la cohérence absolue de l'ensemble du site.
 
 2. **Pipeline de sécurité Contact et lutte anti-spam** :
-   - **Jeton cryptographique à double facteur (`_token`)** : Jeton éphémère signé combinant un horodatage d'émission, un nonce aléatoire et une signature HMAC-SHA256 (`RATE_LIMIT_SECRET`). Un délai de latence minimal de 2 secondes bloque les automates instantanés, et un délai maximal de 2 heures invalide les jetons anciens.
+   - **Jeton cryptographique lié au contexte de session (`_token`)** : Cookie anonyme éphémère HttpOnly/SameSite=Lax `__parallax_contact_ctx` liant le jeton signé à la session du navigateur. Le jeton éphémère signé combine un horodatage d'émission, un nonce aléatoire, l'identifiant de contexte et une signature HMAC-SHA256 (`RATE_LIMIT_SECRET`). Un délai minimal de 2 secondes bloque les automates instantanés, et un délai maximal de 2 heures invalide les jetons anciens.
    - **Honeypot discret (`website`)** : Champ masqué visuellement par CSS Module et ignoré des technologies d'assistance (`aria-hidden="true"`, `tabIndex={-1}`, `autoComplete="off"`). Toute soumission contenant une valeur dans ce champ est rejetée immédiatement avec un code 400.
    - **Contrôle strict des requêtes** : Validation de l'en-tête `Origin` contre `PUBLIC_SITE_URL`, encodage strict `application/x-www-form-urlencoded`, lecture bornée en streaming à 64 Kio, et rejet des clés dupliquées (400).
-   - **Rate Limiting persistant dédié** : Table `rate_limits` sous le namespace `contact` (distinct de `admin` et `gallery`), plafonné à 5 soumissions par heure par empreinte IP (hachée en HMAC). Code 429 avec en-tête `Retry-After`. Les compteurs ne sont jamais remis à zéro lors d'une soumission réussie afin de neutraliser les attaques en rafale.
-   - **Table anti-rejeu et dédoublonnage (`contact_claims`)** : Table SQLite dédiée permettant de réserver atomiquement l'empreinte du jeton (`pending`). En cas de double-clic ou de soumissions concurrentes, un seul e-mail est expédié. La ré-exécution d'un jeton déjà validé retourne la redirection PRG 303 sans nouvel envoi SMTP.
+   - **Rate Limiting persistant dédié** : Table `requests` sous le namespace `contact` (distinct de `admin` et `gallery`), plafonné à 5 soumissions par fenêtre glissante de 15 minutes par empreinte IP (hachée en HMAC). Code 429 avec en-tête `Retry-After`. Les compteurs ne sont jamais remis à zéro lors d'une soumission réussie afin de neutraliser les attaques en rafale.
+   - **Table anti-rejeu et dédoublonnage liée au contenu (`contact_claims`)** : Table SQLite liant atomiquement chaque jeton à l'empreinte HMAC de son contenu normalisé (`content_hash`) et à un identifiant unique de claim (`claim_id`). Un bail éphémère de 60s protège le traitement en vol. En cas de succès, le reçu d'acceptation est prolongé jusqu'à la fin de validité du jeton (`tokenExpiresAt + 60s`), évitant tout deuxième envoi SMTP en cas de rejeu même après 120s. Un même jeton rejoué avec un contenu altéré est rejeté par un code 409 Conflict. Les erreurs de transport incertaines sont marquées `uncertain` (HTTP 504) sans réarmement aveugle.
+   - **En-têtes HTTP stricts** : En-tête `Cache-Control: no-store` garanti sur les documents SSR Contact, les requêtes `.data`, actions et réponses d'erreur, tout en maintenant la page indexable (aucun `noindex` public).
 
 3. **Transport Nodemailer sécurisé (`mailer.server.ts`)** :
    - Compatibilité native Node 24.
+   - Validation stricte du port SMTP (`parseStrictPort`) : chaîne décimale complète, entier strict entre 1 et 65535, rejet des suffixes (ex. `587oops`), décimales et signes.
    - Chiffrement TLS strict : Port 587 impose STARTTLS (`requireTLS: true`) ; port 465 impose le TLS direct (`secure: true`). Validation stricte des certificats (`rejectUnauthorized: true`, support de `SMTP_CA_CERT` pour tests locaux). Aucun fallback en clair n'est toléré.
    - Protection contre l'injection d'en-têtes CRLF dans les adresses d'expédition, de réception et dans les sujets.
    - Concurrence bornée (5 envois simultanés maximum) et délais d'attente stricts (connexion 10s, négociation socket 15s).
    - Masquage des erreurs : Aucun mot de passe, secret, adresse de visiteur ou corps de message n'est journalisé (codes d'erreur normalisés : `SMTP_UNCONFIGURED`, `SMTP_AUTH_FAILED`, `SMTP_CONN_REFUSED`, `SMTP_TLS_FAILED`, `SMTP_TIMEOUT`, etc.).
    - HTTP 503 neutre côté public en cas de serveur SMTP non configuré ou indisponible, avec proposition d'un fallback `mailto:` si une adresse publique est renseignée.
 
-4. **Pattern PRG et cookie flash éphémère** :
+4. **Pattern PRG et cookie flash éphémère avec remise à zéro** :
    - Redirection HTTP 303 vers la route Contact localisée en cas de succès.
    - Cookie signé éphémère `__parallax_contact_flash` consommé et supprimé dès le premier affichage pour présenter le bandeau vert de confirmation `role="status"`.
    - L'altération ou la simple présence d'un paramètre d'URL `?success=true` ne provoque aucun faux message de succès.
-   - Le formulaire est intégralement réinitialisé après succès (y compris le sélecteur du type de projet).
+   - Le formulaire monté est intégralement réinitialisé après succès (y compris le sélecteur du type de projet), tout en préservant les nouvelles saisies de l'utilisateur.
 
 5. **Diagnostic CLI autonome (`npm run smtp:verify`)** :
-   - Commande indépendante sans envoi d'e-mail validant la configuration des 6 variables et la poignée de main TLS, renvoyant un code de sortie standard 0 (succès) ou 1 (erreur diagnostiquée).
+   - Commande indépendante sans envoi d'e-mail validant la configuration des 6 variables (avec `parseStrictPort`) et la poignée de main TLS, renvoyant un code de sortie standard 0 (succès) ou 1 (erreur diagnostiquée).
 
 ---
 

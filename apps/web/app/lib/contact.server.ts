@@ -3,12 +3,22 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { data } from "react-router";
 import { ENV } from "./env.server";
 import { validateOrigin, getClientIp, readStrictFormUrlEncoded } from "./security.server";
-import { checkRateLimit, RateLimitExceededError, RateLimitStorageError, acquireContactClaim, completeContactClaim, failContactClaim } from "./rate-limit.server";
+import {
+  checkRateLimit,
+  RateLimitExceededError,
+  RateLimitStorageError,
+  acquireContactClaim,
+  completeContactClaim,
+  markUncertainContactClaim,
+  failContactClaim,
+  type ContactClaimAcquireResult,
+} from "./rate-limit.server";
 import { getSiteContent } from "./site-content.server";
 import type { SiteContent } from "./site-content.shared";
 import { sendContactEmail, getSmtpDiagnostic, SmtpConfigError, SmtpDeliveryError } from "./mailer.server";
 
 const FLASH_COOKIE_NAME = "__parallax_contact_flash";
+const CONTEXT_COOKIE_NAME = "__parallax_contact_ctx";
 const MIN_SUBMISSION_DELAY_MS = 2000; // 2 seconds
 const MAX_SUBMISSION_AGE_MS = 2 * 60 * 60 * 1000; // 2 hours
 const MAX_BODY_BYTES = 64 * 1024; // 64 KiB
@@ -35,39 +45,148 @@ export interface ContactActionFailure {
 
 export type ContactActionResult = ContactActionSuccess | ContactActionFailure;
 
-export function generateContactToken(secret = ENV.RATE_LIMIT_SECRET): string {
-  const issuedAt = Date.now();
+function isProductionHttps(): boolean {
+  return process.env.NODE_ENV === "production" && process.env.PARALLAX_LOCAL_PREVIEW !== "true";
+}
+
+export function createContactContextCookie(
+  contextId: string,
+  expiresAt: number,
+  secret = ENV.RATE_LIMIT_SECRET
+): string {
+  const isSecure = isProductionHttps();
+  const signature = crypto
+    .createHmac("sha256", secret)
+    .update(`contact-ctx:${contextId}:${expiresAt}`)
+    .digest("hex");
+  const cookieVal = `${contextId}.${expiresAt}.${signature}`;
+  const maxAge = Math.max(0, Math.floor((expiresAt - Date.now()) / 1000));
+  return `${CONTEXT_COOKIE_NAME}=${cookieVal}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${isSecure ? "; Secure" : ""}`;
+}
+
+export function getOrCreateContactContext(
+  request: Request,
+  secret = ENV.RATE_LIMIT_SECRET
+): { contextId: string; cookieHeader?: string } {
+  const cookieHeader = request.headers.get("Cookie");
+  const now = Date.now();
+
+  if (cookieHeader) {
+    const match = cookieHeader.match(new RegExp(`(?:^|;\\s*)${CONTEXT_COOKIE_NAME}=([^;]+)`));
+    if (match) {
+      const parts = match[1].split(".");
+      if (parts.length === 3) {
+        const [contextId, expiresAtStr, sig] = parts;
+        if (/^[0-9a-f]{32}$/i.test(contextId) && /^\d+$/.test(expiresAtStr) && /^[0-9a-f]{64}$/i.test(sig)) {
+          const expiresAt = parseInt(expiresAtStr, 10);
+          const expectedSig = crypto
+            .createHmac("sha256", secret)
+            .update(`contact-ctx:${contextId}:${expiresAt}`)
+            .digest("hex");
+          if (
+            expectedSig.length === sig.length &&
+            crypto.timingSafeEqual(Buffer.from(expectedSig, "hex"), Buffer.from(sig, "hex")) &&
+            expiresAt > now + 60_000
+          ) {
+            return { contextId };
+          }
+        }
+      }
+    }
+  }
+
+  const contextId = crypto.randomBytes(16).toString("hex");
+  const expiresAt = now + MAX_SUBMISSION_AGE_MS;
+  const setCookie = createContactContextCookie(contextId, expiresAt, secret);
+  return { contextId, cookieHeader: setCookie };
+}
+
+export function generateContactToken(
+  contextId: string,
+  issuedAt = Date.now(),
+  secret = ENV.RATE_LIMIT_SECRET
+): string {
   const nonce = crypto.randomBytes(16).toString("hex");
   const signature = crypto
     .createHmac("sha256", secret)
-    .update(`contact-token:${issuedAt}:${nonce}`)
+    .update(`contact-token:${issuedAt}:${nonce}:${contextId}`)
     .digest("hex");
-  return `${issuedAt}.${nonce}.${signature}`;
+  return `${issuedAt}.${nonce}.${contextId}.${signature}`;
 }
 
 export function verifyContactToken(
   token: string | null | undefined,
+  request: Request,
   options?: { minDelayMs?: number; maxAgeMs?: number; secret?: string }
-): { valid: boolean; reason?: "MISSING" | "FORMAT_INVALID" | "SIGNATURE_INVALID" | "TOO_FAST" | "EXPIRED" } {
+): {
+  valid: boolean;
+  reason?: "MISSING" | "FORMAT_INVALID" | "SIGNATURE_INVALID" | "TOO_FAST" | "EXPIRED" | "INVALID_CONTEXT" | "CONTEXT_MISMATCH";
+  contextId?: string;
+  issuedAt?: number;
+  expiresAt?: number;
+} {
   if (!token || typeof token !== "string") {
     return { valid: false, reason: "MISSING" };
   }
 
   const parts = token.split(".");
-  if (parts.length !== 3) {
+  if (parts.length !== 4) {
     return { valid: false, reason: "FORMAT_INVALID" };
   }
 
-  const [issuedAtStr, nonce, receivedSig] = parts;
-  if (!/^\d+$/.test(issuedAtStr) || !/^[0-9a-f]{32}$/i.test(nonce) || !/^[0-9a-f]{64}$/i.test(receivedSig)) {
+  const [issuedAtStr, nonce, tokenContextId, receivedSig] = parts;
+  if (
+    !/^\d+$/.test(issuedAtStr) ||
+    !/^[0-9a-f]{32}$/i.test(nonce) ||
+    !/^[0-9a-f]{32}$/i.test(tokenContextId) ||
+    !/^[0-9a-f]{64}$/i.test(receivedSig)
+  ) {
     return { valid: false, reason: "FORMAT_INVALID" };
+  }
+
+  const cookieHeader = request.headers.get("Cookie");
+  if (!cookieHeader) {
+    return { valid: false, reason: "INVALID_CONTEXT" };
+  }
+  const match = cookieHeader.match(new RegExp(`(?:^|;\\s*)${CONTEXT_COOKIE_NAME}=([^;]+)`));
+  if (!match) {
+    return { valid: false, reason: "INVALID_CONTEXT" };
+  }
+  const ctxParts = match[1].split(".");
+  if (ctxParts.length !== 3) {
+    return { valid: false, reason: "INVALID_CONTEXT" };
+  }
+  const [cookieContextId, cookieExpiresAtStr, cookieSig] = ctxParts;
+  if (!/^[0-9a-f]{32}$/i.test(cookieContextId) || !/^\d+$/.test(cookieExpiresAtStr) || !/^[0-9a-f]{64}$/i.test(cookieSig)) {
+    return { valid: false, reason: "INVALID_CONTEXT" };
+  }
+
+  const secret = options?.secret ?? ENV.RATE_LIMIT_SECRET;
+  const cookieExpiresAt = parseInt(cookieExpiresAtStr, 10);
+  const expectedCookieSig = crypto
+    .createHmac("sha256", secret)
+    .update(`contact-ctx:${cookieContextId}:${cookieExpiresAt}`)
+    .digest("hex");
+
+  if (
+    expectedCookieSig.length !== cookieSig.length ||
+    !crypto.timingSafeEqual(Buffer.from(expectedCookieSig, "hex"), Buffer.from(cookieSig, "hex")) ||
+    cookieExpiresAt <= Date.now()
+  ) {
+    return { valid: false, reason: "INVALID_CONTEXT" };
+  }
+
+  if (
+    tokenContextId.length !== cookieContextId.length ||
+    !crypto.timingSafeEqual(Buffer.from(tokenContextId), Buffer.from(cookieContextId))
+  ) {
+    return { valid: false, reason: "CONTEXT_MISMATCH" };
   }
 
   const issuedAt = parseInt(issuedAtStr, 10);
-  const secret = options?.secret ?? ENV.RATE_LIMIT_SECRET;
   const expectedSig = crypto
     .createHmac("sha256", secret)
-    .update(`contact-token:${issuedAt}:${nonce}`)
+    .update(`contact-token:${issuedAt}:${nonce}:${tokenContextId}`)
     .digest("hex");
 
   const expectedBuf = Buffer.from(expectedSig, "hex");
@@ -81,7 +200,6 @@ export function verifyContactToken(
   const minDelayMs = options?.minDelayMs ?? MIN_SUBMISSION_DELAY_MS;
   const maxAgeMs = options?.maxAgeMs ?? MAX_SUBMISSION_AGE_MS;
 
-  // Protect against clock skew (issued more than 60s in the future)
   if (issuedAt > now + 60_000) {
     return { valid: false, reason: "FORMAT_INVALID" };
   }
@@ -94,15 +212,35 @@ export function verifyContactToken(
     return { valid: false, reason: "EXPIRED" };
   }
 
-  return { valid: true };
+  return { valid: true, contextId: tokenContextId, issuedAt, expiresAt: issuedAt + maxAgeMs };
+}
+
+export function computeFormContentHash(
+  params: {
+    lang: string;
+    name: string;
+    email: string;
+    phone?: string;
+    timeline?: string;
+    type: string;
+    message: string;
+  },
+  secret = ENV.RATE_LIMIT_SECRET
+): string {
+  const normalized = [
+    params.lang,
+    params.name.trim(),
+    params.email.trim(),
+    params.phone?.trim() ?? "",
+    params.timeline?.trim() ?? "",
+    params.type.trim(),
+    params.message.trim(),
+  ].join(":");
+  return crypto.createHmac("sha256", secret).update(`contact-content:${normalized}`).digest("hex");
 }
 
 function computeTokenClaimHash(token: string, secret = ENV.RATE_LIMIT_SECRET): string {
   return crypto.createHmac("sha256", secret).update(`contact-claim:${token}`).digest("hex");
-}
-
-function isProductionHttps(): boolean {
-  return process.env.NODE_ENV === "production" && process.env.PARALLAX_LOCAL_PREVIEW !== "true";
 }
 
 export function createContactFlashCookie(secret = ENV.RATE_LIMIT_SECRET): string {
@@ -182,7 +320,8 @@ export async function handleContactLoader(args: LoaderFunctionArgs, forcedLang?:
   const { request } = args;
   const lang = detectRequestLang(request, forcedLang);
   const content = getSiteContent();
-  const token = generateContactToken();
+  const { contextId, cookieHeader: contextCookieHeader } = getOrCreateContactContext(request);
+  const token = generateContactToken(contextId);
 
   const smtpDiag = getSmtpDiagnostic();
   const smtpAvailable = smtpDiag.status === "configured";
@@ -197,6 +336,9 @@ export async function handleContactLoader(args: LoaderFunctionArgs, forcedLang?:
   const headers = new Headers({
     "Cache-Control": "no-store",
   });
+  if (contextCookieHeader) {
+    headers.append("Set-Cookie", contextCookieHeader);
+  }
   if (clearCookieHeader) {
     headers.append("Set-Cookie", clearCookieHeader);
   }
@@ -260,7 +402,7 @@ export async function handleContactAction(args: ActionFunctionArgs, forcedLang?:
 
   // Token validation
   const token = formData.get("_token");
-  const tokenCheck = verifyContactToken(token);
+  const tokenCheck = verifyContactToken(token, request);
   if (!tokenCheck.valid) {
     const errorMsg =
       tokenCheck.reason === "TOO_FAST"
@@ -356,7 +498,7 @@ export async function handleContactAction(args: ActionFunctionArgs, forcedLang?:
     );
   }
 
-  // Check Rate Limit (IP based)
+  // Check Rate Limit (IP based: 5 attempts per 15 minutes)
   const clientIp = getClientIp(request);
   if (!clientIp) {
     return Response.json(
@@ -385,19 +527,31 @@ export async function handleContactAction(args: ActionFunctionArgs, forcedLang?:
     throw err;
   }
 
-  // Atomic Anti-Replay & Concurrency Claim
+  // Content hash & anti-replay claim
+  const contentHash = computeFormContentHash({
+    lang,
+    name: rawName,
+    email: rawEmail,
+    phone: rawPhone,
+    timeline: rawTimeline,
+    type: rawType,
+    message: rawMessage,
+  });
   const tokenHash = computeTokenClaimHash(token!);
-  let claimStatus: "acquired" | "in_progress" | "completed";
+  const tokenExpiresAt = tokenCheck.expiresAt ?? Date.now() + MAX_SUBMISSION_AGE_MS;
+
+  let claimResult: ContactClaimAcquireResult;
   try {
-    claimStatus = acquireContactClaim(tokenHash);
-  } catch {
+    claimResult = acquireContactClaim(tokenHash, contentHash, tokenExpiresAt);
+  } catch (err: unknown) {
+    console.error("[CONTACT_CLAIM_ACQUIRE_ERROR]", err instanceof Error ? err.message : String(err));
     return Response.json(
-      { ok: false, error: isFr ? "Service temporairement indisponible." : "Service temporarily unavailable.", values },
+      { ok: false, error: contactPage.messages.unavailableMessage[lang], values },
       { status: 503, headers: noStoreHeaders }
     );
   }
 
-  if (claimStatus === "completed") {
+  if (claimResult.status === "completed") {
     // Already sent successfully: return 303 PRG redirect with flash cookie without re-sending
     const flashCookie = createContactFlashCookie();
     const redirectHeaders = new Headers({
@@ -408,12 +562,46 @@ export async function handleContactAction(args: ActionFunctionArgs, forcedLang?:
     return new Response(null, { status: 303, headers: redirectHeaders });
   }
 
-  if (claimStatus === "in_progress") {
+  if (claimResult.status === "conflict_content_mismatch") {
     return Response.json(
-      { ok: false, error: isFr ? "Un envoi identique est déjà en cours." : "A duplicate request is already in progress.", values },
+      {
+        ok: false,
+        error: isFr
+          ? "Ce jeton de formulaire a déjà été utilisé avec un contenu différent. Veuillez rafraîchir la page pour une nouvelle soumission."
+          : "This form session was already submitted with different content. Please refresh the page to submit a new message.",
+        values,
+      },
       { status: 409, headers: noStoreHeaders }
     );
   }
+
+  if (claimResult.status === "in_progress") {
+    return Response.json(
+      {
+        ok: false,
+        error: isFr
+          ? "Un envoi identique est déjà en cours de traitement. Veuillez patienter."
+          : "A matching submission is already being processed. Please wait.",
+        values,
+      },
+      { status: 409, headers: noStoreHeaders }
+    );
+  }
+
+  if (claimResult.status === "uncertain") {
+    return Response.json(
+      {
+        ok: false,
+        error: isFr
+          ? "L'envoi précédent est dans un état incertain suite à un délai de transmission. Veuillez rafraîchir la page ou nous contacter par un autre moyen si nécessaire."
+          : "The previous transmission is in an uncertain state due to a connection timeout. Please refresh the page or contact us directly if needed.",
+        values,
+      },
+      { status: 504, headers: noStoreHeaders }
+    );
+  }
+
+  const claimId = claimResult.claimId;
 
   // Send email via Nodemailer
   try {
@@ -429,9 +617,12 @@ export async function handleContactAction(args: ActionFunctionArgs, forcedLang?:
     });
 
     try {
-      completeContactClaim(tokenHash);
-    } catch {
-      // Ignored
+      completeContactClaim(tokenHash, claimId, tokenExpiresAt);
+    } catch (persistErr: unknown) {
+      console.error(
+        "[CONTACT_CLAIM_PERSISTENCE_FAILURE] Failed to persist completed contact claim receipt",
+        persistErr instanceof Error ? persistErr.message : String(persistErr)
+      );
     }
 
     const flashCookie = createContactFlashCookie();
@@ -443,10 +634,35 @@ export async function handleContactAction(args: ActionFunctionArgs, forcedLang?:
 
     return new Response(null, { status: 303, headers: redirectHeaders });
   } catch (err: unknown) {
+    if (err instanceof SmtpDeliveryError && err.isUncertain) {
+      try {
+        markUncertainContactClaim(tokenHash, claimId, tokenExpiresAt);
+      } catch (claimErr: unknown) {
+        console.error(
+          "[CONTACT_CLAIM_UNCERTAIN_FAILURE] Failed to mark claim as uncertain",
+          claimErr instanceof Error ? claimErr.message : String(claimErr)
+        );
+      }
+      return Response.json(
+        {
+          ok: false,
+          error: isFr
+            ? "Le statut de transmission de votre message n'a pas pu être confirmé en raison d'un délai de communication. Pour éviter tout doublon, veuillez patienter quelques instants avant de renouveler votre demande."
+            : "The transmission status of your message could not be confirmed due to a connection timeout. To prevent duplicates, please wait a moment before trying again.",
+          values,
+        },
+        { status: 504, headers: noStoreHeaders }
+      );
+    }
+
+    // Certain failure: fail the claim so user can retry
     try {
-      failContactClaim(tokenHash);
-    } catch {
-      // Ignored
+      failContactClaim(tokenHash, claimId);
+    } catch (claimErr: unknown) {
+      console.error(
+        "[CONTACT_CLAIM_FAIL_FAILURE] Failed to mark claim as failed",
+        claimErr instanceof Error ? claimErr.message : String(claimErr)
+      );
     }
 
     if (err instanceof SmtpConfigError) {

@@ -7,7 +7,9 @@ import handleRequest, {
   buildCsp,
   addSecurityHeaders,
   applyAdminSecurityHeaders,
+  applyContactSecurityHeaders,
 } from "../app/entry.server";
+import { headers as contactHeaders } from "../app/routes/public/contact";
 
 function createEntryContext(staticHandlerContext: StaticHandlerContext): EntryContext {
   const routesObj: EntryContext["manifest"]["routes"] = {
@@ -248,5 +250,99 @@ describe("entry.server.tsx Security and CSP", () => {
       const htmlEnStudio = await resEnStudio.text();
       expect(htmlEnStudio).toContain('<html lang="en">');
     }
+  });
+
+  describe("Contact Route and SSR Security Headers", () => {
+    it("applies Cache-Control: no-store on Contact URLs without adding noindex", () => {
+      const urls = [
+        "https://parallax.example.com/fr/contact",
+        "https://parallax.example.com/en/contact",
+        "https://parallax.example.com/fr/contact.data",
+        "https://parallax.example.com/en/contact.data",
+        "https://parallax.example.com/contact",
+      ];
+
+      for (const url of urls) {
+        const headers = new Headers();
+        applyContactSecurityHeaders(headers, url);
+        expect(headers.get("Cache-Control")).toBe("no-store");
+        expect(headers.get("X-Robots-Tag")).toBeNull(); // Must remain indexable!
+      }
+
+      // Non-contact route must not be affected
+      const homeHeaders = new Headers();
+      applyContactSecurityHeaders(homeHeaders, "https://parallax.example.com/fr");
+      expect(homeHeaders.get("Cache-Control")).toBeNull();
+    });
+
+    it("composes route headers with no-store while preserving Set-Cookie, Allow, and Retry-After", () => {
+      const loaderHeaders = new Headers();
+      loaderHeaders.append("Set-Cookie", "__parallax_contact_ctx=ctx123; Path=/; HttpOnly");
+
+      const actionHeaders = new Headers();
+      actionHeaders.append("Set-Cookie", "__parallax_contact_flash=flash123; Path=/; HttpOnly");
+      actionHeaders.set("Allow", "POST");
+      actionHeaders.set("Retry-After", "900");
+
+      const errorHeaders = new Headers();
+
+      const composed = contactHeaders({
+        loaderHeaders,
+        actionHeaders,
+        errorHeaders,
+        parentHeaders: new Headers(),
+      });
+
+      expect(composed.get("Cache-Control")).toBe("no-store");
+      expect(composed.get("Allow")).toBe("POST");
+      expect(composed.get("Retry-After")).toBe("900");
+
+      // Verify Set-Cookie headers are preserved
+      const setCookies = composed.getSetCookie();
+      expect(setCookies.some((c) => c.includes("__parallax_contact_ctx"))).toBe(true);
+      expect(setCookies.some((c) => c.includes("__parallax_contact_flash"))).toBe(true);
+    });
+
+    it("renders Contact SSR HTML with Cache-Control: no-store and CSP nonce without noindex", async () => {
+      const staticHandler = createStaticHandler([
+        {
+          id: "root",
+          path: "/",
+          Component: RootLayout,
+          children: [
+            { id: "fr-contact", path: "fr/contact", Component: RootLayout },
+            { id: "en-contact", path: "en/contact", Component: RootLayout },
+          ],
+        },
+      ]);
+
+      // FR Contact
+      const reqFr = new Request("https://parallax.example.com/fr/contact");
+      const queryFr = await staticHandler.query(reqFr);
+      if (!(queryFr instanceof Response)) {
+        const ctxFr = createEntryContext(queryFr);
+        const resFr = await handleRequest(reqFr, 200, new Headers(), ctxFr, {});
+        expect(resFr.status).toBe(200);
+        expect(resFr.headers.get("Cache-Control")).toBe("no-store");
+        expect(resFr.headers.get("X-Robots-Tag")).toBeNull(); // Indexable
+        expect(resFr.headers.get("Content-Security-Policy")).toContain("nonce-");
+        const htmlFr = await resFr.text();
+        expect(htmlFr).toContain('<html lang="fr">');
+      }
+
+      // EN Contact
+      const reqEn = new Request("https://parallax.example.com/en/contact");
+      const queryEn = await staticHandler.query(reqEn);
+      if (!(queryEn instanceof Response)) {
+        const ctxEn = createEntryContext(queryEn);
+        const resEn = await handleRequest(reqEn, 200, new Headers(), ctxEn, {});
+        expect(resEn.status).toBe(200);
+        expect(resEn.headers.get("Cache-Control")).toBe("no-store");
+        expect(resEn.headers.get("X-Robots-Tag")).toBeNull(); // Indexable
+        expect(resEn.headers.get("Content-Security-Policy")).toContain("nonce-");
+        const htmlEn = await resEn.text();
+        expect(htmlEn).toContain('<html lang="en">');
+      }
+    });
   });
 });

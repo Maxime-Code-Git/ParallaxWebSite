@@ -27,6 +27,19 @@ export function applyAdminSecurityHeaders(headers: Headers, url: string): void {
   }
 }
 
+export function applyContactSecurityHeaders(headers: Headers, url: string): void {
+  try {
+    const parsed = new URL(url);
+    if (/^\/(fr|en)\/contact(\/|\.|$)/i.test(parsed.pathname) || parsed.pathname === "/contact") {
+      headers.set("Cache-Control", "no-store");
+    }
+  } catch {
+    if (url.includes("/contact")) {
+      headers.set("Cache-Control", "no-store");
+    }
+  }
+}
+
 import { validateServerStartup } from "./lib/env.server";
 
 export default function handleRequest(
@@ -101,6 +114,7 @@ function handleBotRequest(
           const stream = createReadableStreamFromReadable(body);
 
           applyAdminSecurityHeaders(responseHeaders, request.url);
+          applyContactSecurityHeaders(responseHeaders, request.url);
           addSecurityHeaders(responseHeaders, nonce);
           responseHeaders.set("Content-Type", "text/html; charset=utf-8");
 
@@ -149,6 +163,7 @@ function handleBrowserRequest(
           const stream = createReadableStreamFromReadable(body);
 
           applyAdminSecurityHeaders(responseHeaders, request.url);
+          applyContactSecurityHeaders(responseHeaders, request.url);
           addSecurityHeaders(responseHeaders, nonce);
           responseHeaders.set("Content-Type", "text/html; charset=utf-8");
 

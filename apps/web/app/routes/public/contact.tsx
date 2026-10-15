@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import type { ActionFunctionArgs, LoaderFunctionArgs, HeadersArgs } from "react-router";
 import { Form, useActionData, useLoaderData, useNavigation, Link } from "react-router";
 import { Header } from "../../components/public/Header";
 import { Footer } from "../../components/public/Footer";
@@ -20,6 +20,24 @@ export async function action(args: ActionFunctionArgs) {
   return handleContactAction(args);
 }
 
+export function headers({ loaderHeaders, actionHeaders, errorHeaders }: HeadersArgs): Headers {
+  const headers = new Headers();
+  headers.set("Cache-Control", "no-store");
+
+  const sources = [loaderHeaders, actionHeaders, errorHeaders];
+  for (const source of sources) {
+    if (source) {
+      for (const [key, value] of source.entries()) {
+        if (key.toLowerCase() !== "cache-control") {
+          headers.append(key, value);
+        }
+      }
+    }
+  }
+
+  return headers;
+}
+
 export function meta({ data }: { data?: ContactLoaderData }) {
   if (!data) {
     return [{ title: "Contact | Parallax" }];
@@ -37,6 +55,22 @@ export default function ContactPage() {
   const actionData = useActionData<ContactActionResult>();
   const navigation = useNavigation();
   const errorSummaryRef = useRef<HTMLDivElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+  const prevFlashSuccessRef = useRef(false);
+
+  // Reset form inputs upon confirmed success (PRG transition)
+  useEffect(() => {
+    if (flashSuccess && !prevFlashSuccessRef.current) {
+      if (formRef.current) {
+        formRef.current.reset();
+        const typeSelect = formRef.current.querySelector<HTMLSelectElement>('select[name="type"]');
+        if (typeSelect) {
+          typeSelect.value = "";
+        }
+      }
+    }
+    prevFlashSuccessRef.current = flashSuccess;
+  }, [flashSuccess]);
 
   const contactPage = content.contactPage;
   const formContent = contactPage.form;
@@ -108,7 +142,7 @@ export default function ContactPage() {
               </div>
             )}
 
-            <Form method="post" noValidate={false}>
+            <Form method="post" noValidate={false} ref={formRef}>
               {/* Signed Anti-Spam Token */}
               <input type="hidden" name="_token" value={token} />
 

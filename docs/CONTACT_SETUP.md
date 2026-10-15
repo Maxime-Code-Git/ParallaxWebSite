@@ -84,8 +84,9 @@ Dans l'interface d'administration `/admin/contact` :
 
 Le traitement de soumission Contact intègre une chaîne de sécurité multicouche :
 
-1. **Jeton cryptographique signé à double facteur :**
-   - `_token` contenant `timestamp.nonce.signatureHMAC`.
+1. **Jeton cryptographique lié au contexte de session :**
+   - Cookie anonyme éphémère HttpOnly/SameSite=Lax `__parallax_contact_ctx`.
+   - `_token` contenant `timestamp.nonce.contextId.signatureHMAC`.
    - Délai minimal de 2 secondes : rejette les soumissions instantanées des automates.
    - Expiration maximale de 2 heures : invalide les jetons anciens ou rejoués.
 2. **Honeypot discret :**
@@ -93,17 +94,20 @@ Le traitement de soumission Contact intègre une chaîne de sécurité multicouc
    - Si renseigné, la soumission est immédiatement refusée avec code 400 sans révéler au bot la nature du piège.
 3. **Rate Limiting persistant indépendant :**
    - Stocké dans SQLite sous le namespace `contact` (distinct de `admin` et `gallery`).
-   - 5 soumissions par heure par empreinte IP (hachée en HMAC avec `RATE_LIMIT_SECRET`).
+   - 5 soumissions par fenêtre glissante de 15 minutes par empreinte IP (hachée en HMAC avec `RATE_LIMIT_SECRET`).
    - Code HTTP 429 avec en-tête `Retry-After` en cas de dépassement.
    - Les compteurs ne sont jamais réinitialisés lors d'un envoi réussi afin de bloquer les rafales.
 4. **Table anti-rejeu et dédoublonnage (`contact_claims`) :**
-   - Empreinte de jeton réservée atomiquement dans SQLite (`pending`).
-   - En cas de double-clic ou soumission concurrente, un seul appel SMTP est exécuté.
-   - Une re-soumission immédiate d'un jeton déjà validé renvoie le statut de redirection 303 sans renvoyer d'e-mail.
-5. **Pattern PRG (Post-Redirect-Get) avec flash signé :**
+   - Empreinte de jeton liée atomiquement à l'empreinte HMAC du contenu (`content_hash`) et à une identité de claim (`claim_id`).
+   - En cas de double-clic ou soumission concurrente, un seul appel SMTP est exécuté, la requête concurrente recevant 409.
+   - Une re-soumission d'un même jeton avec le même contenu (même au-delà de 2 minutes et jusqu'à 2 heures) renvoie la redirection 303 PRG sans second envoi d'e-mail.
+   - Une re-soumission d'un même jeton avec un contenu différent est rejetée avec code 409 Conflict avec préservation des saisies.
+   - Les erreurs de transport incertaines (timeout socket, déconnexion) marquent le claim comme `uncertain` (code HTTP 504) et interdisent tout réarmement aveugle.
+5. **Pattern PRG (Post-Redirect-Get) avec flash signé et remise à zéro :**
    - Succès confirmé par redirection HTTP 303 vers `/fr/contact` ou `/en/contact`.
    - Cookie flash éphémère signé `__parallax_contact_flash` consommé et effacé immédiatement lors de l'affichage.
    - Un simple paramètre d'URL `?success=true` ne provoque aucun faux message de succès.
+   - Réinitialisation complète des champs et du sélecteur de type après succès, sans effacer de nouvelle saisie lors de revalidations ultérieures.
 
 ---
 

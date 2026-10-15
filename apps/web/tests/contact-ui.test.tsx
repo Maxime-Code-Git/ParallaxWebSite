@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import ContactPage from "../app/routes/public/contact";
 import AdminContactPage from "../app/routes/admin/contact";
 import { DEFAULT_CONTACT_PAGE_CONTENT } from "../app/lib/site-content.shared";
@@ -253,6 +253,92 @@ describe("Contact UI Components", () => {
       expect(submitBtn).toBeInTheDocument();
       expect(submitBtn).toBeDisabled();
     });
+
+    it("resets all form fields and project type select when mounted instance receives flashSuccess", () => {
+      let loaderDataState = {
+        lang: "fr" as const,
+        content: mockContent,
+        token: "mock.token.123",
+        prefillType: "",
+        flashSuccess: false,
+        smtpAvailable: true,
+      };
+      vi.mocked(useLoaderData).mockImplementation(() => loaderDataState);
+      vi.mocked(useActionData).mockReturnValue(undefined);
+
+      const { rerender } = render(<ContactPage />);
+
+      const nameInput = screen.getByLabelText(/Nom \/ société/i) as HTMLInputElement;
+      const emailInput = screen.getByLabelText(/^Email$/i) as HTMLInputElement;
+      const phoneInput = screen.getByLabelText(/Téléphone \(optionnel\)/i) as HTMLInputElement;
+      const timelineInput = screen.getByLabelText(/Échéance souhaitée/i) as HTMLInputElement;
+      const typeSelect = screen.getByLabelText(/Type de projet/i) as HTMLSelectElement;
+      const messageTextarea = screen.getByLabelText(/Votre message/i) as HTMLTextAreaElement;
+
+      // User fills the form
+      fireEvent.change(nameInput, { target: { value: "Maxime Studio" } });
+      fireEvent.change(emailInput, { target: { value: "maxime@example.com" } });
+      fireEvent.change(phoneInput, { target: { value: "+32 470 11 22 33" } });
+      fireEvent.change(timelineInput, { target: { value: "Juin 2027" } });
+      fireEvent.change(typeSelect, { target: { value: "music-video" } });
+      fireEvent.change(messageTextarea, { target: { value: "Tournage prévu à Bruxelles." } });
+
+      expect(nameInput.value).toBe("Maxime Studio");
+      expect(emailInput.value).toBe("maxime@example.com");
+      expect(phoneInput.value).toBe("+32 470 11 22 33");
+      expect(timelineInput.value).toBe("Juin 2027");
+      expect(typeSelect.value).toBe("music-video");
+      expect(messageTextarea.value).toBe("Tournage prévu à Bruxelles.");
+
+      // Form is submitted, server accepts and PRG redirects back with flashSuccess: true
+      // Component remains mounted across navigation
+      loaderDataState = {
+        ...loaderDataState,
+        token: "new.token.456",
+        flashSuccess: true,
+      };
+      rerender(<ContactPage />);
+
+      // All fields including project type select MUST be reset to empty / placeholder
+      expect(nameInput.value).toBe("");
+      expect(emailInput.value).toBe("");
+      expect(phoneInput.value).toBe("");
+      expect(timelineInput.value).toBe("");
+      expect(typeSelect.value).toBe("");
+      expect(messageTextarea.value).toBe("");
+    });
+
+    it("does not wipe new typing if loader revalidates while flashSuccess remains true", () => {
+      let loaderDataState = {
+        lang: "fr" as const,
+        content: mockContent,
+        token: "mock.token.123",
+        prefillType: "",
+        flashSuccess: true,
+        smtpAvailable: true,
+      };
+      vi.mocked(useLoaderData).mockImplementation(() => loaderDataState);
+      vi.mocked(useActionData).mockReturnValue(undefined);
+
+      const { rerender } = render(<ContactPage />);
+
+      const nameInput = screen.getByLabelText(/Nom \/ société/i) as HTMLInputElement;
+      expect(nameInput.value).toBe("");
+
+      // User starts typing a second message
+      fireEvent.change(nameInput, { target: { value: "Second message draft" } });
+      expect(nameInput.value).toBe("Second message draft");
+
+      // Loader revalidation occurs with a new token
+      loaderDataState = {
+        ...loaderDataState,
+        token: "refreshed.token.789",
+      };
+      rerender(<ContactPage />);
+
+      // Saisie must NOT be wiped
+      expect(nameInput.value).toBe("Second message draft");
+    });
   });
 
   describe("Admin ContactPage", () => {
@@ -319,6 +405,29 @@ describe("Contact UI Components", () => {
       expect(screen.getByText(/●\s*Incomplet/)).toBeInTheDocument();
       expect(screen.getByText("SMTP_HOST")).toBeInTheDocument();
       expect(screen.getByText("SMTP_PASSWORD")).toBeInTheDocument();
+    });
+
+    it("renders admin contact without any inline style attributes", () => {
+      vi.mocked(useLoaderData).mockReturnValue({
+        csrfToken: "mock-csrf-token",
+        contactPage: mockContent.contactPage,
+        coordinates: {
+          email: "admin-contact@parallax.test",
+          instagramUrl: "https://instagram.com/parallax",
+          youtubeUrl: "https://youtube.com/parallax",
+        },
+        revision: "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+        isCorrupted: false,
+        smtpDiagnostic: {
+          status: "configured",
+          missing: [],
+        },
+      });
+      vi.mocked(useActionData).mockReturnValue(undefined);
+
+      const { container } = render(<AdminContactPage />);
+      const styledElements = container.querySelectorAll("[style]");
+      expect(styledElements.length).toBe(0);
     });
   });
 });

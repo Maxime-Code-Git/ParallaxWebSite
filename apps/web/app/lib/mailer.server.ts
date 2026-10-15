@@ -30,11 +30,13 @@ export class SmtpConfigError extends Error {
 }
 
 export class SmtpDeliveryError extends Error {
-  code: string;
-  constructor(message: string, code = "SMTP_DELIVERY_FAILED", cause?: unknown) {
+  readonly code: string;
+  readonly isUncertain: boolean;
+  constructor(message: string, code = "SMTP_DELIVERY_FAILED", isUncertain = false, cause?: unknown) {
     super(message, { cause });
     this.name = "SmtpDeliveryError";
     this.code = code;
+    this.isUncertain = isUncertain;
   }
 }
 
@@ -48,6 +50,22 @@ export const REQUIRED_SMTP_KEYS = [
 ] as const;
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+export function parseStrictPort(raw: string | undefined): number | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (!/^\d+$/.test(trimmed)) {
+    return null;
+  }
+  const port = Number(trimmed);
+  if (!Number.isSafeInteger(port) || port < 1 || port > 65535) {
+    return null;
+  }
+  if (String(port) !== trimmed) {
+    return null;
+  }
+  return port;
+}
 
 export function getSmtpDiagnostic(): SmtpDiagnostic {
   const missing: string[] = [];
@@ -66,13 +84,12 @@ export function getSmtpDiagnostic(): SmtpDiagnostic {
     };
   }
 
-  const portRaw = process.env.SMTP_PORT?.trim() ?? "";
-  const port = parseInt(portRaw, 10);
-  if (Number.isNaN(port) || port <= 0 || port > 65535) {
+  const port = parseStrictPort(process.env.SMTP_PORT);
+  if (port === null) {
     return {
       status: "invalid",
       missing: [],
-      reason: `SMTP_PORT invalide (${portRaw}). Port attendu entre 1 et 65535.`,
+      reason: `SMTP_PORT invalide (${process.env.SMTP_PORT ?? ""}). Port attendu : entier décimal entre 1 et 65535.`,
     };
   }
 
@@ -143,7 +160,10 @@ export async function sendContactEmail(data: ContactEmailPayload): Promise<void>
 
   try {
     const host = process.env.SMTP_HOST!.trim();
-    const port = parseInt(process.env.SMTP_PORT!.trim(), 10);
+    const port = parseStrictPort(process.env.SMTP_PORT);
+    if (port === null) {
+      throw new SmtpConfigError("Port SMTP invalide", "SMTP_INVALID_PORT");
+    }
     const user = process.env.SMTP_USER!.trim();
     const pass = process.env.SMTP_PASSWORD!;
     const fromEmail = process.env.CONTACT_FROM_EMAIL!.trim();
@@ -202,7 +222,8 @@ export async function sendContactEmail(data: ContactEmailPayload): Promise<void>
     if (!info.accepted || !info.accepted.includes(toEmail)) {
       throw new SmtpDeliveryError(
         "Le destinataire n'a pas été accepté par le serveur SMTP.",
-        "RECIPIENT_NOT_ACCEPTED"
+        "RECIPIENT_NOT_ACCEPTED",
+        false
       );
     }
   } catch (err: unknown) {
@@ -210,8 +231,16 @@ export async function sendContactEmail(data: ContactEmailPayload): Promise<void>
       throw err;
     }
     const code = err && typeof err === "object" && "code" in err ? String(err.code) : "TRANSPORT_ERROR";
-    console.error(`[SMTP_DELIVERY_FAILURE] code=${code}`);
-    throw new SmtpDeliveryError("Erreur de transport SMTP lors de l'envoi du message.", code, err);
+    const msg = err instanceof Error ? err.message : String(err);
+    const isUncertain =
+      code === "ETIMEDOUT" ||
+      code === "ESOCKETTIMEDOUT" ||
+      code === "ECONNRESET" ||
+      code === "EPIPE" ||
+      code === "EDISCONNECTED" ||
+      /timeout/i.test(msg);
+    console.error(`[SMTP_DELIVERY_FAILURE] code=${code} uncertain=${isUncertain}`);
+    throw new SmtpDeliveryError("Erreur de transport SMTP lors de l'envoi du message.", code, isUncertain, err);
   } finally {
     activeSends--;
     if (transporter) {
