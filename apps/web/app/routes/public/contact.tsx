@@ -50,7 +50,7 @@ export function meta({ data }: { data?: ContactLoaderData }) {
 }
 
 export default function ContactPage() {
-  const { lang, content, token, prefillType, flashSuccess, flashSuccessId, smtpAvailable } =
+  const { lang, content, token, prefillType, flashSuccess, flashSuccessId, smtpAvailable, isPrivacyPolicyPublished } =
     useLoaderData<ContactLoaderData>();
   const actionData = useActionData<ContactActionResult>();
   const navigation = useNavigation();
@@ -99,7 +99,10 @@ export default function ContactPage() {
   const instagramUrl = homeContact.instagramUrl.trim();
   const youtubeUrl = homeContact.youtubeUrl.trim();
   const responseTimeNotice = cardContent.responseTimeNotice[lang]?.trim();
-  const privacyUrl = formContent.privacyPolicyUrl.trim();
+  const configuredPrivacyUrl = formContent.privacyPolicyUrl.trim();
+  const privacyUrl = isPrivacyPolicyPublished
+    ? (configuredPrivacyUrl || (lang === "en" ? "/en/privacy-policy" : "/fr/confidentialite"))
+    : (configuredPrivacyUrl || "");
 
   return (
     <div className={styles.container}>

@@ -353,47 +353,49 @@ Depuis la racine du monorepo :
 
 ---
 
-## 13. Architecture Lot 7 — Entreprise, Pages Légales et Préférences de Confidentialité (APD)
+## 13. Architecture Lot 7 — Entreprise, Pages Légales et Préférences de Confidentialité
 
 ### 1. Schéma éditorial V3 et migration séquentielle
 - **Évolution de schéma sans régression** : `SiteContent` passe à `schemaVersion: 3`. La fonction `validateSiteContent` assure la mise à niveau séquentielle `V1 -> V2 -> V3` à la volée lors de la lecture du fichier `site-content.json` et persiste automatiquement la structure V3 sur disque.
 - **Nouveaux blocs de premier niveau** :
   - `company: CompanyContent` : paramètres d'entreprise (dénomination commerciale, dénomination sociale, forme juridique, adresse légale, numéro d'entreprise / BCE, numéro de TVA, e-mail, téléphone, réseaux sociaux, directeur de publication, hébergeur et indicateur `isPublished`).
   - `legalPages: Record<LegalPageKey, LegalPageRecord>` : conteneur des 4 documents légaux (`mentions`, `privacy`, `terms`, `cookies`). Chaque document dispose d'une partition étanche `draft: LegalDocument` et `published: LegalDocument | null`.
-- **Synchronisation canonique des coordonnées** : Toute mise à jour des coordonnées d'entreprise depuis l'administration `/admin/company` ou de la fiche Contact `/admin/contact` synchronise atomiquement les coordonnées publiques associées (`common.brandName`, `home.contact.email`, `home.contact.instagramUrl`, `home.contact.youtubeUrl`, `contactPage.card.phone`).
+- **Synchronisation bidirectionnelle canonique des coordonnées** : Toute mise à jour ou suppression de coordonnées (e-mail, téléphone, Instagram, YouTube) depuis l'administration `/admin/company`, `/admin/contact` ou `/admin/home` synchronise atomiquement l'ensemble des sections publiques associées (`common.brandName`, `home.contact`, `contactPage.card`). Une valeur vidée supprime la coordonnée partout où elle est référencée sans laisser d'orphelin.
 
 ### 2. Cycle de vie documentaire et étanchéité public / privé
-- **Séparation stricte Draft vs Published** : La modification d'un brouillon dans `/admin/legal/:pageKey` n'impacte jamais le document public en ligne.
+- **Séparation stricte Draft vs Published** : La modification d'un brouillon dans `/admin/legal/:pageKey` n'impacte jamais le document public en ligne. L'éditeur préserve la saisie brute (espaces, retours à la ligne, paragraphes FR/EN) et utilise `useFetcher` pour un transport fiable.
 - **Contrôles stricts de publication (`publishLegalPage`)** :
-  - Rejet absolu des placeholders non résolus (ex. `[à compléter]`, `[date]`, `[nom]`, etc.) dans les titres, paragraphes et listes.
+  - Rejet absolu des placeholders non résolus (ex. `[à compléter]`, `[date]`, `[nom]`, etc.) dans les titres, paragraphes, listes et inventaire.
   - Métadonnées SEO et titres publics obligatoires en FR et EN.
-  - Date d'entrée en vigueur obligatoire.
-  - Présence d'un inventaire technique documenté pour la politique de cookies.
+  - Date d'entrée en vigueur avec année à 4 chiffres validée.
+  - Présence d'un inventaire technique documenté et éditable pour la politique de cookies.
   - Vérification préalable de l'identité d'entreprise (dénomination sociale, adresse, BCE, hébergeur) avant d'autoriser la publication des mentions légales.
-  - Incrément automatique du numéro de version lors de la publication.
+  - Incrément monotone du numéro de version lors de la publication : dépublier puis republier poursuit la numérotation (`v1` -> `v2` -> dépublié -> `v3`).
 - **Prévisualisation privée authentifiée (`/admin/legal/:pageKey/preview`)** :
   - Réservée aux administrateurs authentifiés.
   - En-têtes stricts `Cache-Control: no-store, no-cache, must-revalidate` et `X-Robots-Tag: noindex, nofollow`.
-- **Prévention des fuites de sentinelles privées** :
-  - Les getters publics `getPublicCompanyContent()` et `getPublicLegalDocument()` filtrent les champs non confirmés. Si `company.isPublished` est faux, l'adresse enregistrée et le numéro BCE sont expurgés des payloads publics.
-  - Si une page légale n'a pas de version publiée, le loader public renvoie `document: null`, affiche un état neutre (« Document en cours de mise à jour ») et injecte `X-Robots-Tag: noindex, nofollow` ainsi que `Cache-Control: private`.
+- **Prévention des fuites de données privées non confirmées** :
+  - `getPublicCompanyContent()` applique une allowlist stricte. Si `company.isPublished !== true`, seuls `tradeName`, `email`, `phone`, `instagramUrl`, `youtubeUrl` sont exposés. `publicationDirector`, adresse, numéro BCE restent strictement masqués.
+  - Si une page légale n'a pas de version publiée, le loader public renvoie `document: null`, affiche un état neutre (« Document en cours de mise à jour ») et injecte `X-Robots-Tag: noindex, nofollow` ainsi que `Cache-Control: private, no-store`.
 
-### 3. Gestion des préférences de confidentialité (Conformité APD Belgique)
-- **Principe d'opt-in préalable strict** : Aucun lecteur vidéo tiers (iframe YouTube ou Vimeo) n'est injecté dans le DOM, et aucune requête réseau tierce n'est initiée avant un consentement explicite de l'utilisateur.
-- **Cookie signé HMAC-SHA256 (`__parallax_privacy_prefs`)** :
-  - Durée de vie (TTL) : 180 jours (~6 mois), SameSite=Lax, Path=/.
-  - Signature cryptographique garantissant l'intégrité du choix (rejet et retour aux valeurs par défaut si altération, expiration ou mauvaise version).
-- **Consentement granulaire et optionnel** :
-  - Consentement pour la session (en mémoire) ou persistant (cookie signé).
-  - La case « Mémoriser mon choix » est rigoureusement décochée par défaut.
-  - Boutons d'acceptation et de refus présentés de façon équilibrée sans incitation asymétrique (dark pattern).
+### 3. Gestion des préférences de confidentialité
+- **Principe d'accord préalable** : Aucun lecteur vidéo tiers (iframe YouTube ou Vimeo) n'est injecté dans le DOM, et aucune requête réseau tierce n'est initiée avant un accord explicite de l'utilisateur.
+- **Cookie HttpOnly signé HMAC-SHA256 (`__parallax_privacy_prefs`)** :
+  - Durée de vie (TTL) : 180 jours (~6 mois), `SameSite=Lax`, `Path=/`, `HttpOnly`, `Secure` (production).
+  - Signé avec `RATE_LIMIT_SECRET` (HMAC-SHA256). Tout cookie falsifié, expiré ou de mauvaise version est rejeté tant par le serveur que par le client.
+  - Le client JavaScript ne lit pas `document.cookie` directement : l'état est projeté depuis le serveur via `/api/privacy/preferences` ou les loaders.
+- **Accord ponctuel cantonné au média actif** :
+  - L'accord pour une vidéo sans mémorisation est stocké en mémoire JavaScript lié strictement à l'URL média (`inMemoryOneTimeByMedia`).
+  - L'accord est révoqué dès la fermeture de la modale, le changement de média ou la navigation.
 - **Révocation immédiate** :
-  - Modification des préférences accessible à tout moment via le footer (« Gérer mes préférences ») ou la page `/fr/cookies`.
-  - Émission de l'événement navigateur `parallax:privacy-updated` : tout composant vidéo actif (`VideoModal`) réagit instantanément en démontant l'iframe du DOM et en réaffichant le panneau de consentement.
+  - Révocation accessible sans JavaScript via le formulaire natif ou en JavaScript avec mise à jour immédiate.
+  - Émission de l'événement `parallax:privacy-updated` : tout composant vidéo actif (`VideoModal`) démonte instantanément l'iframe du DOM et réaffiche le panneau d'information.
 - **Endpoint API sécurisé (`/api/privacy/preferences`)** :
-  - Méthodes autorisées : GET (lecture) et POST (mise à jour ou `revoke_all`).
-  - Support hybride : JSON pour les requêtes asynchrones fetch/AJAX, et `application/x-www-form-urlencoded` pour le formulaire HTML natif (fallback sans JavaScript avec redirection HTTP 303).
-  - Contrôles de sécurité : validation de l'en-tête `Origin`, lecture bornée du corps à 8 Kio, en-têtes `Cache-Control: private, no-store`.
+  - Méthodes autorisées : GET (projection validée) et POST (mise à jour ou `revoke_all`).
+  - Validation stricte des types booléens (rejet des chaînes `"false"` / `"true"`).
+  - Lecture bornée du flux à 8 Kio avec interruption active du flux en cas de dépassement.
+  - Destination de retour strictement restreinte aux routes cookies FR/EN autorisées (rejet des URL relatives au protocole `//` et des redirections externes).
+  - Support hybride : JSON pour requêtes asynchrones, et `application/x-www-form-urlencoded` avec redirection 303 sûre pour formulaires natifs.
 
 ### 4. Routes canoniques et redirections 301
 - **8 URLs canoniques bilingues** :
@@ -401,12 +403,13 @@ Depuis la racine du monorepo :
   - `/fr/confidentialite` et `/en/privacy-policy`
   - `/fr/cgv` et `/en/terms`
   - `/fr/cookies` et `/en/cookies`
-- **Redirections 301 permanentes** :
+- **Redirections 301 permanentes (compatibles `.data`)** :
   - `/en/mentions-legales` -> `/en/legal-notice`
   - `/en/confidentialite` -> `/en/privacy-policy`
   - `/en/cgv` -> `/en/terms`
   - `/fr/politique-de-confidentialite` -> `/fr/confidentialite`
-- **En-têtes SEO** : Canonical URL absolue, balises `rel="alternate"` hreflang pour `fr` et `en`, et balise `Vary: Cookie` sur `/fr/cookies` pour éviter la mise en cache de choix personnalisés par des mandataires intermédiaires.
+- **En-têtes HTTP** : URL canonique absolue construite depuis `PUBLIC_SITE_URL`, balises `rel="alternate"` hreflang pour `fr` et `en`, et en-têtes `Cache-Control: private, no-store` et `Vary: Cookie` sur l'ensemble des routes légales et leurs requêtes `.data`.
+
 
 ---
 

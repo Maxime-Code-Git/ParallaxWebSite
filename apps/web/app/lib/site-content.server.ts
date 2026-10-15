@@ -546,6 +546,12 @@ export function validateContactPageContent(val: unknown): ContactPageContent {
   };
 }
 
+export function containsUnresolvedPlaceholders(text: string): boolean {
+  if (!text) return false;
+  const placeholderRegex = /\[\s*(à compléter|to complete|to be completed|date|nom|adresse|nom et adresse de l'hébergeur|ton prénom|your name|placeholder|todo|tbd|xxx|à préciser|remplir)\s*\]/i;
+  return placeholderRegex.test(text);
+}
+
 export function validateCompanyContent(val: unknown): CompanyContent {
   const obj = assertObject(val, "company");
   assertExactKeys(
@@ -625,7 +631,9 @@ export function validateCompanyContent(val: unknown): CompanyContent {
     throw new ValidationError("company.youtubeUrl doit être une URL HTTP(S) valide.");
   }
 
-  return {
+  const isPublished = Boolean(obj.isPublished);
+
+  const normalizedCompany: CompanyContent = {
     tradeName: (obj.tradeName as string).trim(),
     legalName: (obj.legalName as string).trim(),
     legalForm: (obj.legalForm as string).trim(),
@@ -641,8 +649,36 @@ export function validateCompanyContent(val: unknown): CompanyContent {
     email: emailTrim,
     instagramUrl: igTrim,
     youtubeUrl: ytTrim,
-    isPublished: Boolean(obj.isPublished),
+    isPublished,
   };
+
+  if (isPublished) {
+    const requiredPublishedFields: (keyof CompanyContent)[] = [
+      "tradeName",
+      "legalName",
+      "legalForm",
+      "address",
+      "enterpriseNumber",
+      "publicationDirector",
+      "hostingProvider",
+      "hostingAddress",
+    ];
+    for (const key of requiredPublishedFields) {
+      const val = normalizedCompany[key];
+      if (typeof val === "string" && !val) {
+        throw new ValidationError(
+          `La confirmation d'identité d'entreprise requiert de renseigner '${key}'.`
+        );
+      }
+      if (typeof val === "string" && containsUnresolvedPlaceholders(val)) {
+        throw new ValidationError(
+          `Le champ company.${key} contient des mentions non complétées (placeholders).`
+        );
+      }
+    }
+  }
+
+  return normalizedCompany;
 }
 
 export function validateLegalSection(val: unknown, context: string): LegalSection {
@@ -739,8 +775,11 @@ export function validateLegalDocument(val: unknown, context: string): LegalDocum
   if (typeof obj.effectiveDate !== "string") {
     throw new ValidationError(`${context}.effectiveDate doit être une chaîne.`);
   }
-  if (typeof obj.version !== "number" || obj.version < 1) {
+  if (typeof obj.version !== "number" || !Number.isInteger(obj.version) || obj.version < 0) {
     throw new ValidationError(`${context}.version doit être un entier positif.`);
+  }
+  if (context.endsWith(".published") && obj.version < 1) {
+    throw new ValidationError(`${context}.version doit être un entier strictement positif.`);
   }
 
   if (!Array.isArray(obj.sections)) {
@@ -821,11 +860,12 @@ export function migrateSiteContentV1ToV2(v1: SiteContentV1): SiteContentV2 {
 
 export function migrateSiteContentV2ToV3(v2: SiteContentV2): SiteContent {
   const company = structuredClone(DEFAULT_COMPANY_CONTENT);
-  if (v2.home?.contact?.email) company.email = v2.home.contact.email;
-  if (v2.contactPage?.card?.phone) company.phone = v2.contactPage.card.phone;
-  if (v2.home?.contact?.instagramUrl) company.instagramUrl = v2.home.contact.instagramUrl;
-  if (v2.home?.contact?.youtubeUrl) company.youtubeUrl = v2.home.contact.youtubeUrl;
-  if (v2.common?.brandName) company.tradeName = v2.common.brandName;
+  company.email = v2.home?.contact?.email ?? "";
+  company.phone = v2.contactPage?.card?.phone ?? "";
+  company.instagramUrl = v2.home?.contact?.instagramUrl ?? "";
+  company.youtubeUrl = v2.home?.contact?.youtubeUrl ?? "";
+  company.tradeName = v2.common?.brandName || "Parallax";
+  company.isPublished = false;
 
   return {
     schemaVersion: 3,
@@ -1048,11 +1088,17 @@ export function saveHomeContent(newHome: HomeContent, previousRevision: string):
     }
   }
 
+  const updatedCompany = structuredClone(current.content.company);
+  updatedCompany.email = validatedHome.contact.email;
+  updatedCompany.instagramUrl = validatedHome.contact.instagramUrl;
+  updatedCompany.youtubeUrl = validatedHome.contact.youtubeUrl;
+
   const nextContent: SiteContent = {
     ...current.content,
     revision: nextRevision,
     updatedAt: new Date().toISOString(),
     home: validatedHome,
+    company: updatedCompany,
     media: prunedMedia,
   };
 
@@ -1325,9 +1371,17 @@ export function saveContactPageContent(
 
   const updatedCompany = structuredClone(current.content.company);
   updatedCompany.phone = validatedContact.card.phone;
-  if (canonicalCoordinates?.email) updatedCompany.email = canonicalCoordinates.email.trim();
-  if (canonicalCoordinates?.instagramUrl) updatedCompany.instagramUrl = canonicalCoordinates.instagramUrl.trim();
-  if (canonicalCoordinates?.youtubeUrl) updatedCompany.youtubeUrl = canonicalCoordinates.youtubeUrl.trim();
+  if (canonicalCoordinates) {
+    if (typeof canonicalCoordinates.email === "string") {
+      updatedCompany.email = canonicalCoordinates.email.trim();
+    }
+    if (typeof canonicalCoordinates.instagramUrl === "string") {
+      updatedCompany.instagramUrl = canonicalCoordinates.instagramUrl.trim();
+    }
+    if (typeof canonicalCoordinates.youtubeUrl === "string") {
+      updatedCompany.youtubeUrl = canonicalCoordinates.youtubeUrl.trim();
+    }
+  }
 
   const nextContent: SiteContent = {
     ...current.content,
@@ -1366,20 +1420,12 @@ export function saveCompanyContent(
   }
 
   const updatedHome = structuredClone(current.content.home);
-  if (validatedCompany.email) {
-    updatedHome.contact.email = validatedCompany.email;
-  }
-  if (validatedCompany.instagramUrl) {
-    updatedHome.contact.instagramUrl = validatedCompany.instagramUrl;
-  }
-  if (validatedCompany.youtubeUrl) {
-    updatedHome.contact.youtubeUrl = validatedCompany.youtubeUrl;
-  }
+  updatedHome.contact.email = validatedCompany.email;
+  updatedHome.contact.instagramUrl = validatedCompany.instagramUrl;
+  updatedHome.contact.youtubeUrl = validatedCompany.youtubeUrl;
 
   const updatedContactPage = structuredClone(current.content.contactPage);
-  if (validatedCompany.phone !== undefined) {
-    updatedContactPage.card.phone = validatedCompany.phone;
-  }
+  updatedContactPage.card.phone = validatedCompany.phone;
 
   const nextRevision = crypto.randomBytes(16).toString("hex");
 
@@ -1462,9 +1508,20 @@ export function saveLegalPageDraft(
   return nextRevision;
 }
 
-function containsUnresolvedPlaceholders(text: string): boolean {
-  const placeholderRegex = /\[(à compléter|to complete|date|nom|adresse|nom et adresse de l'hébergeur|ton prénom|your name)\]/i;
-  return placeholderRegex.test(text);
+export function validateEffectiveDate(dateStr: string): string {
+  const trimmed = dateStr.trim();
+  if (!trimmed) {
+    throw new ValidationError("Une date d'entrée en vigueur est obligatoire pour publier le document.");
+  }
+  if (containsUnresolvedPlaceholders(trimmed)) {
+    throw new ValidationError("La date d'entrée en vigueur contient des mentions non complétées (placeholders).");
+  }
+  if (trimmed.length < 8 || trimmed.length > 80 || !/\b(20\d{2})\b/.test(trimmed)) {
+    throw new ValidationError(
+      "La date d'entrée en vigueur doit être une date valide avec une année à 4 chiffres (ex: '15 octobre 2026' ou '2026-10-15')."
+    );
+  }
+  return trimmed;
 }
 
 export function publishLegalPage(
@@ -1490,20 +1547,32 @@ export function publishLegalPage(
   if (!draft.seoTitle.fr?.trim() || !draft.seoTitle.en?.trim()) {
     throw new ValidationError("Le titre SEO (FR et EN) est obligatoire pour publier.");
   }
+  if (containsUnresolvedPlaceholders(draft.seoTitle.fr) || containsUnresolvedPlaceholders(draft.seoTitle.en)) {
+    throw new ValidationError("Le titre SEO contient des mentions non complétées (placeholders).");
+  }
+
   if (!draft.seoDescription.fr?.trim() || !draft.seoDescription.en?.trim()) {
     throw new ValidationError("La description SEO (FR et EN) est obligatoire pour publier.");
   }
+  if (containsUnresolvedPlaceholders(draft.seoDescription.fr) || containsUnresolvedPlaceholders(draft.seoDescription.en)) {
+    throw new ValidationError("La description SEO contient des mentions non complétées (placeholders).");
+  }
+
   if (!draft.publicTitle.fr?.trim() || !draft.publicTitle.en?.trim()) {
     throw new ValidationError("Le titre public (FR et EN) est obligatoire pour publier.");
   }
+  if (containsUnresolvedPlaceholders(draft.publicTitle.fr) || containsUnresolvedPlaceholders(draft.publicTitle.en)) {
+    throw new ValidationError("Le titre public contient des mentions non complétées (placeholders).");
+  }
+
   if (!draft.intro.fr?.trim() || !draft.intro.en?.trim()) {
     throw new ValidationError("L'introduction (FR et EN) est obligatoire pour publier.");
   }
-
-  const effectiveDate = (effectiveDateOverride?.trim() || draft.effectiveDate?.trim() || "").trim();
-  if (!effectiveDate) {
-    throw new ValidationError("Une date d'entrée en vigueur est obligatoire pour publier le document.");
+  if (containsUnresolvedPlaceholders(draft.intro.fr) || containsUnresolvedPlaceholders(draft.intro.en)) {
+    throw new ValidationError("L'introduction contient des mentions non complétées (placeholders).");
   }
+
+  const effectiveDate = validateEffectiveDate(effectiveDateOverride?.trim() || draft.effectiveDate?.trim() || "");
 
   if (draft.sections.length === 0) {
     throw new ValidationError("Au moins une section de contenu est requise pour publier.");
@@ -1538,6 +1607,9 @@ export function publishLegalPage(
     }
 
     for (const li of s.listItems || []) {
+      if (!li.fr?.trim() || !li.en?.trim()) {
+        throw new ValidationError(`Un élément de liste de la section '${s.id}' est vide.`);
+      }
       if (containsUnresolvedPlaceholders(li.fr) || containsUnresolvedPlaceholders(li.en)) {
         throw new ValidationError(`Un élément de liste de la section '${s.id}' contient des mentions non complétées.`);
       }
@@ -1554,19 +1626,70 @@ export function publishLegalPage(
         throw new ValidationError(`Identifiant de cookie dupliqué dans l'inventaire: '${c.id}'.`);
       }
       cookieIds.add(c.id);
+
+      if (!c.name.fr?.trim() || !c.name.en?.trim()) {
+        throw new ValidationError(`Le cookie '${c.id}' manque d'un nom FR ou EN.`);
+      }
+      if (containsUnresolvedPlaceholders(c.name.fr) || containsUnresolvedPlaceholders(c.name.en)) {
+        throw new ValidationError(`Le cookie '${c.id}' contient des mentions non complétées.`);
+      }
+      if (!c.provider.fr?.trim() || !c.provider.en?.trim()) {
+        throw new ValidationError(`Le cookie '${c.id}' manque d'un fournisseur FR ou EN.`);
+      }
+      if (containsUnresolvedPlaceholders(c.provider.fr) || containsUnresolvedPlaceholders(c.provider.en)) {
+        throw new ValidationError(`Le fournisseur du cookie '${c.id}' contient des mentions non complétées.`);
+      }
+      if (!c.purpose.fr?.trim() || !c.purpose.en?.trim()) {
+        throw new ValidationError(`Le cookie '${c.id}' manque d'une finalité FR ou EN.`);
+      }
+      if (containsUnresolvedPlaceholders(c.purpose.fr) || containsUnresolvedPlaceholders(c.purpose.en)) {
+        throw new ValidationError(`La finalité du cookie '${c.id}' contient des mentions non complétées.`);
+      }
+      if (!c.duration.fr?.trim() || !c.duration.en?.trim()) {
+        throw new ValidationError(`Le cookie '${c.id}' manque d'une durée FR ou EN.`);
+      }
+      if (containsUnresolvedPlaceholders(c.duration.fr) || containsUnresolvedPlaceholders(c.duration.en)) {
+        throw new ValidationError(`La durée du cookie '${c.id}' contient des mentions non complétées.`);
+      }
     }
   }
 
   if (pageKey === "mentions") {
     const comp = current.content.company;
-    if (!comp.legalName || !comp.address || !comp.enterpriseNumber || !comp.hostingProvider) {
+    if (!comp.isPublished) {
       throw new ValidationError(
-        "Les mentions d'entreprise indispensables (dénomination, adresse, BCE, hébergeur) doivent être renseignées dans les paramètres d'entreprise avant de publier les mentions légales."
+        "Les paramètres d'entreprise doivent être confirmés et publiés avant de publier les mentions légales."
+      );
+    }
+    if (
+      !comp.legalName ||
+      !comp.legalForm ||
+      !comp.address ||
+      !comp.enterpriseNumber ||
+      !comp.publicationDirector ||
+      !comp.hostingProvider ||
+      !comp.hostingAddress
+    ) {
+      throw new ValidationError(
+        "Les mentions d'entreprise indispensables (dénomination légale, forme, siège social, BCE, directeur de publication, hébergeur) doivent être renseignées avant de publier les mentions légales."
+      );
+    }
+    if (
+      containsUnresolvedPlaceholders(comp.legalName) ||
+      containsUnresolvedPlaceholders(comp.address) ||
+      containsUnresolvedPlaceholders(comp.enterpriseNumber) ||
+      containsUnresolvedPlaceholders(comp.publicationDirector) ||
+      containsUnresolvedPlaceholders(comp.hostingProvider) ||
+      containsUnresolvedPlaceholders(comp.hostingAddress)
+    ) {
+      throw new ValidationError(
+        "Les paramètres d'entreprise contiennent des mentions non complétées (placeholders)."
       );
     }
   }
 
-  const nextVersion = pageRecord.published ? pageRecord.published.version + 1 : 1;
+  const currentVersion = Math.max(pageRecord.published?.version ?? 0, pageRecord.draft?.version ?? 0);
+  const nextVersion = currentVersion > 0 ? currentVersion + 1 : 1;
   const now = new Date().toISOString();
 
   const publishedDoc: LegalDocument = {
@@ -1616,8 +1739,15 @@ export function unpublishLegalPage(
   const updatedLegalPages = structuredClone(current.content.legalPages);
   const now = new Date().toISOString();
 
+  const pageRecord = updatedLegalPages[pageKey];
+  const lastVersion = Math.max(pageRecord.published?.version ?? 0, pageRecord.draft?.version ?? 0);
+  const updatedDraft = {
+    ...structuredClone(pageRecord.draft),
+    version: lastVersion > 0 ? lastVersion : 1,
+  };
+
   updatedLegalPages[pageKey] = {
-    ...updatedLegalPages[pageKey],
+    draft: updatedDraft,
     published: null,
     lastUpdated: now,
   };
@@ -1650,14 +1780,13 @@ export function getPublicCompanyContent(): Partial<CompanyContent> {
     return structuredClone(c);
   }
 
-  // If not confirmed for public publication, only return public-facing brand coordinates
+  // If not confirmed for public publication, only return public-facing vitrine coordinates
   return {
-    tradeName: c.tradeName,
-    email: c.email,
-    phone: c.phone,
-    instagramUrl: c.instagramUrl,
-    youtubeUrl: c.youtubeUrl,
-    publicationDirector: c.publicationDirector,
+    tradeName: c.tradeName || content.common?.brandName || "Parallax",
+    email: c.email || content.home?.contact?.email || "",
+    phone: c.phone || content.contactPage?.card?.phone || "",
+    instagramUrl: c.instagramUrl || content.home?.contact?.instagramUrl || "",
+    youtubeUrl: c.youtubeUrl || content.home?.contact?.youtubeUrl || "",
     isPublished: false,
   };
 }

@@ -81,17 +81,17 @@ export default function AdminLegalListPage() {
       <main className={formStyles.mainContent}>
         <div className={formStyles.topBar}>
           <div>
-            <h2 style={{ fontSize: "24px", margin: "0 0 8px", color: "var(--px-text)" }}>
+            <h2 className={formStyles.listHeaderTitle}>
               Documents légaux FR / EN
             </h2>
-            <p style={{ color: "var(--px-text-2)", margin: 0, fontSize: "14px" }}>
+            <p className={formStyles.listHeaderSubtitle}>
               Édition bilingue, sauvegarde en brouillon et publication serveur explicite.
             </p>
           </div>
           <span className={formStyles.revisionTag}>Révision : {revision}</span>
         </div>
 
-        <div style={{ display: "grid", gap: "24px", marginTop: "32px" }}>
+        <div className={formStyles.listGrid}>
           {LEGAL_PAGE_KEYS.map((key) => {
             const pageRecord = legalPages[key];
             const meta = PAGE_METADATA[key];
@@ -99,51 +99,35 @@ export default function AdminLegalListPage() {
             const publicUrls = LEGAL_PAGE_URLS[key];
 
             return (
-              <div
-                key={key}
-                className={formStyles.card}
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  flexWrap: "wrap",
-                  gap: "20px",
-                }}
-              >
-                <div style={{ maxWidth: "600px" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "8px" }}>
-                    <h3 style={{ margin: 0, fontSize: "18px", color: "var(--px-text)" }}>
+              <div key={key} className={`${formStyles.card} ${formStyles.cardFlex}`}>
+                <div className={formStyles.cardInfo}>
+                  <div className={formStyles.cardTitleRow}>
+                    <h3 className={formStyles.cardTitleHeading}>
                       {meta.frTitle} / {meta.enTitle}
                     </h3>
                     <span
-                      style={{
-                        padding: "3px 10px",
-                        borderRadius: "999px",
-                        fontSize: "12px",
-                        fontWeight: 500,
-                        background: isPublished ? "rgba(52, 211, 153, 0.15)" : "rgba(245, 158, 11, 0.15)",
-                        color: isPublished ? "#34d399" : "#f59e0b",
-                        border: isPublished
-                          ? "1px solid rgba(52, 211, 153, 0.3)"
-                          : "1px solid rgba(245, 158, 11, 0.3)",
-                      }}
+                      className={
+                        isPublished
+                          ? formStyles.statusBadgePublished
+                          : formStyles.statusBadgeDraft
+                      }
                     >
                       {isPublished
                         ? `Publié (v${pageRecord.published?.version} — ${pageRecord.published?.effectiveDate})`
                         : "Brouillon non publié"}
                     </span>
                   </div>
-                  <p style={{ margin: 0, fontSize: "14px", color: "var(--px-text-2)", lineHeight: 1.5 }}>
+                  <p className={formStyles.cardDesc}>
                     {meta.desc}
                   </p>
                   {isPublished && (
-                    <div style={{ marginTop: "10px", fontSize: "13px" }}>
-                      <span style={{ color: "var(--px-text-3)" }}>Accès public : </span>
+                    <div className={formStyles.cardPublicLinks}>
+                      <span className={formStyles.cardPublicLabel}>Accès public : </span>
                       <a
                         href={publicUrls.fr}
                         target="_blank"
                         rel="noreferrer"
-                        style={{ color: "var(--px-accent)", textDecoration: "none", marginRight: "12px" }}
+                        className={formStyles.cardPublicLink}
                       >
                         FR ↗
                       </a>
@@ -151,7 +135,7 @@ export default function AdminLegalListPage() {
                         href={publicUrls.en}
                         target="_blank"
                         rel="noreferrer"
-                        style={{ color: "var(--px-accent)", textDecoration: "none" }}
+                        className={formStyles.cardPublicLinkLast}
                       >
                         EN ↗
                       </a>
@@ -159,25 +143,16 @@ export default function AdminLegalListPage() {
                   )}
                 </div>
 
-                <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
+                <div className={formStyles.cardButtonGroup}>
                   <Link
                     to={`/admin/legal/${key}/preview`}
-                    className={formStyles.langTab}
-                    style={{
-                      background: "rgba(255, 255, 255, 0.05)",
-                      border: "1px solid var(--px-border)",
-                      color: "var(--px-text)",
-                      textDecoration: "none",
-                      display: "inline-flex",
-                      alignItems: "center",
-                    }}
+                    className={formStyles.previewButton}
                   >
                     Aperçu privé
                   </Link>
                   <Link
                     to={`/admin/legal/${key}`}
-                    className={formStyles.submitButton}
-                    style={{ textDecoration: "none", display: "inline-flex", alignItems: "center" }}
+                    className={`${formStyles.submitButton} ${formStyles.cardActionLink}`}
                   >
                     Modifier
                   </Link>

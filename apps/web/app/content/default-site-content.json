@@ -480,20 +480,20 @@
   },
   "company": {
     "tradeName": "Parallax",
-    "legalName": "LS studio",
+    "legalName": "",
     "legalForm": "",
     "address": "",
     "enterpriseNumber": "",
     "vatNumber": "",
     "vatRegime": "",
-    "publicationDirector": "Maxime",
-    "privacyContact": "contact@parallax.be",
+    "publicationDirector": "",
+    "privacyContact": "",
     "hostingProvider": "",
     "hostingAddress": "",
     "phone": "",
-    "email": "contact@parallax.be",
-    "instagramUrl": "https://instagram.com/parallax",
-    "youtubeUrl": "https://youtube.com/@parallax",
+    "email": "",
+    "instagramUrl": "",
+    "youtubeUrl": "",
     "isPublished": false
   },
   "legalPages": {
@@ -518,7 +518,7 @@
           "en": "This legal notice details the publisher of the Parallax platform, as well as hosting and contact information."
         },
         "effectiveDate": "15 octobre 2026",
-        "version": 1,
+        "version": 0,
         "sections": [
           {
             "id": "editor",
@@ -528,8 +528,8 @@
             },
             "paragraphs": [
               {
-                "fr": "Le site Parallax est édité par l'entité juridique exploitante LS studio.",
-                "en": "The Parallax website is published by the operating legal entity LS studio."
+                "fr": "Le site Parallax est édité par l'entité juridique exploitante renseignée dans les paramètres d'entreprise.",
+                "en": "The Parallax website is published by the operating legal entity specified in company settings."
               }
             ]
           },
@@ -554,8 +554,8 @@
             },
             "paragraphs": [
               {
-                "fr": "Le responsable de la publication est Maxime.",
-                "en": "The publication director is Maxime."
+                "fr": "Le responsable de la publication est précisé dans les informations d'entreprise.",
+                "en": "The publication director is specified in company information."
               }
             ]
           },
@@ -609,7 +609,7 @@
           "en": "Parallax is committed to protecting your privacy and personal data in strict compliance with the GDPR (EU Regulation 2016/679) and Belgian legislation."
         },
         "effectiveDate": "15 octobre 2026",
-        "version": 1,
+        "version": 0,
         "sections": [
           {
             "id": "data_controller",
@@ -713,7 +713,7 @@
           "en": "These terms of service govern all audiovisual production, music video direction, photography, and art direction services provided by Parallax."
         },
         "effectiveDate": "15 octobre 2026",
-        "version": 1,
+        "version": 0,
         "sections": [
           {
             "id": "scope",
@@ -804,7 +804,7 @@
           "en": "Parallax uses strictly necessary technical trackers required for website operation and enforces strict prior consent for external video players."
         },
         "effectiveDate": "15 octobre 2026",
-        "version": 1,
+        "version": 0,
         "sections": [
           {
             "id": "what_is_cookie",

@@ -321,6 +321,27 @@
   letter-spacing: 0.05em;
 }
 
+.previewBannerInner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.previewSubtext {
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.prefsErrorMsg {
+  margin-top: 16px;
+  padding: 10px 16px;
+  background: rgba(255, 107, 107, 0.1);
+  border: 1px solid rgba(255, 107, 107, 0.3);
+  border-radius: var(--r-pill);
+  color: #ff6b6b;
+  font-size: 14px;
+}
+
 @media (max-width: 900px) {
   .titleSection {
     padding: 60px 24px 12px;

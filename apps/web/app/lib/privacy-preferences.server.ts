@@ -28,12 +28,12 @@ export function createSignedPrivacyCookie(
   const cookieVal = `${payload}.${sig}`;
   const isSecure = isProductionHttps();
 
-  return `${PRIVACY_COOKIE_NAME}=${cookieVal}; Path=/; SameSite=Lax; Max-Age=${PRIVACY_COOKIE_MAX_AGE_SECONDS}${isSecure ? "; Secure" : ""}`;
+  return `${PRIVACY_COOKIE_NAME}=${cookieVal}; Path=/; SameSite=Lax; Max-Age=${PRIVACY_COOKIE_MAX_AGE_SECONDS}; HttpOnly${isSecure ? "; Secure" : ""}`;
 }
 
 export function createClearPrivacyCookie(): string {
   const isSecure = isProductionHttps();
-  return `${PRIVACY_COOKIE_NAME}=; Path=/; SameSite=Lax; Max-Age=0${isSecure ? "; Secure" : ""}`;
+  return `${PRIVACY_COOKIE_NAME}=; Path=/; SameSite=Lax; Max-Age=0; HttpOnly${isSecure ? "; Secure" : ""}`;
 }
 
 export function parsePrivacyCookie(

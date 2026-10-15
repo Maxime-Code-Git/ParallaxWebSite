@@ -1,54 +1,86 @@
-import {
-  PRIVACY_COOKIE_NAME,
-  type VideoProvider,
-} from "./privacy-preferences.shared";
+import type { VideoProvider } from "./privacy-preferences.shared";
 
-let inMemoryOneTime: Record<VideoProvider, boolean> = {
-  youtube: false,
-  vimeo: false,
-};
+let validatedServerPrefs: { youtube: boolean; vimeo: boolean } | null = null;
+const inMemoryOneTimeByMedia = new Map<string, boolean>();
 
-export function getClientOneTimeConsent(provider: VideoProvider): boolean {
-  return Boolean(inMemoryOneTime[provider]);
+export function getClientOneTimeConsent(mediaUrl: string): boolean {
+  if (!mediaUrl) return false;
+  return Boolean(inMemoryOneTimeByMedia.get(mediaUrl));
 }
 
-export function setClientOneTimeConsent(provider: VideoProvider, granted = true): void {
-  inMemoryOneTime[provider] = granted;
-  if (!granted && typeof window !== "undefined") {
-    window.dispatchEvent(
-      new CustomEvent("parallax:privacy-updated", {
-        detail: { provider, granted: false },
-      })
-    );
+export function setClientOneTimeConsent(mediaUrlOrProvider: string, granted = true): void {
+  if (!mediaUrlOrProvider) return;
+  if (granted) {
+    inMemoryOneTimeByMedia.set(mediaUrlOrProvider, true);
+  } else {
+    inMemoryOneTimeByMedia.delete(mediaUrlOrProvider);
+    if (mediaUrlOrProvider === "youtube" || mediaUrlOrProvider === "vimeo") {
+      for (const key of Array.from(inMemoryOneTimeByMedia.keys())) {
+        if (key.includes(mediaUrlOrProvider)) {
+          inMemoryOneTimeByMedia.delete(key);
+        }
+      }
+    }
   }
 }
 
-export function parseClientPrivacyCookie(): { youtube: boolean; vimeo: boolean } {
-  if (typeof document === "undefined") {
-    return { youtube: false, vimeo: false };
-  }
-  const cookies = document.cookie || "";
-  const match = cookies.match(new RegExp(`(?:^|;\\s*)${PRIVACY_COOKIE_NAME}=([^;]+)`));
-  if (!match) {
-    return { youtube: false, vimeo: false };
-  }
-  const parts = match[1].split(".");
-  if (parts.length !== 5) {
-    return { youtube: false, vimeo: false };
-  }
-  const [, ytStr, vimStr] = parts;
-  return {
-    youtube: ytStr === "1",
-    vimeo: vimStr === "1",
+export function clearClientOneTimeConsents(): void {
+  inMemoryOneTimeByMedia.clear();
+}
+
+export function resetClientPrivacyState(): void {
+  validatedServerPrefs = null;
+  inMemoryOneTimeByMedia.clear();
+}
+
+export function setClientValidatedPreferences(prefs: { youtube: boolean; vimeo: boolean }): void {
+  validatedServerPrefs = {
+    youtube: Boolean(prefs.youtube),
+    vimeo: Boolean(prefs.vimeo),
   };
 }
 
-export function hasProviderConsent(provider: VideoProvider): boolean {
-  if (getClientOneTimeConsent(provider)) {
+export function getClientValidatedPreferences(): { youtube: boolean; vimeo: boolean } | null {
+  return validatedServerPrefs ? { ...validatedServerPrefs } : null;
+}
+
+export async function fetchValidatedPreferences(): Promise<{ youtube: boolean; vimeo: boolean }> {
+  if (typeof window === "undefined") {
+    return { youtube: false, vimeo: false };
+  }
+  try {
+    const res = await fetch("/api/privacy/preferences", {
+      headers: {
+        "Accept": "application/json",
+      },
+    });
+    if (res.ok) {
+      const data = (await res.json()) as {
+        ok: boolean;
+        preferences: { youtube: boolean; vimeo: boolean };
+      };
+      if (data && data.ok && data.preferences) {
+        validatedServerPrefs = {
+          youtube: Boolean(data.preferences.youtube),
+          vimeo: Boolean(data.preferences.vimeo),
+        };
+        return { ...validatedServerPrefs };
+      }
+    }
+  } catch {
+    // Network or server error
+  }
+  return { youtube: false, vimeo: false };
+}
+
+export function hasProviderConsent(provider: VideoProvider, mediaUrl?: string): boolean {
+  if (mediaUrl && inMemoryOneTimeByMedia.get(mediaUrl) === true) {
     return true;
   }
-  const persistent = parseClientPrivacyCookie();
-  return Boolean(persistent[provider]);
+  if (validatedServerPrefs && validatedServerPrefs[provider] === true) {
+    return true;
+  }
+  return false;
 }
 
 export async function persistProviderPreferences(prefs: {
@@ -57,7 +89,7 @@ export async function persistProviderPreferences(prefs: {
 }): Promise<boolean> {
   if (typeof window === "undefined") return false;
   try {
-    const current = parseClientPrivacyCookie();
+    const current = validatedServerPrefs || { youtube: false, vimeo: false };
     const updated = {
       youtube: prefs.youtube !== undefined ? prefs.youtube : current.youtube,
       vimeo: prefs.vimeo !== undefined ? prefs.vimeo : current.vimeo,
@@ -67,22 +99,29 @@ export async function persistProviderPreferences(prefs: {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        "Accept": "application/json",
       },
       body: JSON.stringify(updated),
     });
 
     if (res.ok) {
-      if (prefs.youtube) inMemoryOneTime.youtube = true;
-      if (prefs.vimeo) inMemoryOneTime.vimeo = true;
-      if (prefs.youtube === false) inMemoryOneTime.youtube = false;
-      if (prefs.vimeo === false) inMemoryOneTime.vimeo = false;
+      const data = (await res.json()) as {
+        ok: boolean;
+        preferences?: { youtube: boolean; vimeo: boolean };
+      };
+      if (data && data.ok) {
+        validatedServerPrefs = {
+          youtube: Boolean(data.preferences?.youtube ?? updated.youtube),
+          vimeo: Boolean(data.preferences?.vimeo ?? updated.vimeo),
+        };
 
-      window.dispatchEvent(
-        new CustomEvent("parallax:privacy-updated", {
-          detail: updated,
-        })
-      );
-      return true;
+        window.dispatchEvent(
+          new CustomEvent("parallax:privacy-updated", {
+            detail: validatedServerPrefs,
+          })
+        );
+        return true;
+      }
     }
   } catch {
     // Network or server issue
@@ -91,7 +130,9 @@ export async function persistProviderPreferences(prefs: {
 }
 
 export async function revokeAllProviderConsent(): Promise<boolean> {
-  inMemoryOneTime = { youtube: false, vimeo: false };
+  inMemoryOneTimeByMedia.clear();
+  validatedServerPrefs = { youtube: false, vimeo: false };
+
   if (typeof window !== "undefined") {
     window.dispatchEvent(
       new CustomEvent("parallax:privacy-updated", {
@@ -99,11 +140,13 @@ export async function revokeAllProviderConsent(): Promise<boolean> {
       })
     );
   }
+
   try {
     const res = await fetch("/api/privacy/preferences", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        "Accept": "application/json",
       },
       body: JSON.stringify({ action: "revoke_all" }),
     });

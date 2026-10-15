@@ -137,3 +137,14 @@
   height: 16px;
   cursor: pointer;
 }
+
+.consentError {
+  font-size: 13px;
+  color: #ff6b6b;
+  background: rgba(255, 107, 107, 0.1);
+  border: 1px solid rgba(255, 107, 107, 0.25);
+  border-radius: var(--r-pill);
+  padding: 8px 16px;
+  margin: 4px 0;
+  max-width: 500px;
+}

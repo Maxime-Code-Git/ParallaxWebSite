@@ -13,10 +13,19 @@ import {
   getPublicCompanyContent,
 } from "../../lib/site-content.server";
 import { parsePrivacyCookie } from "../../lib/privacy-preferences.server";
+import { ENV } from "../../lib/env.server";
 import { LegalPageView } from "../../components/public/LegalPageView";
 
+export function normalizeLegalPathname(pathname: string): string {
+  let clean = pathname.replace(/\/+$/, "");
+  if (clean.endsWith(".data")) {
+    clean = clean.slice(0, -".data".length).replace(/\/+$/, "");
+  }
+  return clean;
+}
+
 export function resolveLegalRoute(pathname: string): { pageKey: LegalPageKey; lang: "fr" | "en" } | null {
-  const clean = pathname.replace(/\/+$/, "");
+  const clean = normalizeLegalPathname(pathname);
   for (const [key, urls] of Object.entries(LEGAL_PAGE_URLS)) {
     if (urls.fr === clean) {
       return { pageKey: key as LegalPageKey, lang: "fr" };
@@ -63,19 +72,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 
   const headers = new Headers();
-  if (pageKey === "cookies" || !publishedDoc) {
-    headers.set("Cache-Control", "private, no-cache");
-    headers.set("Vary", "Cookie");
-  } else {
-    headers.set("Cache-Control", "public, max-age=300, stale-while-revalidate=86400");
-  }
+  headers.set("Cache-Control", "private, no-store");
+  headers.set("Vary", "Cookie");
 
   return data<LegalPageLoaderData>(
     {
       lang,
       pageKey,
       alternateUrls,
-      siteUrl: url.origin,
+      siteUrl: ENV.PUBLIC_SITE_URL,
       common: content.common,
       company: publicCompany,
       document: publishedDoc,

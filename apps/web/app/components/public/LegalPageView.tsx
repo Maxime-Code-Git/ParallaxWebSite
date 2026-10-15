@@ -9,7 +9,8 @@ import type {
   LegalPageKey,
 } from "../../lib/site-content.shared";
 import {
-  parseClientPrivacyCookie,
+  setClientValidatedPreferences,
+  fetchValidatedPreferences,
   persistProviderPreferences,
   revokeAllProviderConsent,
 } from "../../lib/privacy-client";
@@ -40,12 +41,16 @@ export function LegalPageView({
 
   // Client-side privacy preferences state
   const [prefs, setPrefs] = useState<{ youtube: boolean; vimeo: boolean }>(initialPreferences);
-  const [saveStatus, setSaveStatus] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   useEffect(() => {
+    if (initialPreferences) {
+      setClientValidatedPreferences(initialPreferences);
+    }
     if (pageKey === "cookies") {
-      const clientPrefs = parseClientPrivacyCookie();
-      setPrefs(clientPrefs);
+      void fetchValidatedPreferences().then((verified) => {
+        setPrefs(verified);
+      });
 
       function handlePrivacyUpdated(e: Event) {
         const customEvent = e as CustomEvent<{ youtube?: boolean; vimeo?: boolean }>;
@@ -60,41 +65,147 @@ export function LegalPageView({
       window.addEventListener("parallax:privacy-updated", handlePrivacyUpdated);
       return () => window.removeEventListener("parallax:privacy-updated", handlePrivacyUpdated);
     }
-  }, [pageKey]);
+  }, [pageKey, initialPreferences]);
 
-  const handleClientSave = async (e: FormEvent) => {
+  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    setSaveStatus(null);
-    const success = await persistProviderPreferences(prefs);
-    if (success) {
-      setSaveStatus(
-        lang === "fr"
-          ? "Vos préférences ont été enregistrées avec succès."
-          : "Your preferences have been saved successfully."
-      );
-    }
-  };
+    setFeedback(null);
+    const submitEvent = e.nativeEvent as SubmitEvent;
+    const submitter = submitEvent.submitter as HTMLButtonElement | null;
+    const actionType = submitter?.value || "save";
 
-  const handleClientRevoke = async () => {
-    setSaveStatus(null);
-    const success = await revokeAllProviderConsent();
-    if (success) {
-      setPrefs({ youtube: false, vimeo: false });
-      setSaveStatus(
-        lang === "fr"
-          ? "Tous les consentements ont été révoqués."
-          : "All consents have been revoked."
-      );
+    if (actionType === "revoke_all" || actionType === "refuse_all") {
+      const success = await revokeAllProviderConsent();
+      if (success) {
+        setPrefs({ youtube: false, vimeo: false });
+        setFeedback({
+          type: "success",
+          text: lang === "fr" ? "Tous les consentements ont été révoqués." : "All consents have been revoked.",
+        });
+      } else {
+        setFeedback({
+          type: "error",
+          text: lang === "fr" ? "Erreur réseau lors de la révocation des consentements." : "Network error while revoking consents.",
+        });
+      }
+    } else {
+      const success = await persistProviderPreferences(prefs);
+      if (success) {
+        setFeedback({
+          type: "success",
+          text: lang === "fr" ? "Vos préférences ont été enregistrées avec succès." : "Your preferences have been saved successfully.",
+        });
+      } else {
+        setFeedback({
+          type: "error",
+          text: lang === "fr" ? "Erreur réseau lors de l'enregistrement de vos préférences." : "Network error while saving your preferences.",
+        });
+      }
     }
   };
 
   const currentCanonicalUrl = alternateUrls[lang];
 
+  const renderPreferencesCard = () => (
+    <div id="preferences" className={styles.preferencesCard}>
+      <h2 className={styles.preferencesCardTitle}>
+        {lang === "fr" ? "Gestion de vos préférences" : "Manage your preferences"}
+      </h2>
+      <p className={styles.preferencesCardDesc}>
+        {lang === "fr"
+          ? "Par défaut, aucun lecteur externe (YouTube ou Vimeo) n'est chargé sans votre autorisation préalable. Vous pouvez mémoriser vos préférences ici pour une durée maximale de 6 mois, ou révoquer vos choix à tout moment."
+          : "By default, no third-party player (YouTube or Vimeo) is loaded without your prior authorization. You can save your preferences here for up to 6 months, or revoke them at any time."}
+      </p>
+
+      <form
+        method="POST"
+        action="/api/privacy/preferences"
+        onSubmit={handleSubmit}
+      >
+        <input type="hidden" name="returnTo" value={`${currentCanonicalUrl}#preferences`} />
+
+        <div className={styles.preferenceItem}>
+          <input
+            type="checkbox"
+            id="pref-youtube"
+            name="youtube"
+            value="true"
+            checked={prefs.youtube}
+            onChange={(e) => setPrefs({ ...prefs, youtube: e.target.checked })}
+            className={styles.preferenceCheckbox}
+          />
+          <div className={styles.preferenceLabelGroup}>
+            <label htmlFor="pref-youtube" className={styles.preferenceLabel}>
+              YouTube
+            </label>
+            <span className={styles.preferenceSubtext}>
+              {lang === "fr"
+                ? "Autoriser le chargement des vidéos YouTube dans le lecteur du site."
+                : "Allow YouTube videos to load in the site player."}
+            </span>
+          </div>
+        </div>
+
+        <div className={styles.preferenceItem}>
+          <input
+            type="checkbox"
+            id="pref-vimeo"
+            name="vimeo"
+            value="true"
+            checked={prefs.vimeo}
+            onChange={(e) => setPrefs({ ...prefs, vimeo: e.target.checked })}
+            className={styles.preferenceCheckbox}
+          />
+          <div className={styles.preferenceLabelGroup}>
+            <label htmlFor="pref-vimeo" className={styles.preferenceLabel}>
+              Vimeo
+            </label>
+            <span className={styles.preferenceSubtext}>
+              {lang === "fr"
+                ? "Autoriser le chargement des vidéos Vimeo dans le lecteur du site."
+                : "Allow Vimeo videos to load in the site player."}
+            </span>
+          </div>
+        </div>
+
+        <div className={styles.preferencesActions}>
+          <button
+            type="submit"
+            name="action"
+            value="save"
+            className={styles.savePrefsButton}
+          >
+            {lang === "fr" ? "Enregistrer mes choix" : "Save my choices"}
+          </button>
+          <button
+            type="submit"
+            name="action"
+            value="revoke_all"
+            className={styles.revokePrefsButton}
+          >
+            {lang === "fr" ? "Révoquer tous les consentements" : "Revoke all consents"}
+          </button>
+        </div>
+
+        {feedback?.type === "success" && (
+          <div role="status" className={styles.prefsStatusMsg}>
+            {feedback.text}
+          </div>
+        )}
+        {feedback?.type === "error" && (
+          <div role="alert" className={styles.prefsErrorMsg}>
+            {feedback.text}
+          </div>
+        )}
+      </form>
+    </div>
+  );
+
   return (
     <div className={styles.pageRoot}>
       {isPreview && (
         <aside className={styles.previewBanner} aria-label="Bandeau de prévisualisation">
-          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          <div className={styles.previewBannerInner}>
             <span className={styles.previewBadge}>Aperçu privé</span>
             <span>
               {lang === "fr"
@@ -102,7 +213,7 @@ export function LegalPageView({
                 : "Admin preview mode — this document is not public."}
             </span>
           </div>
-          <span style={{ fontSize: "12px", opacity: 0.85 }}>noindex, no-store</span>
+          <span className={styles.previewSubtext}>noindex, no-store</span>
         </aside>
       )}
 
@@ -129,6 +240,9 @@ export function LegalPageView({
                     : "This document has not been published yet. Please check back later."}
                 </p>
               </div>
+
+              {/* Preferences are available even before editorial publication */}
+              {pageKey === "cookies" && renderPreferencesCard()}
             </div>
           </div>
         ) : (
@@ -287,93 +401,7 @@ export function LegalPageView({
                       </div>
                     )}
 
-                    {/* Preferences Management Card */}
-                    <div id="preferences" className={styles.preferencesCard}>
-                      <h2 className={styles.preferencesCardTitle}>
-                        {lang === "fr" ? "Gestion de vos préférences" : "Manage your preferences"}
-                      </h2>
-                      <p className={styles.preferencesCardDesc}>
-                        {lang === "fr"
-                          ? "Par défaut, aucun lecteur externe (YouTube ou Vimeo) n'est chargé sans votre autorisation préalable. Vous pouvez mémoriser vos préférences ici pour une durée maximale de 6 mois, ou révoquer vos choix à tout moment."
-                          : "By default, no third-party player (YouTube or Vimeo) is loaded without your prior authorization. You can save your preferences here for up to 6 months, or revoke them at any time."}
-                      </p>
-
-                      <form
-                        method="POST"
-                        action="/api/privacy/preferences"
-                        onSubmit={handleClientSave}
-                      >
-                        <input type="hidden" name="returnTo" value={currentCanonicalUrl} />
-
-                        <div className={styles.preferenceItem}>
-                          <input
-                            type="checkbox"
-                            id="pref-youtube"
-                            name="youtube"
-                            value="true"
-                            checked={prefs.youtube}
-                            onChange={(e) => setPrefs({ ...prefs, youtube: e.target.checked })}
-                            className={styles.preferenceCheckbox}
-                          />
-                          <div className={styles.preferenceLabelGroup}>
-                            <label htmlFor="pref-youtube" className={styles.preferenceLabel}>
-                              YouTube
-                            </label>
-                            <span className={styles.preferenceSubtext}>
-                              {lang === "fr"
-                                ? "Autoriser le chargement des vidéos YouTube dans le lecteur du site."
-                                : "Allow YouTube videos to load in the site player."}
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className={styles.preferenceItem}>
-                          <input
-                            type="checkbox"
-                            id="pref-vimeo"
-                            name="vimeo"
-                            value="true"
-                            checked={prefs.vimeo}
-                            onChange={(e) => setPrefs({ ...prefs, vimeo: e.target.checked })}
-                            className={styles.preferenceCheckbox}
-                          />
-                          <div className={styles.preferenceLabelGroup}>
-                            <label htmlFor="pref-vimeo" className={styles.preferenceLabel}>
-                              Vimeo
-                            </label>
-                            <span className={styles.preferenceSubtext}>
-                              {lang === "fr"
-                                ? "Autoriser le chargement des vidéos Vimeo dans le lecteur du site."
-                                : "Allow Vimeo videos to load in the site player."}
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className={styles.preferencesActions}>
-                          <button
-                            type="submit"
-                            name="action"
-                            value="save"
-                            className={styles.savePrefsButton}
-                          >
-                            {lang === "fr" ? "Enregistrer mes choix" : "Save my choices"}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={handleClientRevoke}
-                            className={styles.revokePrefsButton}
-                          >
-                            {lang === "fr" ? "Révoquer tous les consentements" : "Revoke all consents"}
-                          </button>
-                        </div>
-
-                        {saveStatus && (
-                          <div role="status" className={styles.prefsStatusMsg}>
-                            {saveStatus}
-                          </div>
-                        )}
-                      </form>
-                    </div>
+                    {renderPreferencesCard()}
                   </>
                 )}
               </div>

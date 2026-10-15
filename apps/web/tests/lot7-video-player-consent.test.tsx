@@ -3,13 +3,14 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import { VideoModal, parseVideoEmbedUrl } from "../app/components/public/VideoModal";
 import { PRIVACY_COOKIE_NAME } from "../app/lib/privacy-preferences.shared";
-import { setClientOneTimeConsent } from "../app/lib/privacy-client";
+import { setClientOneTimeConsent, resetClientPrivacyState } from "../app/lib/privacy-client";
 
 describe("Lot 7 - Video Player APD-Compliant Consent & Immediate Revocation", () => {
   beforeEach(() => {
     // Clear cookies
     document.cookie = `${PRIVACY_COOKIE_NAME}=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT`;
-    // Clear one-time in-memory consent
+    // Clear state
+    resetClientPrivacyState();
     setClientOneTimeConsent("youtube", false);
     setClientOneTimeConsent("vimeo", false);
   });
@@ -90,12 +91,19 @@ describe("Lot 7 - Video Player APD-Compliant Consent & Immediate Revocation", ()
   });
 
   it("accepting with remember option triggers persistence request", async () => {
-    const fetchSpy = vi.spyOn(global, "fetch").mockResolvedValueOnce(
-      new Response(JSON.stringify({ ok: true }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      })
-    );
+    const fetchSpy = vi.spyOn(global, "fetch").mockImplementation(async (_url, init) => {
+      const isPost = init?.method === "POST";
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          preferences: isPost ? { youtube: true, vimeo: false } : { youtube: false, vimeo: false },
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+    });
 
     render(
       <VideoModal

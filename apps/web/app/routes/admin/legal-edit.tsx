@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs, HeadersArgs } from "react-router";
-import { Link, useLoaderData } from "react-router";
+import { Link, useFetcher, useLoaderData } from "react-router";
 import {
   requireValidAdminSession,
   createAdminHeaders,
@@ -25,6 +25,8 @@ import {
   type LegalPageKey,
   type LegalDocument,
   type LegalPageRecord,
+  type LegalSection,
+  type LocalizedString,
 } from "../../lib/site-content.shared";
 import formStyles from "./adminForms.module.css";
 
@@ -130,8 +132,19 @@ export async function action({ request, params }: ActionFunctionArgs) {
     }
 
     if (intent === "publish") {
+      let currentRev = revision;
+      const rawDraft = String(formData.get("draftData") || "");
+      if (rawDraft) {
+        let draftData: LegalDocument;
+        try {
+          draftData = JSON.parse(rawDraft);
+        } catch {
+          return Response.json({ error: "Données de brouillon invalides." }, { status: 400, headers });
+        }
+        currentRev = saveLegalPageDraft(pageKey, draftData, currentRev);
+      }
       const effectiveDate = String(formData.get("effectiveDate") || "").trim() || undefined;
-      const newRevision = publishLegalPage(pageKey, revision, effectiveDate);
+      const newRevision = publishLegalPage(pageKey, currentRev, effectiveDate);
       const updated = getRawSiteContent().content;
       return Response.json(
         {
@@ -181,6 +194,16 @@ export async function action({ request, params }: ActionFunctionArgs) {
   }
 }
 
+interface ActionResponseData {
+  success?: boolean;
+  action?: "save_draft" | "publish" | "unpublish";
+  newRevision?: string;
+  pageRecord?: LegalPageRecord;
+  error?: string;
+  conflict?: boolean;
+  serverRevision?: string;
+}
+
 export default function AdminLegalEditPage() {
   const { csrfToken, pageKey, pageRecord: initialRecord, revision: initialRevision } =
     useLoaderData<{
@@ -190,6 +213,9 @@ export default function AdminLegalEditPage() {
       revision: string;
       isCorrupted: boolean;
     }>();
+
+  const fetcher = useFetcher<ActionResponseData>();
+  const isSubmitting = fetcher.state === "submitting" || fetcher.state === "loading";
 
   const [activeLang, setActiveLang] = useState<"fr" | "en">("fr");
   const [pageRecord, setPageRecord] = useState<LegalPageRecord>(initialRecord);
@@ -202,9 +228,79 @@ export default function AdminLegalEditPage() {
     null
   );
   const [conflictRevision, setConflictRevision] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Raw section texts keeping raw keystrokes (trailing spaces, newlines, blank lines)
+  const [sectionRawTexts, setSectionRawTexts] = useState<Record<string, { fr: string; en: string }>>(() => {
+    const initial: Record<string, { fr: string; en: string }> = {};
+    for (const sec of initialRecord.draft.sections) {
+      initial[sec.id] = {
+        fr: sec.paragraphs.map((p) => p.fr).join("\n\n"),
+        en: sec.paragraphs.map((p) => p.en).join("\n\n"),
+      };
+    }
+    return initial;
+  });
+
+  const [hasUnsavedEdits, setHasUnsavedEdits] = useState(false);
 
   const isPublished = Boolean(pageRecord.published);
+
+  useEffect(() => {
+    if (!fetcher.data) return;
+
+    if (fetcher.data.success) {
+      if (fetcher.data.newRevision) {
+        setCurrentRevision(fetcher.data.newRevision);
+      }
+      if (fetcher.data.pageRecord) {
+        setPageRecord(fetcher.data.pageRecord);
+        // Only re-sync draft/raw texts if user hasn't made further edits
+        if (!hasUnsavedEdits) {
+          setDraft(fetcher.data.pageRecord.draft);
+          const updatedRaw: Record<string, { fr: string; en: string }> = {};
+          for (const sec of fetcher.data.pageRecord.draft.sections) {
+            updatedRaw[sec.id] = {
+              fr: sec.paragraphs.map((p) => p.fr).join("\n\n"),
+              en: sec.paragraphs.map((p) => p.en).join("\n\n"),
+            };
+          }
+          setSectionRawTexts(updatedRaw);
+        }
+      }
+      setHasUnsavedEdits(false);
+
+      if (fetcher.data.action === "save_draft") {
+        setFeedback({
+          type: "success",
+          text: "Brouillon enregistré avec succès. La version publiée reste inchangée.",
+        });
+      } else if (fetcher.data.action === "publish") {
+        setFeedback({
+          type: "success",
+          text: `Document publié avec succès (version ${fetcher.data.pageRecord?.published?.version} du ${fetcher.data.pageRecord?.published?.effectiveDate}).`,
+        });
+      } else if (fetcher.data.action === "unpublish") {
+        setFeedback({
+          type: "success",
+          text: "Document dépublié. Le document public affichera désormais un état neutre en attente.",
+        });
+      }
+    } else if (fetcher.data.conflict) {
+      // 409 conflict: keep user's active inputs, active tab, and focus intact
+      setConflictRevision(fetcher.data.serverRevision || null);
+      setFeedback({
+        type: "error",
+        text:
+          fetcher.data.error ||
+          "Conflit de révision : le contenu a été modifié sur le serveur. Vos modifications locales ont été conservées.",
+      });
+    } else if (fetcher.data.error) {
+      setFeedback({
+        type: "error",
+        text: fetcher.data.error,
+      });
+    }
+  }, [fetcher.data]);
 
   const handleLocalizedFieldChange = (
     field: "publicTitle" | "seoTitle" | "seoDescription" | "intro",
@@ -217,6 +313,7 @@ export default function AdminLegalEditPage() {
         [activeLang]: value,
       },
     }));
+    setHasUnsavedEdits(true);
   };
 
   const handleSectionTitleChange = (sectionIdx: number, value: string) => {
@@ -231,35 +328,118 @@ export default function AdminLegalEditPage() {
       };
       return { ...prev, sections: nextSections };
     });
+    setHasUnsavedEdits(true);
   };
 
-  const handleSectionParagraphsChange = (sectionIdx: number, text: string) => {
-    // Split by newlines into paragraphs
-    const paragraphs = text
-      .split("\n\n")
-      .map((p) => p.trim())
-      .filter(Boolean);
+  const handleSectionParagraphsChange = (sectionId: string, text: string) => {
+    // Preserve raw input: spaces, empty lines, trailing spaces are NOT modified
+    setSectionRawTexts((prev) => ({
+      ...prev,
+      [sectionId]: {
+        ...prev[sectionId],
+        [activeLang]: text,
+      },
+    }));
+    setHasUnsavedEdits(true);
+  };
 
+  const handleInventoryFieldChange = (
+    index: number,
+    field: "name" | "provider" | "purpose" | "duration",
+    val: string
+  ) => {
     setDraft((prev) => {
-      const nextSections = [...prev.sections];
-      const currentSec = nextSections[sectionIdx];
-      const otherLang = activeLang === "fr" ? "en" : "fr";
-
-      const updatedParagraphs = paragraphs.map((p, pIdx) => ({
-        [activeLang]: p,
-        [otherLang]: currentSec.paragraphs[pIdx]?.[otherLang] || "",
-      })) as { fr: string; en: string }[];
-
-      nextSections[sectionIdx] = {
-        ...currentSec,
-        paragraphs: updatedParagraphs,
+      const currentInv = prev.inventory ? [...prev.inventory] : [];
+      if (!currentInv[index]) return prev;
+      currentInv[index] = {
+        ...currentInv[index],
+        [field]: {
+          ...currentInv[index][field],
+          [activeLang]: val,
+        },
       };
-      return { ...prev, sections: nextSections };
+      return { ...prev, inventory: currentInv };
     });
+    setHasUnsavedEdits(true);
   };
 
-  const executeAction = async (intent: "save_draft" | "publish" | "unpublish") => {
-    setIsSubmitting(true);
+  const handleInventoryCategoryChange = (
+    index: number,
+    cat: "technical" | "preferences"
+  ) => {
+    setDraft((prev) => {
+      const currentInv = prev.inventory ? [...prev.inventory] : [];
+      if (!currentInv[index]) return prev;
+      currentInv[index] = {
+        ...currentInv[index],
+        category: cat,
+      };
+      return { ...prev, inventory: currentInv };
+    });
+    setHasUnsavedEdits(true);
+  };
+
+  const handleAddInventoryRow = () => {
+    setDraft((prev) => {
+      const currentInv = prev.inventory ? [...prev.inventory] : [];
+      const newId = `cookie_${Date.now()}`;
+      currentInv.push({
+        id: newId,
+        name: { fr: "", en: "" },
+        provider: { fr: "Parallax", en: "Parallax" },
+        category: "technical",
+        purpose: { fr: "", en: "" },
+        duration: { fr: "", en: "" },
+      });
+      return { ...prev, inventory: currentInv };
+    });
+    setHasUnsavedEdits(true);
+  };
+
+  const handleDeleteInventoryRow = (index: number) => {
+    setDraft((prev) => {
+      const currentInv = prev.inventory ? [...prev.inventory] : [];
+      currentInv.splice(index, 1);
+      return { ...prev, inventory: currentInv };
+    });
+    setHasUnsavedEdits(true);
+  };
+
+  const buildCurrentDraft = (): LegalDocument => {
+    const updatedSections: LegalSection[] = draft.sections.map((sec) => {
+      const raw = sectionRawTexts[sec.id] || { fr: "", en: "" };
+      const frParas = raw.fr
+        .split(/\n\s*\n/)
+        .map((p) => p.trim())
+        .filter(Boolean);
+      const enParas = raw.en
+        .split(/\n\s*\n/)
+        .map((p) => p.trim())
+        .filter(Boolean);
+
+      const maxLen = Math.max(frParas.length, enParas.length);
+      const paragraphs: LocalizedString[] = [];
+      for (let i = 0; i < maxLen; i++) {
+        paragraphs.push({
+          fr: frParas[i] || "",
+          en: enParas[i] || "",
+        });
+      }
+
+      return {
+        ...sec,
+        paragraphs,
+      };
+    });
+
+    return {
+      ...draft,
+      effectiveDate,
+      sections: updatedSections,
+    };
+  };
+
+  const executeAction = (intent: "save_draft" | "publish" | "unpublish") => {
     setFeedback(null);
     setConflictRevision(null);
 
@@ -268,58 +448,15 @@ export default function AdminLegalEditPage() {
     body.set("revision", currentRevision);
     body.set("intent", intent);
 
-    if (intent === "save_draft") {
-      body.set("draftData", JSON.stringify(draft));
-    } else if (intent === "publish") {
+    if (intent === "save_draft" || intent === "publish") {
+      const fullDraft = buildCurrentDraft();
+      body.set("draftData", JSON.stringify(fullDraft));
+    }
+    if (intent === "publish") {
       body.set("effectiveDate", effectiveDate);
     }
 
-    try {
-      const res = await fetch(`/admin/legal/${pageKey}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: body.toString(),
-      });
-
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setCurrentRevision(data.newRevision);
-        setPageRecord(data.pageRecord);
-        setDraft(data.pageRecord.draft);
-
-        if (intent === "save_draft") {
-          setFeedback({
-            type: "success",
-            text: "Brouillon enregistré avec succès. La version publiée reste inchangée.",
-          });
-        } else if (intent === "publish") {
-          setFeedback({
-            type: "success",
-            text: `Document publié avec succès (version ${data.pageRecord.published?.version} du ${data.pageRecord.published?.effectiveDate}).`,
-          });
-        } else if (intent === "unpublish") {
-          setFeedback({
-            type: "success",
-            text: "Document dépublié. Le document public affichera désormais un état neutre en attente.",
-          });
-        }
-      } else {
-        if (data.conflict) {
-          setConflictRevision(data.serverRevision);
-        }
-        setFeedback({
-          type: "error",
-          text: data.error || "Une erreur est survenue.",
-        });
-      }
-    } catch {
-      setFeedback({
-        type: "error",
-        text: "Erreur réseau lors de la communication avec le serveur.",
-      });
-    } finally {
-      setIsSubmitting(false);
-    }
+    fetcher.submit(body, { method: "POST" });
   };
 
   return (
@@ -331,17 +468,11 @@ export default function AdminLegalEditPage() {
           </Link>
           <h1 className={formStyles.pageHeading}>Édition : {draft.publicTitle.fr}</h1>
         </div>
-        <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+        <div className={formStyles.headerActions}>
           <Link
             to={`/admin/legal/${pageKey}/preview`}
             target="_blank"
-            className={formStyles.langTab}
-            style={{
-              background: "rgba(255, 255, 255, 0.05)",
-              border: "1px solid var(--px-border)",
-              color: "var(--px-text)",
-              textDecoration: "none",
-            }}
+            className={formStyles.previewButton}
           >
             Aperçu privé ↗
           </Link>
@@ -350,20 +481,14 @@ export default function AdminLegalEditPage() {
 
       <main className={formStyles.mainContent}>
         <div className={formStyles.topBar}>
-          <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
+          <div className={formStyles.topBarLeft}>
             <span className={formStyles.revisionTag}>Révision : {currentRevision}</span>
             <span
-              style={{
-                padding: "3px 10px",
-                borderRadius: "999px",
-                fontSize: "12px",
-                fontWeight: 500,
-                background: isPublished ? "rgba(52, 211, 153, 0.15)" : "rgba(245, 158, 11, 0.15)",
-                color: isPublished ? "#34d399" : "#f59e0b",
-                border: isPublished
-                  ? "1px solid rgba(52, 211, 153, 0.3)"
-                  : "1px solid rgba(245, 158, 11, 0.3)",
-              }}
+              className={
+                isPublished
+                  ? formStyles.statusBadgePublished
+                  : formStyles.statusBadgeDraft
+              }
             >
               {isPublished
                 ? `Publié (v${pageRecord.published?.version} — ${pageRecord.published?.effectiveDate})`
@@ -395,11 +520,10 @@ export default function AdminLegalEditPage() {
             className={
               feedback.type === "error" ? formStyles.statusError : formStyles.statusSuccess
             }
-            style={{ marginBottom: "24px" }}
           >
             {feedback.text}
             {conflictRevision && (
-              <div style={{ marginTop: "10px" }}>
+              <div className={formStyles.conflictActions}>
                 <button
                   type="button"
                   onClick={() => {
@@ -407,11 +531,10 @@ export default function AdminLegalEditPage() {
                     setConflictRevision(null);
                     setFeedback({
                       type: "error",
-                      text: "Révision serveur adoptée. Vous pouvez maintenant soumettre à nouveau.",
+                      text: "Révision serveur adoptée. Vous pouvez maintenant soumettre à nouveau vos modifications.",
                     });
                   }}
-                  className={formStyles.langTab}
-                  style={{ background: "rgba(255,255,255,0.1)", color: "#fff" }}
+                  className={formStyles.adoptRevisionButton}
                 >
                   Adopter la révision du serveur ({conflictRevision})
                 </button>
@@ -421,7 +544,7 @@ export default function AdminLegalEditPage() {
         )}
 
         {/* Global Page Information */}
-        <div className={formStyles.card} style={{ marginBottom: "28px" }}>
+        <div className={formStyles.card}>
           <h2 className={formStyles.cardTitle}>En-tête & Métadonnées SEO ({activeLang.toUpperCase()})</h2>
 
           <div className={formStyles.field}>
@@ -434,7 +557,7 @@ export default function AdminLegalEditPage() {
             />
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" }}>
+          <div className={formStyles.row2}>
             <div className={formStyles.field}>
               <label className={formStyles.label}>Titre SEO ({activeLang.toUpperCase()})</label>
               <input
@@ -468,28 +591,22 @@ export default function AdminLegalEditPage() {
         </div>
 
         {/* Sections */}
-        <div className={formStyles.card} style={{ marginBottom: "28px" }}>
+        <div className={formStyles.card}>
           <h2 className={formStyles.cardTitle}>Sections du document ({activeLang.toUpperCase()})</h2>
           <p className={formStyles.helper}>
-            Chaque section correspond à un paragraphe ou un chapitre structuré. Séparez les paragraphes par une ligne vide.
+            Chaque section correspond à un chapitre structuré. Séparez les paragraphes par un double saut de ligne.
           </p>
 
           {draft.sections.map((section, sIdx) => {
-            const paragraphsText = section.paragraphs
-              .map((p) => p[activeLang])
-              .join("\n\n");
+            const rawText = sectionRawTexts[section.id]?.[activeLang] ?? "";
 
             return (
               <div
                 key={section.id}
-                style={{
-                  borderTop: sIdx > 0 ? "1px solid var(--px-line)" : "none",
-                  paddingTop: sIdx > 0 ? "24px" : 0,
-                  marginTop: sIdx > 0 ? "24px" : 0,
-                }}
+                className={sIdx > 0 ? formStyles.sectionDivider : undefined}
               >
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "8px" }}>
-                  <span style={{ fontSize: "12px", fontFamily: "monospace", color: "var(--px-text-3)" }}>
+                <div className={formStyles.sectionHeader}>
+                  <span className={formStyles.sectionIdTag}>
                     Section ID: #{section.id}
                   </span>
                 </div>
@@ -508,10 +625,10 @@ export default function AdminLegalEditPage() {
                   <label className={formStyles.label}>Paragraphes ({activeLang.toUpperCase()})</label>
                   <textarea
                     className={formStyles.textarea}
-                    rows={4}
-                    value={paragraphsText}
-                    onChange={(e) => handleSectionParagraphsChange(sIdx, e.target.value)}
-                    placeholder="Saisissez le texte des paragraphes, séparés par un saut de ligne..."
+                    rows={5}
+                    value={rawText}
+                    onChange={(e) => handleSectionParagraphsChange(section.id, e.target.value)}
+                    placeholder="Saisissez le texte des paragraphes, séparés par une ligne vide..."
                   />
                 </div>
               </div>
@@ -519,74 +636,131 @@ export default function AdminLegalEditPage() {
           })}
         </div>
 
-        {/* Cookie Inventory (only for cookies page) */}
-        {pageKey === "cookies" && draft.inventory && (
-          <div className={formStyles.card} style={{ marginBottom: "28px" }}>
-            <h2 className={formStyles.cardTitle}>Inventaire des cookies & traceurs</h2>
+        {/* Structured Cookie Inventory (only for cookies page) */}
+        {pageKey === "cookies" && (
+          <div className={formStyles.card}>
+            <h2 className={formStyles.cardTitle}>
+              Inventaire des cookies & traceurs ({activeLang.toUpperCase()})
+            </h2>
             <p className={formStyles.helper}>
-              Tableau des cookies techniques et préférences déployés sur Parallax.
+              Tableau structuré des cookies techniques et de préférences déployés sur Parallax.
             </p>
 
-            <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "14px" }}>
+            <div className={formStyles.tableScroll}>
+              <table className={formStyles.inventoryTable}>
                 <thead>
-                  <tr style={{ borderBottom: "1px solid var(--px-line)", textAlign: "left" }}>
-                    <th style={{ padding: "8px" }}>Nom</th>
-                    <th style={{ padding: "8px" }}>Fournisseur</th>
-                    <th style={{ padding: "8px" }}>Catégorie</th>
-                    <th style={{ padding: "8px" }}>Durée</th>
+                  <tr>
+                    <th className={formStyles.inventoryTh}>Nom</th>
+                    <th className={formStyles.inventoryTh}>Fournisseur</th>
+                    <th className={formStyles.inventoryTh}>Catégorie</th>
+                    <th className={formStyles.inventoryTh}>Durée</th>
+                    <th className={formStyles.inventoryTh}>Finalité</th>
+                    <th className={formStyles.inventoryTh}>Action</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {draft.inventory.map((item) => (
-                    <tr key={item.id} style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
-                      <td style={{ padding: "8px", fontFamily: "monospace" }}>{item.name.fr}</td>
-                      <td style={{ padding: "8px" }}>{item.provider.fr}</td>
-                      <td style={{ padding: "8px" }}>{item.category}</td>
-                      <td style={{ padding: "8px" }}>{item.duration.fr}</td>
+                  {(draft.inventory || []).map((item, idx) => (
+                    <tr key={item.id || idx}>
+                      <td className={formStyles.inventoryTd}>
+                        <input
+                          type="text"
+                          className={formStyles.inventoryInput}
+                          value={item.name[activeLang] || ""}
+                          onChange={(e) =>
+                            handleInventoryFieldChange(idx, "name", e.target.value)
+                          }
+                          placeholder="Nom du cookie"
+                        />
+                      </td>
+                      <td className={formStyles.inventoryTd}>
+                        <input
+                          type="text"
+                          className={formStyles.inventoryInput}
+                          value={item.provider[activeLang] || ""}
+                          onChange={(e) =>
+                            handleInventoryFieldChange(idx, "provider", e.target.value)
+                          }
+                          placeholder="Fournisseur"
+                        />
+                      </td>
+                      <td className={formStyles.inventoryTd}>
+                        <select
+                          className={formStyles.inventorySelect}
+                          value={item.category}
+                          onChange={(e) =>
+                            handleInventoryCategoryChange(
+                              idx,
+                              e.target.value as "technical" | "preferences"
+                            )
+                          }
+                        >
+                          <option value="technical">Technique</option>
+                          <option value="preferences">Préférences</option>
+                        </select>
+                      </td>
+                      <td className={formStyles.inventoryTd}>
+                        <input
+                          type="text"
+                          className={formStyles.inventoryInput}
+                          value={item.duration[activeLang] || ""}
+                          onChange={(e) =>
+                            handleInventoryFieldChange(idx, "duration", e.target.value)
+                          }
+                          placeholder="Ex. Session, 1 an"
+                        />
+                      </td>
+                      <td className={formStyles.inventoryTd}>
+                        <input
+                          type="text"
+                          className={formStyles.inventoryInput}
+                          value={item.purpose[activeLang] || ""}
+                          onChange={(e) =>
+                            handleInventoryFieldChange(idx, "purpose", e.target.value)
+                          }
+                          placeholder="Description de la finalité"
+                        />
+                      </td>
+                      <td className={formStyles.inventoryTd}>
+                        <button
+                          type="button"
+                          className={formStyles.deleteRowButton}
+                          onClick={() => handleDeleteInventoryRow(idx)}
+                        >
+                          Supprimer
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
+
+            <button
+              type="button"
+              className={formStyles.addRowButton}
+              onClick={handleAddInventoryRow}
+            >
+              + Ajouter un cookie / traceur
+            </button>
           </div>
         )}
 
         {/* Action Buttons */}
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            flexWrap: "wrap",
-            gap: "16px",
-            marginTop: "32px",
-            padding: "24px",
-            background: "var(--px-surface)",
-            borderRadius: "var(--r-card)",
-            border: "1px solid var(--px-border)",
-          }}
-        >
+        <div className={formStyles.actionsContainer}>
           <div>
             <button
               type="button"
               disabled={isSubmitting}
               onClick={() => executeAction("save_draft")}
-              className={formStyles.langTab}
-              style={{
-                background: "rgba(255, 255, 255, 0.08)",
-                border: "1px solid var(--px-border)",
-                color: "var(--px-text)",
-                padding: "10px 24px",
-              }}
+              className={formStyles.secondaryButton}
             >
               {isSubmitting ? "Enregistrement..." : "Enregistrer le brouillon"}
             </button>
           </div>
 
-          <div style={{ display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <label htmlFor="pub-effectiveDate" style={{ fontSize: "13px", color: "var(--px-text-2)" }}>
+          <div className={formStyles.actionsRight}>
+            <div className={formStyles.effectiveDateGroup}>
+              <label htmlFor="pub-effectiveDate" className={formStyles.effectiveDateLabel}>
                 Date d'effet :
               </label>
               <input
@@ -594,15 +768,7 @@ export default function AdminLegalEditPage() {
                 type="text"
                 value={effectiveDate}
                 onChange={(e) => setEffectiveDate(e.target.value)}
-                style={{
-                  background: "var(--px-ink)",
-                  border: "1px solid var(--px-border)",
-                  borderRadius: "var(--r-input)",
-                  color: "var(--px-text)",
-                  padding: "6px 12px",
-                  fontSize: "13px",
-                  width: "140px",
-                }}
+                className={formStyles.effectiveDateInput}
               />
             </div>
 
@@ -624,13 +790,7 @@ export default function AdminLegalEditPage() {
                     executeAction("unpublish");
                   }
                 }}
-                className={formStyles.langTab}
-                style={{
-                  background: "rgba(239, 68, 68, 0.15)",
-                  color: "#ef4444",
-                  border: "1px solid rgba(239, 68, 68, 0.3)",
-                  padding: "10px 18px",
-                }}
+                className={formStyles.unpublishButton}
               >
                 Dépublier
               </button>

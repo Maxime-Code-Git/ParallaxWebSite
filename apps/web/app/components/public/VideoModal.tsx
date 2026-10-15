@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import styles from "./videoModal.module.css";
 import {
   detectVideoProvider,
@@ -8,6 +8,7 @@ import {
   hasProviderConsent,
   setClientOneTimeConsent,
   persistProviderPreferences,
+  fetchValidatedPreferences,
 } from "../../lib/privacy-client";
 
 interface VideoModalProps {
@@ -73,50 +74,132 @@ export function parseVideoEmbedUrl(url: string | null | undefined): string | nul
 export function VideoModal({ isOpen, onClose, videoUrl, lang }: VideoModalProps) {
   const [consented, setConsented] = useState(false);
   const [rememberChoice, setRememberChoice] = useState(false);
+  const [persistenceError, setPersistenceError] = useState<string | null>(null);
+
+  const modalRef = useRef<HTMLDivElement>(null);
+  const previousActiveElementRef = useRef<HTMLElement | null>(null);
+  const currentMediaUrlRef = useRef<string>(videoUrl);
 
   const provider: VideoProvider | null = detectVideoProvider(videoUrl);
 
-  const checkConsentStatus = useCallback(() => {
-    if (!provider) {
-      setConsented(false);
-      return;
-    }
-    const hasConsent = hasProviderConsent(provider);
-    setConsented(hasConsent);
-  }, [provider]);
+  const evaluateConsent = useCallback(
+    async (targetUrl: string) => {
+      if (!provider) {
+        setConsented(false);
+        return;
+      }
+      // Check existing validated or one-time consent for this media URL
+      if (hasProviderConsent(provider, targetUrl)) {
+        setConsented(true);
+        return;
+      }
+      // Attempt to load validated server preferences if not yet done
+      const verified = await fetchValidatedPreferences();
+      if (verified && verified[provider]) {
+        setConsented(true);
+      } else {
+        setConsented(false);
+      }
+    },
+    [provider]
+  );
 
+  // Manage media URL transitions
   useEffect(() => {
-    if (!isOpen) {
+    if (videoUrl !== currentMediaUrlRef.current) {
+      // Different video: revoke one-time consent from previous video
+      if (currentMediaUrlRef.current) {
+        setClientOneTimeConsent(currentMediaUrlRef.current, false);
+      }
+      currentMediaUrlRef.current = videoUrl;
       setConsented(false);
       setRememberChoice(false);
+      setPersistenceError(null);
+    }
+  }, [videoUrl]);
+
+  // Open / Close lifecycle, focus trap, and Escape handling
+  useEffect(() => {
+    if (!isOpen) {
+      // Modal closed: revoke one-time consent for this video context
+      if (currentMediaUrlRef.current) {
+        setClientOneTimeConsent(currentMediaUrlRef.current, false);
+      }
+      setConsented(false);
+      setRememberChoice(false);
+      setPersistenceError(null);
+
+      // Restore focus to opener element
+      if (previousActiveElementRef.current && typeof previousActiveElementRef.current.focus === "function") {
+        previousActiveElementRef.current.focus();
+        previousActiveElementRef.current = null;
+      }
       return;
     }
 
-    checkConsentStatus();
+    // Modal opened: store previously focused element
+    if (typeof document !== "undefined") {
+      previousActiveElementRef.current = document.activeElement as HTMLElement | null;
+    }
+
+    void evaluateConsent(videoUrl);
 
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") {
         e.stopPropagation();
         onClose();
+        return;
+      }
+
+      // WAI-ARIA Focus trapping
+      if (e.key === "Tab" && modalRef.current) {
+        const focusableElements = modalRef.current.querySelectorAll<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        );
+        const focusable = Array.from(focusableElements).filter(
+          (el) => !el.hasAttribute("disabled") && el.offsetParent !== null
+        );
+
+        if (focusable.length === 0) return;
+
+        const firstElement = focusable[0];
+        const lastElement = focusable[focusable.length - 1];
+
+        if (e.shiftKey) {
+          if (document.activeElement === firstElement) {
+            e.preventDefault();
+            lastElement.focus();
+          }
+        } else {
+          if (document.activeElement === lastElement) {
+            e.preventDefault();
+            firstElement.focus();
+          }
+        }
       }
     }
 
     function handlePrivacyUpdate(e: Event) {
-      const customEvent = e as CustomEvent<{ youtube?: boolean; vimeo?: boolean; provider?: VideoProvider; granted?: boolean }>;
+      const customEvent = e as CustomEvent<{
+        youtube?: boolean;
+        vimeo?: boolean;
+        provider?: VideoProvider;
+        granted?: boolean;
+      }>;
       if (provider) {
-        // If event specifies revocation for our provider, immediately revoke
         if (customEvent.detail) {
           if (customEvent.detail.provider === provider && customEvent.detail.granted === false) {
             setConsented(false);
+            setClientOneTimeConsent(videoUrl, false);
             return;
           }
           if (customEvent.detail[provider] === false) {
             setConsented(false);
+            setClientOneTimeConsent(videoUrl, false);
             return;
           }
         }
-        // Re-check consent
-        if (!hasProviderConsent(provider)) {
+        if (!hasProviderConsent(provider, videoUrl)) {
           setConsented(false);
         }
       }
@@ -129,12 +212,11 @@ export function VideoModal({ isOpen, onClose, videoUrl, lang }: VideoModalProps)
       window.removeEventListener("keydown", handleKeyDown, true);
       window.removeEventListener("parallax:privacy-updated", handlePrivacyUpdate);
     };
-  }, [isOpen, onClose, checkConsentStatus, provider]);
+  }, [isOpen, onClose, evaluateConsent, videoUrl, provider]);
 
   if (!isOpen) return null;
 
   const embedUrl = parseVideoEmbedUrl(videoUrl);
-
   const providerLabel = provider === "youtube" ? "YouTube" : provider === "vimeo" ? "Vimeo" : "externe";
 
   const texts = {
@@ -153,23 +235,41 @@ export function VideoModal({ isOpen, onClose, videoUrl, lang }: VideoModalProps)
       lang === "fr"
         ? "Aucun lien vidéo valide n'a été configuré."
         : "No valid video URL has been configured.",
+    persistenceErrorMsg:
+      lang === "fr"
+        ? "Impossible d'enregistrer vos préférences de façon permanente (erreur réseau). La lecture se fera uniquement pour cette session."
+        : "Unable to save your choice permanently (network error). Playback will only occur for this session.",
   };
 
-  const handleAccept = () => {
+  const handleAccept = async () => {
     if (!provider) return;
+    setPersistenceError(null);
+
     if (rememberChoice) {
-      void persistProviderPreferences({ [provider]: true });
+      const persisted = await persistProviderPreferences({ [provider]: true });
+      if (!persisted) {
+        setPersistenceError(texts.persistenceErrorMsg);
+      }
     }
-    setClientOneTimeConsent(provider, true);
+
+    // Grant one-time consent strictly bound to this videoUrl
+    setClientOneTimeConsent(videoUrl, true);
     setConsented(true);
   };
 
+  const handleClose = () => {
+    if (videoUrl) {
+      setClientOneTimeConsent(videoUrl, false);
+    }
+    onClose();
+  };
+
   return (
-    <div className={styles.backdrop} onClick={onClose} role="dialog" aria-modal="true">
-      <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
+    <div className={styles.backdrop} onClick={handleClose} role="dialog" aria-modal="true">
+      <div ref={modalRef} className={styles.modal} onClick={(e) => e.stopPropagation()}>
         <button
           type="button"
-          onClick={onClose}
+          onClick={handleClose}
           className={styles.closeButton}
           aria-label={lang === "fr" ? "Fermer la vidéo" : "Close video"}
         >
@@ -183,7 +283,7 @@ export function VideoModal({ isOpen, onClose, videoUrl, lang }: VideoModalProps)
           <div className={styles.consentContainer}>
             <h3 className={styles.consentTitle}>Showreel</h3>
             <p className={styles.consentText}>{texts.noVideo}</p>
-            <button type="button" onClick={onClose} className={styles.consentCancel}>
+            <button type="button" onClick={handleClose} className={styles.consentCancel}>
               {lang === "fr" ? "Fermer" : "Close"}
             </button>
           </div>
@@ -202,6 +302,12 @@ export function VideoModal({ isOpen, onClose, videoUrl, lang }: VideoModalProps)
               <span>{texts.remember}</span>
             </label>
 
+            {persistenceError && (
+              <div role="alert" className={styles.consentError}>
+                {persistenceError}
+              </div>
+            )}
+
             <div className={styles.consentButtons}>
               <button
                 type="button"
@@ -212,7 +318,7 @@ export function VideoModal({ isOpen, onClose, videoUrl, lang }: VideoModalProps)
               </button>
               <button
                 type="button"
-                onClick={onClose}
+                onClick={handleClose}
                 className={styles.consentCancel}
               >
                 {texts.cancel}

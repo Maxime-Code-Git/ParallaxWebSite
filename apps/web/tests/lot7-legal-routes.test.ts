@@ -134,9 +134,9 @@ describe("Lot 7 - Public Legal Routes, Canonical URLs, and SEO Headers", () => {
     const data = loaderResult.data;
     const headers = new Headers(loaderResult.init?.headers);
 
-    // Published document has standard public caching
-    expect(headers.get("Cache-Control")).toContain("public");
-    expect(headers.get("Cache-Control")).toContain("max-age=300");
+    // Legal routes enforce private, no-store to allow immediate unpublishing and prevent caching visitor state
+    expect(headers.get("Cache-Control")).toContain("private");
+    expect(headers.get("Cache-Control")).toContain("no-store");
 
     const metaTags = legalMeta({ data }) as MetaTag[];
 
@@ -155,7 +155,7 @@ describe("Lot 7 - Public Legal Routes, Canonical URLs, and SEO Headers", () => {
     expect(robots?.content).toBe("index, follow");
   });
 
-  it("cookies page enforces private no-cache headers with Vary: Cookie to avoid caching visitor choices", async () => {
+  it("cookies page enforces private no-store headers with Vary: Cookie to avoid caching visitor choices", async () => {
     const req = new Request("http://127.0.0.1:3000/fr/cookies", { method: "GET" });
     const response = await legalLoader(makeLoaderArgs(req));
 
@@ -163,7 +163,7 @@ describe("Lot 7 - Public Legal Routes, Canonical URLs, and SEO Headers", () => {
     const headers = new Headers(loaderResult.init?.headers);
 
     expect(headers.get("Cache-Control")).toContain("private");
-    expect(headers.get("Cache-Control")).toContain("no-cache");
+    expect(headers.get("Cache-Control")).toContain("no-store");
     expect(headers.get("Vary")).toBe("Cookie");
   });
 });

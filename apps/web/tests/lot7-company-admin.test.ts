@@ -70,6 +70,9 @@ describe("Lot 7 - Company Administration & Coordinate Synchronization", () => {
       address: "Avenue Louise 100, 1050 Bruxelles",
       enterpriseNumber: "0888.999.111",
       vatNumber: "BE 0888.999.111",
+      publicationDirector: "Maxime",
+      hostingProvider: "Infomaniak SA",
+      hostingAddress: "Rue Eugène-Marziano 25, 1227 Genève, Suisse",
       isPublished: true,
     };
 

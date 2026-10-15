@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs, HeadersArgs } from "react-router";
-import { data, Link, useActionData, useLoaderData, useNavigation } from "react-router";
+import { data, Link, useFetcher, useLoaderData } from "react-router";
 import {
   requireValidAdminSession,
   createAdminHeaders,
@@ -132,16 +132,15 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function AdminCompanyPage() {
-  const loaderData = useLoaderData<typeof loader>();
-  const actionData = useActionData<{
+  const loaderData = useLoaderData<AdminCompanyLoaderData>();
+  const fetcher = useFetcher<{
     success?: boolean;
     error?: string;
     conflict?: boolean;
     newRevision?: string;
     serverRevision?: string;
   }>();
-  const navigation = useNavigation();
-  const isSubmitting = navigation.state === "submitting";
+  const isSubmitting = fetcher.state === "submitting" || fetcher.state === "loading";
 
   const [company, setCompany] = useState<CompanyContent>(loaderData.company);
   const [currentRevision, setCurrentRevision] = useState<string>(loaderData.revision);
@@ -150,19 +149,26 @@ export default function AdminCompanyPage() {
   );
 
   useEffect(() => {
-    if (actionData?.success && actionData.newRevision) {
-      setCurrentRevision(actionData.newRevision);
+    if (fetcher.data?.success && fetcher.data.newRevision) {
+      setCurrentRevision(fetcher.data.newRevision);
       setFeedback({
         type: "success",
         text: "Paramètres de l'entreprise enregistrés avec succès. Les coordonnées canoniques ont été synchronisées.",
       });
-    } else if (actionData?.error) {
+    } else if (fetcher.data?.conflict) {
       setFeedback({
         type: "error",
-        text: actionData.error,
+        text:
+          fetcher.data.error ||
+          "Conflit de révision : le contenu a été modifié par un autre administrateur. Vos modifications locales ont été conservées.",
+      });
+    } else if (fetcher.data?.error) {
+      setFeedback({
+        type: "error",
+        text: fetcher.data.error,
       });
     }
-  }, [actionData]);
+  }, [fetcher.data]);
 
   const handleChange = (field: keyof CompanyContent, value: string | boolean) => {
     setCompany((prev) => ({
@@ -172,13 +178,22 @@ export default function AdminCompanyPage() {
   };
 
   const handleAdoptServerRevision = () => {
-    if (actionData?.serverRevision) {
-      setCurrentRevision(actionData.serverRevision);
+    if (fetcher.data?.serverRevision) {
+      setCurrentRevision(fetcher.data.serverRevision);
       setFeedback({
         type: "error",
         text: "Révision serveur adoptée. Vous pouvez maintenant soumettre vos modifications.",
       });
     }
+  };
+
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const body = new URLSearchParams();
+    body.set("csrfToken", loaderData.csrfToken);
+    body.set("revision", currentRevision);
+    body.set("companyData", JSON.stringify(company));
+    fetcher.submit(body, { method: "POST" });
   };
 
   return (
@@ -203,74 +218,25 @@ export default function AdminCompanyPage() {
             className={
               feedback.type === "error" ? formStyles.statusError : formStyles.statusSuccess
             }
-            style={{ marginBottom: "24px" }}
           >
             {feedback.text}
-            {actionData?.conflict && (
-              <div style={{ marginTop: "10px" }}>
+            {fetcher.data?.conflict && (
+              <div className={formStyles.conflictActions}>
                 <button
                   type="button"
                   onClick={handleAdoptServerRevision}
-                  className={formStyles.langTab}
-                  style={{ background: "rgba(255,255,255,0.1)", color: "#fff" }}
+                  className={formStyles.adoptRevisionButton}
                 >
-                  Adopter la révision du serveur ({actionData.serverRevision})
+                  Adopter la révision du serveur ({fetcher.data.serverRevision})
                 </button>
               </div>
             )}
           </div>
         )}
 
-        <form method="post" onSubmit={(e) => {
-          // Native submission with strict URL encoded body
-          e.preventDefault();
-          const form = e.currentTarget;
-          const formData = new FormData();
-          formData.set("csrfToken", loaderData.csrfToken);
-          formData.set("revision", currentRevision);
-          formData.set("companyData", JSON.stringify(company));
-
-          // Use fetch for exact parity with other admin screens
-          const body = new URLSearchParams();
-          body.set("csrfToken", loaderData.csrfToken);
-          body.set("revision", currentRevision);
-          body.set("companyData", JSON.stringify(company));
-
-          const submitBtn = form.querySelector("button[type=submit]") as HTMLButtonElement;
-          if (submitBtn) submitBtn.disabled = true;
-
-          fetch("/admin/company", {
-            method: "POST",
-            headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            body: body.toString(),
-          })
-            .then(async (res) => {
-              const data = await res.json();
-              if (res.ok && data.success) {
-                setCurrentRevision(data.newRevision);
-                setFeedback({
-                  type: "success",
-                  text: "Paramètres de l'entreprise enregistrés avec succès. Les coordonnées canoniques ont été synchronisées.",
-                });
-              } else {
-                setFeedback({
-                  type: "error",
-                  text: data.error || "Erreur lors de l'enregistrement.",
-                });
-              }
-            })
-            .catch(() => {
-              setFeedback({
-                type: "error",
-                text: "Erreur réseau lors de l'enregistrement.",
-              });
-            })
-            .finally(() => {
-              if (submitBtn) submitBtn.disabled = false;
-            });
-        }}>
+        <form method="post" onSubmit={handleSubmit}>
           {/* Card 1: Identification & Statut Juridique */}
-          <div className={formStyles.card} style={{ marginBottom: "28px" }}>
+          <div className={formStyles.card}>
             <h2 className={formStyles.cardTitle}>Identification & Forme juridique</h2>
             <p className={formStyles.helper}>
               Informations relatives à l'exploitant du site. Si ces informations ne sont pas encore confirmées, laissez la case « Confirmation de publication » décochée pour préserver leur confidentialité.
@@ -321,7 +287,7 @@ export default function AdminCompanyPage() {
               />
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" }}>
+            <div className={formStyles.row2}>
               <div className={formStyles.field}>
                 <label htmlFor="company-enterpriseNumber" className={formStyles.label}>
                   N° d'entreprise (BCE)
@@ -365,26 +331,26 @@ export default function AdminCompanyPage() {
               />
             </div>
 
-            <div className={formStyles.field} style={{ marginTop: "16px" }}>
-              <label style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer" }}>
+            <div className={formStyles.field}>
+              <label className={formStyles.checkboxLabel}>
                 <input
                   type="checkbox"
                   checked={Boolean(company.isPublished)}
                   onChange={(e) => handleChange("isPublished", e.target.checked)}
-                  style={{ width: "18px", height: "18px", accentColor: "var(--px-accent)" }}
+                  className={formStyles.checkboxInput}
                 />
-                <span style={{ fontSize: "14px", fontWeight: 500, color: "var(--px-text)" }}>
+                <span className={formStyles.checkboxText}>
                   Confirmer et autoriser la publication des coordonnées juridiques sur le site public
                 </span>
               </label>
-              <span className={formStyles.helper} style={{ marginLeft: "28px" }}>
+              <span className={formStyles.checkboxHelper}>
                 Tant que cette case n'est pas cochée, le siège social, le numéro BCE et les mentions légales restent masqués des visiteurs publics.
               </span>
             </div>
           </div>
 
           {/* Card 2: Siège social & Responsables */}
-          <div className={formStyles.card} style={{ marginBottom: "28px" }}>
+          <div className={formStyles.card}>
             <h2 className={formStyles.cardTitle}>Siège social & Direction</h2>
 
             <div className={formStyles.field}>
@@ -401,7 +367,7 @@ export default function AdminCompanyPage() {
               />
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" }}>
+            <div className={formStyles.row2}>
               <div className={formStyles.field}>
                 <label htmlFor="company-publicationDirector" className={formStyles.label}>
                   Responsable(s) de la publication
@@ -433,13 +399,13 @@ export default function AdminCompanyPage() {
           </div>
 
           {/* Card 3: Hébergeur */}
-          <div className={formStyles.card} style={{ marginBottom: "28px" }}>
+          <div className={formStyles.card}>
             <h2 className={formStyles.cardTitle}>Hébergement du site</h2>
             <p className={formStyles.helper}>
               Informations légales obligatoires concernant le prestataire d'hébergement web.
             </p>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" }}>
+            <div className={formStyles.row2}>
               <div className={formStyles.field}>
                 <label htmlFor="company-hostingProvider" className={formStyles.label}>
                   Nom de l'hébergeur
@@ -471,13 +437,13 @@ export default function AdminCompanyPage() {
           </div>
 
           {/* Card 4: Coordonnées publiques & Réseaux canoniques */}
-          <div className={formStyles.card} style={{ marginBottom: "28px" }}>
+          <div className={formStyles.card}>
             <h2 className={formStyles.cardTitle}>Coordonnées publiques & Réseaux</h2>
             <p className={formStyles.helper}>
               Source unique de coordonnées canoniques. Toute mise à jour ici est automatiquement répercutée sur les sections Contact et Accueil.
             </p>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" }}>
+            <div className={formStyles.row2}>
               <div className={formStyles.field}>
                 <label htmlFor="company-email" className={formStyles.label}>
                   E-mail public affiché
@@ -507,7 +473,7 @@ export default function AdminCompanyPage() {
               </div>
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" }}>
+            <div className={formStyles.row2}>
               <div className={formStyles.field}>
                 <label htmlFor="company-instagramUrl" className={formStyles.label}>
                   Lien Instagram
@@ -538,7 +504,7 @@ export default function AdminCompanyPage() {
             </div>
           </div>
 
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: "16px", marginTop: "32px" }}>
+          <div className={formStyles.submitActionsRow}>
             <button
               type="submit"
               disabled={isSubmitting}

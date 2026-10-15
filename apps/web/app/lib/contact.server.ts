@@ -13,7 +13,7 @@ import {
   failContactClaim,
   type ContactClaimAcquireResult,
 } from "./rate-limit.server";
-import { getSiteContent } from "./site-content.server";
+import { getSiteContent, getPublicLegalDocument } from "./site-content.server";
 import {
   type CommonContent,
   type ContactPageContent,
@@ -46,6 +46,7 @@ export interface ContactLoaderData {
   flashSuccess: boolean;
   flashSuccessId?: string | null;
   smtpAvailable: boolean;
+  isPrivacyPolicyPublished: boolean;
 }
 
 export interface ContactActionSuccess {
@@ -396,6 +397,7 @@ export async function handleContactLoader(args: LoaderFunctionArgs, forcedLang?:
       flashSuccess: hasFlash,
       flashSuccessId: flashId ?? null,
       smtpAvailable,
+      isPrivacyPolicyPublished: Boolean(getPublicLegalDocument("privacy")),
     },
     { headers }
   );

@@ -1,8 +1,9 @@
 import { redirect, type LoaderFunctionArgs } from "react-router";
+import { normalizeLegalPathname } from "./legal-page";
 
 export function loader({ request }: LoaderFunctionArgs) {
   const url = new URL(request.url);
-  const path = url.pathname.replace(/\/+$/, "");
+  const path = normalizeLegalPathname(url.pathname);
 
   let target = "/fr";
   if (path === "/en/mentions-legales") {
