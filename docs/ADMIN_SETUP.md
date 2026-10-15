@@ -143,13 +143,39 @@ TRUST_PROXY=false
 |---|---|---|---|
 | `/admin` | `GET` | Affiche le formulaire de connexion si anonyme ; redirige vers `/admin/dashboard` si déjà authentifié. | `Cache-Control: no-store`, `X-Robots-Tag: noindex, nofollow`, CSP avec nonce |
 | `/admin` | `POST` | Traite la soumission du mot de passe administrateur. Champs autorisés : `password`, `csrfToken` uniquement. | Origin strict, CSRF constant-time, Rate Limiting SQLite, body stream 8 Kio |
-| `/admin/dashboard` | `GET` | Tableau de bord d'administration listant les 8 modules Parallax. | Authentification obligatoire, `Cache-Control: no-store`, `X-Robots-Tag: noindex, nofollow` |
+| `/admin/dashboard` | `GET` | Tableau de bord d'administration listant les modules Parallax. | Authentification obligatoire, `Cache-Control: no-store`, `X-Robots-Tag: noindex, nofollow` |
+| `/admin/contact` | `GET` | Interface d'édition éditoriale et de diagnostic SMTP du module Contact. | Authentification obligatoire, `Cache-Control: no-store`, `X-Robots-Tag: noindex, nofollow` |
+| `/admin/contact` | `POST` | Enregistrement atomique du contenu Contact avec contrôle optimiste de révision (409 Conflict). | Authentification valide obligatoire, CSRF constant-time, validation V2 |
 | `/admin/logout` | `POST` | Déconnexion : détruit la session et supprime le cookie. Champ autorisé : `csrfToken` uniquement. | Authentification valide obligatoire, Origin strict, CSRF constant-time, body stream 8 Kio |
 | `/admin/logout` | `GET` | Rejet explicite 405 Method Not Allowed (en-tête `Allow: POST`). | `Cache-Control: no-store`, `X-Robots-Tag: noindex, nofollow` |
 
 ---
 
-## 9. Références visuelles obligatoires et flux de validation
+## 9. Module Administration Contact (`/admin/contact` - Lot 6)
+
+Le module `/admin/contact` permet la gestion éditoriale complète et le diagnostic de l'envoi de messages :
+1. **Édition bilingue FR / EN** : Bascule instantanée par onglets pour renseigner l'ensemble des textes dans les deux langues :
+   - Référencement (SEO : titre et méta-description).
+   - En-tête Hero (titre d'accroche).
+   - Formulaire (libellés et textes d'exemple par champ).
+   - Messages système (confirmation de succès, erreur générique, indisponibilité temporaire).
+2. **Types de projet paramétrables** :
+   - Activation ou désactivation individuelle de chaque type de projet (`Clip musical`, `Publicité`, `Portrait`, `Documentaire`, `Autre`).
+   - Modification des libellés FR et EN.
+   - Les types désactivés sont immédiatement retirés du menu déroulant public et rejetés côté serveur en cas de tentative de soumission directe.
+3. **Coordonnées et synchronisation canonique** :
+   - Numéro de téléphone direct et mention de délai de réponse (« Nous répondons sous 48h. »).
+   - L'adresse e-mail et les liens vers les réseaux sociaux (Instagram, YouTube) sont synchronisés canoniquement et de manière bidirectionnelle avec le bloc `home.contact` afin d'éviter toute incohérence d'affichage sur le site.
+4. **Diagnostic SMTP en direct** :
+   - Affiche l'état du transport Nodemailer sans divulguer de mots de passe : badge vert « ● Configuré », badge orange « ● Incomplet » (énumérant les clés d'environnement manquantes), ou badge rouge « ● Invalide ».
+   - Rappel de la commande CLI `npm run smtp:verify` pour tester la connexion socket et la poignée de main TLS sans envoyer de courriel.
+5. **Contrôle de concurrence optimiste (409 Conflict)** :
+   - Basé sur le hachage SHA-256 de la révision du document.
+   - En cas d'enregistrement concurrent par un autre onglet, la saisie en cours de l'utilisateur n'est pas écrasée et un bandeau d'avertissement lui permet d'adopter la dernière révision tout en conservant son travail.
+
+---
+
+## 10. Références visuelles obligatoires et flux de validation
 
 - Les fichiers situés dans `References/parallax-site/` (`espace-client.html`, `contact.html`, `index.html`, `mobile.html`) demeurent la référence visuelle et structurelle stricte et obligatoire du projet (commit `7ff88e94316a3bbed5daa5effd24e2454afa0169` sur `chore/bootstrap`).
 - La carte d'administration respecte les dimensions exactes de `espace-client.html` : largeur max 480 px, fond `#141822`, bordure `0.5px solid #232B3A`, rayon 20 px, padding 48px 44px, indicateur bleu `#1E9EFF` de 40px × 2px.

@@ -172,12 +172,174 @@ export interface StudioContent {
   };
 }
 
-export interface SiteContent {
+export interface ProjectTypeOption {
+  id: string;
+  enabled: boolean;
+  label: LocalizedString;
+}
+
+export interface ContactPageContent {
+  seo: {
+    title: LocalizedString;
+    description: LocalizedString;
+  };
+  hero: {
+    title: LocalizedString;
+    subtitle?: LocalizedString;
+  };
+  form: {
+    nameLabel: LocalizedString;
+    namePlaceholder: LocalizedString;
+    emailLabel: LocalizedString;
+    emailPlaceholder: LocalizedString;
+    phoneLabel: LocalizedString;
+    phonePlaceholder: LocalizedString;
+    timelineLabel: LocalizedString;
+    timelinePlaceholder: LocalizedString;
+    typeLabel: LocalizedString;
+    typePlaceholder: LocalizedString;
+    projectTypes: ProjectTypeOption[];
+    messageLabel: LocalizedString;
+    messagePlaceholder: LocalizedString;
+    submitButton: LocalizedString;
+    noticeText: LocalizedString;
+    privacyPolicyText: LocalizedString;
+    privacyPolicyUrl: string;
+  };
+  card: {
+    title: LocalizedString;
+    emailLabel: LocalizedString;
+    phoneLabel: LocalizedString;
+    phone: string;
+    socialLabel: LocalizedString;
+    responseTimeNotice: LocalizedString;
+  };
+  messages: {
+    successTitle: LocalizedString;
+    successMessage: LocalizedString;
+    unavailableMessage: LocalizedString;
+    genericError: LocalizedString;
+  };
+}
+
+export const DEFAULT_PROJECT_TYPES: readonly ProjectTypeOption[] = [
+  {
+    id: "music-video",
+    enabled: true,
+    label: { fr: "Clip musical", en: "Music video" },
+  },
+  {
+    id: "advertising",
+    enabled: true,
+    label: { fr: "Publicité", en: "Advertising" },
+  },
+  {
+    id: "portrait",
+    enabled: true,
+    label: { fr: "Portrait", en: "Portrait" },
+  },
+  {
+    id: "documentary",
+    enabled: true,
+    label: { fr: "Documentaire", en: "Documentary" },
+  },
+  {
+    id: "other",
+    enabled: true,
+    label: { fr: "Autre", en: "Other" },
+  },
+] as const;
+
+export const DEFAULT_CONTACT_PAGE_CONTENT: ContactPageContent = {
+  seo: {
+    title: {
+      fr: "Contact | Parallax - Studio photo & vidéo",
+      en: "Contact | Parallax - Photo & video studio",
+    },
+    description: {
+      fr: "Contactez le studio Parallax pour vos projets photo et vidéo. Clips musicaux, publicités, portraits et documentaires.",
+      en: "Contact Parallax studio for your photo and video projects. Music videos, commercials, portraits and documentaries.",
+    },
+  },
+  hero: {
+    title: {
+      fr: "Vous préférez écrire ? Remplissez le formulaire ci-dessous.",
+      en: "Prefer to write? Fill in the form below.",
+    },
+  },
+  form: {
+    nameLabel: { fr: "Nom / société", en: "Name / company" },
+    namePlaceholder: { fr: "Studio, marque, artiste…", en: "Studio, brand, artist…" },
+    emailLabel: { fr: "Email", en: "Email" },
+    emailPlaceholder: { fr: "vous@exemple.com", en: "you@example.com" },
+    phoneLabel: { fr: "Téléphone (optionnel)", en: "Phone (optional)" },
+    phonePlaceholder: { fr: "04XX XX XX XX", en: "04XX XX XX XX" },
+    timelineLabel: { fr: "Échéance souhaitée", en: "Preferred timeline" },
+    timelinePlaceholder: { fr: "JJ / MM / AAAA", en: "DD / MM / YYYY" },
+    typeLabel: { fr: "Type de projet", en: "Project type" },
+    typePlaceholder: { fr: "Sélectionner…", en: "Select…" },
+    projectTypes: [...DEFAULT_PROJECT_TYPES],
+    messageLabel: { fr: "Votre message", en: "Your message" },
+    messagePlaceholder: { fr: "Racontez-nous votre projet…", en: "Tell us about your project…" },
+    submitButton: { fr: "Envoyer", en: "Send" },
+    noticeText: {
+      fr: "Les informations transmises servent uniquement à répondre à votre demande et préparer une éventuelle prestation.",
+      en: "The information you provide is used only to answer your request and prepare a possible project.",
+    },
+    privacyPolicyText: {
+      fr: "Politique de confidentialité",
+      en: "Privacy policy",
+    },
+    privacyPolicyUrl: "",
+  },
+  card: {
+    title: { fr: "Coordonnées", en: "Details" },
+    emailLabel: { fr: "Email", en: "Email" },
+    phoneLabel: { fr: "Téléphone", en: "Phone" },
+    phone: "",
+    socialLabel: { fr: "Réseaux", en: "Social" },
+    responseTimeNotice: {
+      fr: "Nous répondons sous 48h.",
+      en: "We reply within 48h.",
+    },
+  },
+  messages: {
+    successTitle: {
+      fr: "Message envoyé avec succès",
+      en: "Message sent successfully",
+    },
+    successMessage: {
+      fr: "Merci pour votre message. Nous reviendrons vers vous dans les meilleurs délais.",
+      en: "Thank you for your message. We will get back to you as soon as possible.",
+    },
+    unavailableMessage: {
+      fr: "Le formulaire de contact est temporairement indisponible. Veuillez nous écrire directement par e-mail.",
+      en: "The contact form is temporarily unavailable. Please write to us directly by email.",
+    },
+    genericError: {
+      fr: "Une erreur est survenue lors de l'envoi de votre message. Veuillez vérifier vos informations et réessayer.",
+      en: "An error occurred while sending your message. Please check your information and try again.",
+    },
+  },
+};
+
+export interface SiteContentV1 {
   schemaVersion: 1;
   revision: string;
   updatedAt: string;
   common: CommonContent;
   home: HomeContent;
   studio: StudioContent;
+  media?: Record<string, UploadedMediaMetadata>;
+}
+
+export interface SiteContent {
+  schemaVersion: 2;
+  revision: string;
+  updatedAt: string;
+  common: CommonContent;
+  home: HomeContent;
+  studio: StudioContent;
+  contactPage: ContactPageContent;
   media?: Record<string, UploadedMediaMetadata>;
 }

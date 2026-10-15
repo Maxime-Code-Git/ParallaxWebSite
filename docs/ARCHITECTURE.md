@@ -312,7 +312,46 @@ Depuis la racine du monorepo :
      - L'élagage des journaux d'audit de suppression finalisés (`pruneRetentionAuditLogs`) selon `log_retention_days`.
    - Journal minimal : identifiant opaque de job, date, volume et nombre de médias, statut final et code d'erreur normalisé. Aucun e-mail, code, nom de client ou chemin système stocké dans l'audit.
 
-## 12. Guide d'exploitation, sauvegardes et restauration (Déploiement Mac mini)
+## 12. Contact, anti-spam, e-mails et schéma V2 (Lot 6)
+
+1. **Évolution du modèle de données (`schemaVersion: 2`)** :
+   - Migration pure, synchrone et idempotente V1 -> V2 (`migrateSiteContentV1ToV2`) déclenchée automatiquement à la lecture de `site-content.json`.
+   - Ajout de la section `contactPage` :
+     - Métadonnées SEO (titre et description FR/EN).
+     - Hero (titre d'accroche bilingue).
+     - Formulaire (libellés et textes d'exemple par champ).
+     - Types de projet paramétrables (`DEFAULT_PROJECT_TYPES` : `music-video`, `advertising`, `portrait`, `documentary`, `other`) avec interrupteurs individuels d'activation et libellés bilingues.
+     - Coordonnées (téléphone direct, mention de délai de réponse).
+     - Messages système localisés (confirmation de succès, indisponibilité du service, erreur générique de transport).
+   - **Synchronisation canonique des coordonnées** : Toute modification de l'adresse e-mail de contact ou des réseaux sociaux (`instagramUrl`, `youtubeUrl`) depuis l'administration Contact met à jour canoniquement et de manière atomique le bloc `home.contact` pour garantir la cohérence absolue de l'ensemble du site.
+
+2. **Pipeline de sécurité Contact et lutte anti-spam** :
+   - **Jeton cryptographique à double facteur (`_token`)** : Jeton éphémère signé combinant un horodatage d'émission, un nonce aléatoire et une signature HMAC-SHA256 (`RATE_LIMIT_SECRET`). Un délai de latence minimal de 2 secondes bloque les automates instantanés, et un délai maximal de 2 heures invalide les jetons anciens.
+   - **Honeypot discret (`website`)** : Champ masqué visuellement par CSS Module et ignoré des technologies d'assistance (`aria-hidden="true"`, `tabIndex={-1}`, `autoComplete="off"`). Toute soumission contenant une valeur dans ce champ est rejetée immédiatement avec un code 400.
+   - **Contrôle strict des requêtes** : Validation de l'en-tête `Origin` contre `PUBLIC_SITE_URL`, encodage strict `application/x-www-form-urlencoded`, lecture bornée en streaming à 64 Kio, et rejet des clés dupliquées (400).
+   - **Rate Limiting persistant dédié** : Table `rate_limits` sous le namespace `contact` (distinct de `admin` et `gallery`), plafonné à 5 soumissions par heure par empreinte IP (hachée en HMAC). Code 429 avec en-tête `Retry-After`. Les compteurs ne sont jamais remis à zéro lors d'une soumission réussie afin de neutraliser les attaques en rafale.
+   - **Table anti-rejeu et dédoublonnage (`contact_claims`)** : Table SQLite dédiée permettant de réserver atomiquement l'empreinte du jeton (`pending`). En cas de double-clic ou de soumissions concurrentes, un seul e-mail est expédié. La ré-exécution d'un jeton déjà validé retourne la redirection PRG 303 sans nouvel envoi SMTP.
+
+3. **Transport Nodemailer sécurisé (`mailer.server.ts`)** :
+   - Compatibilité native Node 24.
+   - Chiffrement TLS strict : Port 587 impose STARTTLS (`requireTLS: true`) ; port 465 impose le TLS direct (`secure: true`). Validation stricte des certificats (`rejectUnauthorized: true`, support de `SMTP_CA_CERT` pour tests locaux). Aucun fallback en clair n'est toléré.
+   - Protection contre l'injection d'en-têtes CRLF dans les adresses d'expédition, de réception et dans les sujets.
+   - Concurrence bornée (5 envois simultanés maximum) et délais d'attente stricts (connexion 10s, négociation socket 15s).
+   - Masquage des erreurs : Aucun mot de passe, secret, adresse de visiteur ou corps de message n'est journalisé (codes d'erreur normalisés : `SMTP_UNCONFIGURED`, `SMTP_AUTH_FAILED`, `SMTP_CONN_REFUSED`, `SMTP_TLS_FAILED`, `SMTP_TIMEOUT`, etc.).
+   - HTTP 503 neutre côté public en cas de serveur SMTP non configuré ou indisponible, avec proposition d'un fallback `mailto:` si une adresse publique est renseignée.
+
+4. **Pattern PRG et cookie flash éphémère** :
+   - Redirection HTTP 303 vers la route Contact localisée en cas de succès.
+   - Cookie signé éphémère `__parallax_contact_flash` consommé et supprimé dès le premier affichage pour présenter le bandeau vert de confirmation `role="status"`.
+   - L'altération ou la simple présence d'un paramètre d'URL `?success=true` ne provoque aucun faux message de succès.
+   - Le formulaire est intégralement réinitialisé après succès (y compris le sélecteur du type de projet).
+
+5. **Diagnostic CLI autonome (`npm run smtp:verify`)** :
+   - Commande indépendante sans envoi d'e-mail validant la configuration des 6 variables et la poignée de main TLS, renvoyant un code de sortie standard 0 (succès) ou 1 (erreur diagnostiquée).
+
+---
+
+## 13. Guide d'exploitation, sauvegardes et restauration (Déploiement Mac mini)
 
 ### Sauvegarde à chaud cohérente
 Pour sauvegarder l'application Parallax sur le Mac mini de production sans interrompre le service :

@@ -156,6 +156,14 @@ function initDb(): DatabaseSync {
       );
       CREATE INDEX IF NOT EXISTS idx_requests_hash ON requests(hash);
       CREATE INDEX IF NOT EXISTS idx_requests_timestamp ON requests(timestamp);
+
+      CREATE TABLE IF NOT EXISTS contact_claims (
+        token_hash TEXT PRIMARY KEY,
+        status TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_contact_claims_expires ON contact_claims(expires_at);
     `);
 
     checkAuxiliaryFiles(dbPath);
@@ -270,5 +278,92 @@ export function resetRateLimit(ip: string, namespace = "admin"): void {
   } catch (err) {
     if (err instanceof RateLimitStorageError) throw err;
     throw new RateLimitStorageError("Erreur lors de la reinitialisation de la limitation de debit", err);
+  }
+}
+
+export type ContactClaimStatus = "acquired" | "in_progress" | "completed";
+
+export function acquireContactClaim(tokenHash: string, ttlMs = 120_000): ContactClaimStatus {
+  let database: DatabaseSync;
+  try {
+    database = initDb();
+  } catch (err) {
+    if (err instanceof RateLimitStorageError) throw err;
+    throw new RateLimitStorageError("Erreur d'acces a la base de donnees", err);
+  }
+
+  const now = Date.now();
+  const expiresAt = now + ttlMs;
+
+  try {
+    database.exec("BEGIN EXCLUSIVE TRANSACTION");
+    try {
+      // 1. Purge expired claims
+      const purgeStmt = database.prepare("DELETE FROM contact_claims WHERE expires_at < ?");
+      purgeStmt.run(now);
+
+      // 2. Check existing claim
+      const selectStmt = database.prepare("SELECT status FROM contact_claims WHERE token_hash = ?");
+      const existing = selectStmt.get(tokenHash) as { status: string } | undefined;
+
+      if (existing) {
+        if (existing.status === "completed") {
+          database.exec("COMMIT");
+          return "completed";
+        }
+        if (existing.status === "in_progress") {
+          database.exec("COMMIT");
+          return "in_progress";
+        }
+        // If status was 'failed', allow retry by re-claiming
+        const updateStmt = database.prepare(
+          "UPDATE contact_claims SET status = 'in_progress', created_at = ?, expires_at = ? WHERE token_hash = ?"
+        );
+        updateStmt.run(now, expiresAt, tokenHash);
+        database.exec("COMMIT");
+        return "acquired";
+      }
+
+      // 3. Insert new claim
+      const insertStmt = database.prepare(
+        "INSERT INTO contact_claims (token_hash, status, created_at, expires_at) VALUES (?, 'in_progress', ?, ?)"
+      );
+      insertStmt.run(tokenHash, now, expiresAt);
+
+      database.exec("COMMIT");
+      return "acquired";
+    } catch (innerErr) {
+      try {
+        database.exec("ROLLBACK");
+      } catch {
+        // Ignored
+      }
+      throw innerErr;
+    }
+  } catch (err: unknown) {
+    if (err instanceof RateLimitStorageError) throw err;
+    throw new RateLimitStorageError("Erreur d'operation SQLite sur le claim anti-rejeu", err);
+  }
+}
+
+export function completeContactClaim(tokenHash: string): void {
+  try {
+    const database = initDb();
+    const stmt = database.prepare("UPDATE contact_claims SET status = 'completed' WHERE token_hash = ?");
+    stmt.run(tokenHash);
+  } catch (err) {
+    if (err instanceof RateLimitStorageError) throw err;
+    throw new RateLimitStorageError("Erreur lors de la finalisation du claim", err);
+  }
+}
+
+export function failContactClaim(tokenHash: string): void {
+  try {
+    const database = initDb();
+    const stmt = database.prepare("UPDATE contact_claims SET status = 'failed' WHERE token_hash = ?");
+    stmt.run(tokenHash);
+  } catch (err) {
+    if (err instanceof RateLimitStorageError) throw err;
+    throw new RateLimitStorageError("Erreur lors de la mise en echec du claim", err);
   }
 }
