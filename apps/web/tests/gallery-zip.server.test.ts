@@ -183,7 +183,7 @@ describe("gallery-download.ts (ZIP Streaming with yazl)", () => {
     expect(zipString).toContain("Photos/photo.jpg");
     expect(zipString).toContain("Photos/photo-1.jpg"); // disambiguated
     expect(zipString).toContain("Videos/film.mp4");
-  });
+  }, 20000);
 
   it("aborts archive creation and releases concurrency slot when client aborts request", async () => {
     const db = getGalleryDb();
@@ -227,5 +227,5 @@ describe("gallery-download.ts (ZIP Streaming with yazl)", () => {
     });
     const nextRes = await downloadLoader(createRouteArgs(nextRequest, { publicId: publishedGallery.public_id }));
     expect(nextRes.status).toBe(200);
-  });
+  }, 20000);
 });

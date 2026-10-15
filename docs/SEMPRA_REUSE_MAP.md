@@ -17,7 +17,7 @@ Ce document inventorie formellement les briques techniques de référence du pro
 | **Galeries privées & Téléchargements ZIP** | `gallery-*.server.ts`, code unique | **Porté et adapté** | **Lot 4** (`apps/web/app/lib/gallery-*.server.ts`, routes client/admin) |
 | **Previews WebP / Sharp** | `gallery-preview.server.ts`, `portfolio-image.server.ts` | **Porté et adapté** | **Lot 4 / Lot 3** (`apps/web/app/lib/gallery-preview.server.ts`, `media-image.server.ts`) |
 | **Suppression & Rétention RGPD** | `gallery-deletion-worker.server.ts` | **Différé** | Lot 5 |
-| **Formulaire Contact & Mailer** | `contact.server.ts`, `mailer.server.ts` | **Différé** | Lot 6 |
+| **Formulaire Contact & Mailer** | `contact.server.ts`, `mailer.server.ts` | **Porté** | Lot 6 |
 | **Pages légales & Inventaire cookies** | `admin.legal.tsx`, cookies techniques | **Différé** | Lot 7 |
 | **Tests E2E & Runner Playwright** | `run-e2e.js`, `playwright.config.ts` | **Différé** | Lot dédié ultérieur |
 
@@ -347,32 +347,48 @@ Ce document inventorie formellement les briques techniques de référence du pro
    - Envoi d'un double e-mail : notification a l'equipe et accuse de reception au contact.
 
 3. **Choix** :
-   - **Différé au Lot 6**.
+   - **Porté et adapté pour le Lot 6 (`feat/contact-mailer`)**.
 
 4. **Adaptations Parallax** :
-   - Champs du formulaire conformes au prototype Parallax :
-     - Nom ou societe ;
-     - E-mail ;
-     - Telephone (facultatif) ;
-     - Delai souhaite ;
-     - Type de projet : options exactes du prototype :
-       - Clip musical ;
-       - Publicite ;
-       - Portrait ;
-       - Documentaire ;
-       - Autre ;
-     - Message ;
-     - Notice de consentement RGPD avec lien vers la page confidentialite.
-   - Ne pas utiliser les intitules generiques "photo, video, documentaire, publicite, portrait".
-   - Templates e-mails bilingues aux couleurs de Parallax.
+   - **Champs du formulaire conformes au prototype Parallax** (`References/parallax-site/contact.html`) :
+     - Nom ou société (1-100 caractères, sans retours chariot CRLF) ;
+     - E-mail (1-254 caractères, validation stricte, sans CRLF) ;
+     - Téléphone (facultatif, max 50 caractères, sans CRLF) ;
+     - Échéance souhaitée (facultative, max 120 caractères, ex: "Printemps 2027", sans CRLF) ;
+     - Type de projet : 5 options strictes configurables (`Clip musical`, `Publicité`, `Portrait`, `Documentaire`, `Autre`) ;
+     - Message (1-5000 caractères) ;
+     - Notice de traitement des données avec lien optionnel vers la politique de confidentialité.
+   - **Anti-spam et sécurité renforcée** :
+     - Jeton signé HMAC `_token` combinant un horodatage d'émission et un nonce avec secret `RATE_LIMIT_SECRET` (délai minimal 2s, expiration 2h).
+     - Champ piège honeypot discret `website` (rejet immédiat 400).
+     - Rate Limiting persistant indépendant sous le namespace SQLite `contact` (5 soumissions / heure / IP). Ne se réinitialise jamais après un succès pour neutraliser les attaques par rafale.
+     - Table anti-rejeu et dédoublonnage `contact_claims` : réservation atomique SQLite empêchant l'envoi multiple lors d'un double-clic ou de soumissions concurrentes.
+     - Redirection PRG (Post-Redirect-Get) 303 avec cookie signé éphémère `__parallax_contact_flash` consommé dès l'affichage. `?success=true` ne déclenche aucun faux succès.
+     - Réinitialisation intégrale du formulaire au succès.
+     - Pré-remplissage propre via paramètre `?type=`.
+   - **Mailer sécurisé (`mailer.server.ts`)** :
+     - Nodemailer avec support Node 24.
+     - Chiffrement TLS strict : Port 587 STARTTLS obligatoire (`requireTLS: true`), Port 465 TLS direct (`secure: true`). Validation stricte des certificats (`rejectUnauthorized: true`, support de `SMTP_CA_CERT` pour tests locaux).
+     - Nettoyage des erreurs : aucun mot de passe, adresse de visiteur ou corps de message n'est journalisé (codes sûrs : `SMTP_UNCONFIGURED`, `SMTP_AUTH_FAILED`, `SMTP_CONN_REFUSED`, `SMTP_TLS_FAILED`, `SMTP_TIMEOUT`).
+     - Pas d'accusé de réception automatique non sollicité au visiteur afin d'éviter le relais de spam (backscatter).
+   - **Administration dédiée (`/admin/contact`)** :
+     - Édition complète bilingue FR/EN (SEO, Hero, formulaires, messages système).
+     - Activation / désactivation des 5 types de projet.
+     - Coordonnées synchronisées canoniquement avec `home.contact` (e-mail, Instagram, YouTube) et numéro de téléphone direct.
+     - Badge en direct de l'état SMTP (configuré / incomplet / invalide) sans fuite de secrets.
+     - Contrôle de conflit de révision optimiste (HTTP 409) préservant la saisie en cours.
+   - **Diagnostic CLI autonome** :
+     - Commande `npm run smtp:verify` testant la configuration et la poignée de main TLS sans envoyer d'e-mail.
 
-5. **Tests Sempra pertinents** :
-   - `apps/web/tests/contact.server.test.ts`
-   - `apps/web/tests/mailer.server.test.ts`
-   - `apps/web/tests/admin-contact-http.test.ts`
+5. **Tests Parallax livrés** :
+   - `apps/web/tests/mailer-smtp.test.ts` (9 tests avec faux serveur SMTP local `smtp-server` sur `127.0.0.1:0` et certificat CA local, STARTTLS, rejet de certificats, assainissement CRLF).
+   - `apps/web/tests/contact.server.test.ts` (18 tests couvrant les jetons, cookies flash, honeypot, limites de corps, doublons, rate limiting et table `contact_claims`).
+   - `apps/web/tests/admin-contact.test.ts` (7 tests couvrant la migration V1->V2, l'enregistrement atomique, la synchronisation des coordonnées et les conflits 409).
+   - `apps/web/tests/contact-ui.test.tsx` (7 tests validant l'accessibilité, le pré-remplissage `?type=`, les états de soumission et les badges SMTP admin).
+   - Zéro e-mail réel expédié, zéro utilisation de données privées.
 
 6. **Elements non verifies** :
-   - Taux de delivrabilite reel avec domaine Parallax sur relais SMTP de production.
+   - Délivrabilité réelle sur les serveurs SMTP finaux en production (dépendra du paramétrage SPF, DKIM et DMARC du domaine final de l'opérateur).
 
 ---
 

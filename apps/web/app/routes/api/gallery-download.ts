@@ -37,10 +37,11 @@ function createLazySecureEntryStream(
   const cleanup = () => {
     if (!isClosed) {
       isClosed = true;
-      if (fileStream && !fileStream.destroyed) {
-        fileStream.destroy();
-      }
+      const fs = fileStream;
       fileStream = null;
+      if (fs && !fs.destroyed && !fs.closed) {
+        fs.destroy();
+      }
       if (handle) {
         handle.close();
         handle = null;
@@ -75,7 +76,12 @@ function createLazySecureEntryStream(
             this.push(null);
           });
           fileStream.on("close", () => {
-            cleanup();
+            isClosed = true;
+            fileStream = null;
+            if (handle) {
+              handle.close();
+              handle = null;
+            }
           });
           fileStream.on("error", (err) => {
             cleanup();
