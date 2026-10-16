@@ -137,6 +137,38 @@ function resolveCaCert(raw: string | undefined): string | Buffer | undefined {
 let activeSends = 0;
 const MAX_CONCURRENT_SENDS = 5;
 
+const FRENCH_MONTH_NAMES = [
+  "janvier", "février", "mars", "avril", "mai", "juin",
+  "juillet", "août", "septembre", "octobre", "novembre", "décembre"
+];
+
+const ENGLISH_MONTH_NAMES = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December"
+];
+
+export function formatTimelineForEmail(timeline: string | undefined, lang: "fr" | "en"): string {
+  const isFr = lang === "fr";
+  const trimmed = timeline?.trim();
+  if (!trimmed) {
+    return isFr ? "Non précisée" : "Not specified";
+  }
+  const match = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (match) {
+    const year = parseInt(match[1], 10);
+    const month = parseInt(match[2], 10);
+    const day = parseInt(match[3], 10);
+    if (month >= 1 && month <= 12) {
+      if (isFr) {
+        return `${day} ${FRENCH_MONTH_NAMES[month - 1]} ${year} (${trimmed})`;
+      } else {
+        return `${ENGLISH_MONTH_NAMES[month - 1]} ${day}, ${year} (${trimmed})`;
+      }
+    }
+  }
+  return trimmed;
+}
+
 export async function sendContactEmail(data: ContactEmailPayload): Promise<void> {
   const diagnostic = getSmtpDiagnostic();
   if (diagnostic.status !== "configured") {
@@ -198,7 +230,7 @@ export async function sendContactEmail(data: ContactEmailPayload): Promise<void>
       `Nom / société       : ${data.name.trim()}`,
       `Email               : ${data.email.trim()}`,
       `Téléphone           : ${data.phone?.trim() ? data.phone.trim() : (isFr ? "Non précisé" : "Not specified")}`,
-      `Échéance souhaitée  : ${data.timeline?.trim() ? data.timeline.trim() : (isFr ? "Non précisée" : "Not specified")}`,
+      `Échéance souhaitée  : ${formatTimelineForEmail(data.timeline, data.lang)}`,
       `Type de projet      : ${data.projectTypeLabel} (${data.projectTypeId})`,
       `Langue              : ${data.lang.toUpperCase()}`,
       "--------------------------------------------------",

@@ -236,16 +236,30 @@ export function validateHomeContent(val: unknown): HomeContent {
   if (!Array.isArray(sf.photoItems)) {
     throw new ValidationError("home.savoirFaire.photoItems doit être une liste.");
   }
-  const photoItems = sf.photoItems.map((item, idx) =>
-    validateLocalizedString(item, `home.savoirFaire.photoItems[${idx}]`)
-  );
+  if (sf.photoItems.length > 50) {
+    throw new ValidationError("home.savoirFaire.photoItems ne peut pas contenir plus de 50 éléments.");
+  }
+  const photoItems = sf.photoItems.map((item, idx) => {
+    const validated = validateLocalizedString(item, `home.savoirFaire.photoItems[${idx}]`);
+    if (validated.fr.length > 300 || validated.en.length > 300) {
+      throw new ValidationError(`L'élément photo ${idx + 1} ne doit pas dépasser 300 caractères.`);
+    }
+    return validated;
+  });
 
   if (!Array.isArray(sf.videoItems)) {
     throw new ValidationError("home.savoirFaire.videoItems doit être une liste.");
   }
-  const videoItems = sf.videoItems.map((item, idx) =>
-    validateLocalizedString(item, `home.savoirFaire.videoItems[${idx}]`)
-  );
+  if (sf.videoItems.length > 50) {
+    throw new ValidationError("home.savoirFaire.videoItems ne peut pas contenir plus de 50 éléments.");
+  }
+  const videoItems = sf.videoItems.map((item, idx) => {
+    const validated = validateLocalizedString(item, `home.savoirFaire.videoItems[${idx}]`);
+    if (validated.fr.length > 300 || validated.en.length > 300) {
+      throw new ValidationError(`L'élément vidéo ${idx + 1} ne doit pas dépasser 300 caractères.`);
+    }
+    return validated;
+  });
 
   const contact = assertObject(obj.contact, "home.contact");
   assertExactKeys(contact, ["title", "emailLabel", "email", "socialLabel", "instagramUrl", "youtubeUrl"], "home.contact");
@@ -263,6 +277,18 @@ export function validateHomeContent(val: unknown): HomeContent {
   assertExactKeys(sempra, ["badge", "title", "buttonText", "buttonUrl"], "home.sempra");
   if (typeof sempra.buttonUrl !== "string") {
     throw new ValidationError("home.sempra.buttonUrl doit être une chaîne.");
+  }
+  const trimmedSempraUrl = sempra.buttonUrl.trim();
+  if (trimmedSempraUrl && trimmedSempraUrl !== "#") {
+    try {
+      const parsed = new URL(trimmedSempraUrl);
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+        throw new ValidationError("home.sempra.buttonUrl doit être une URL sécurisée (http: ou https:).");
+      }
+    } catch (err) {
+      if (err instanceof ValidationError) throw err;
+      throw new ValidationError("home.sempra.buttonUrl doit être une URL valide (ex: https://sempra.be/).");
+    }
   }
 
   return {

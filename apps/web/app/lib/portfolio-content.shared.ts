@@ -8,6 +8,8 @@ export const PORTFOLIO_MEDIA_SLOTS = [
   "showreel_cover",
   "video_cover",
   "gallery",
+  "category_entry",
+  "category_banner",
 ] as const;
 export type PortfolioMediaSlot = (typeof PORTFOLIO_MEDIA_SLOTS)[number];
 
@@ -77,6 +79,8 @@ export interface PortfolioProject {
   galleryAlt?: Record<string, LocalizedString>;
   video: PortfolioVideo | null;
   draftVideoCoverImageId?: string | null;
+  presentationMode?: "photo" | "video";
+  aspectRatio?: "3:2" | "4:5" | "16:9" | "1:1";
   showcase: boolean;
   side: "auto" | "left" | "right";
   order: number;
@@ -96,6 +100,12 @@ export interface PortfolioSection {
   };
   coverImageId: string | null;
   coverAlt: LocalizedString;
+  entryImageId?: string | null;
+  entryAlt?: LocalizedString;
+  entrySummary?: LocalizedString;
+  entrySide?: "left" | "right";
+  bannerImageId?: string | null;
+  bannerAlt?: LocalizedString;
   showreelTitle: LocalizedString;
   showreelVideo: PortfolioVideo | null;
   showreelCoverImageId: string | null;
@@ -525,6 +535,20 @@ function validatePortfolioProject(
     valid = false;
   }
 
+  if (val.presentationMode !== undefined) {
+    if (val.presentationMode !== "photo" && val.presentationMode !== "video") {
+      errors.push({ path: [...pPath, "presentationMode"], message: "presentationMode doit être 'photo' ou 'video'" });
+      valid = false;
+    }
+  }
+
+  if (val.aspectRatio !== undefined) {
+    if (!["3:2", "4:5", "16:9", "1:1"].includes(val.aspectRatio as string)) {
+      errors.push({ path: [...pPath, "aspectRatio"], message: "aspectRatio doit être '3:2', '4:5', '16:9' ou '1:1'" });
+      valid = false;
+    }
+  }
+
   if (typeof val.showcase !== "boolean") {
     errors.push({ path: [...pPath, "showcase"], message: "showcase doit être un booléen" });
     valid = false;
@@ -651,6 +675,56 @@ function validatePortfolioSection(
   }
 
   if (!validateLocalizedString(val.coverAlt, [...sPath, "coverAlt"], errors)) valid = false;
+
+  if (val.entryImageId !== null && val.entryImageId !== undefined) {
+    if (typeof val.entryImageId !== "string" || !UUID_REGEX.test(val.entryImageId)) {
+      errors.push({ path: [...sPath, "entryImageId"], message: "UUID d'image d'entrée invalide" });
+      valid = false;
+    } else if (mediaRegistry) {
+      const item = mediaRegistry[val.entryImageId];
+      if (!item) {
+        errors.push({ path: [...sPath, "entryImageId"], message: `Média d'entrée ${val.entryImageId} introuvable dans le registre` });
+        valid = false;
+      } else if (item.ownerType !== "section" || item.ownerId !== category) {
+        errors.push({ path: [...sPath, "entryImageId"], message: `Le média ${val.entryImageId} n'appartient pas à cette rubrique` });
+        valid = false;
+      }
+    }
+  }
+
+  if (val.entryAlt !== undefined && !validateLocalizedString(val.entryAlt, [...sPath, "entryAlt"], errors)) {
+    valid = false;
+  }
+
+  if (val.entrySummary !== undefined && !validateLocalizedString(val.entrySummary, [...sPath, "entrySummary"], errors)) {
+    valid = false;
+  }
+
+  if (val.entrySide !== undefined && val.entrySide !== "left" && val.entrySide !== "right") {
+    errors.push({ path: [...sPath, "entrySide"], message: "entrySide doit être 'left' ou 'right'" });
+    valid = false;
+  }
+
+  if (val.bannerImageId !== null && val.bannerImageId !== undefined) {
+    if (typeof val.bannerImageId !== "string" || !UUID_REGEX.test(val.bannerImageId)) {
+      errors.push({ path: [...sPath, "bannerImageId"], message: "UUID de bannière invalide" });
+      valid = false;
+    } else if (mediaRegistry) {
+      const item = mediaRegistry[val.bannerImageId];
+      if (!item) {
+        errors.push({ path: [...sPath, "bannerImageId"], message: `Média de bannière ${val.bannerImageId} introuvable dans le registre` });
+        valid = false;
+      } else if (item.ownerType !== "section" || item.ownerId !== category) {
+        errors.push({ path: [...sPath, "bannerImageId"], message: `Le média ${val.bannerImageId} n'appartient pas à cette rubrique` });
+        valid = false;
+      }
+    }
+  }
+
+  if (val.bannerAlt !== undefined && !validateLocalizedString(val.bannerAlt, [...sPath, "bannerAlt"], errors)) {
+    valid = false;
+  }
+
   if (!validateLocalizedString(val.showreelTitle, [...sPath, "showreelTitle"], errors)) valid = false;
   if (!validatePortfolioVideo(val.showreelVideo, [...sPath, "showreelVideo"], errors, mediaRegistry, "section", category)) {
     valid = false;

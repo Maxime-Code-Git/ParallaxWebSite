@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import ContactPage from "../app/routes/public/contact";
@@ -279,14 +280,15 @@ describe("Contact UI Components", () => {
       fireEvent.change(nameInput, { target: { value: "Maxime Studio" } });
       fireEvent.change(emailInput, { target: { value: "maxime@example.com" } });
       fireEvent.change(phoneInput, { target: { value: "+32 470 11 22 33" } });
-      fireEvent.change(timelineInput, { target: { value: "Juin 2027" } });
+      expect(timelineInput).toHaveAttribute("type", "date");
+      fireEvent.change(timelineInput, { target: { value: "2027-06-15" } });
       fireEvent.change(typeSelect, { target: { value: "music-video" } });
       fireEvent.change(messageTextarea, { target: { value: "Tournage prévu à Bruxelles." } });
 
       expect(nameInput.value).toBe("Maxime Studio");
       expect(emailInput.value).toBe("maxime@example.com");
       expect(phoneInput.value).toBe("+32 470 11 22 33");
-      expect(timelineInput.value).toBe("Juin 2027");
+      expect(timelineInput.value).toBe("2027-06-15");
       expect(typeSelect.value).toBe("music-video");
       expect(messageTextarea.value).toBe("Tournage prévu à Bruxelles.");
 

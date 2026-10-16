@@ -3,33 +3,73 @@ import styles from "./scrollToTop.module.css";
 
 interface ScrollToTopProps {
   checkSempra?: boolean;
+  targetRef?: React.RefObject<HTMLElement | null>;
+  className?: string;
+  ariaLabel?: string;
 }
 
-export function ScrollToTop({ checkSempra = false }: ScrollToTopProps) {
+export function ScrollToTop({
+  checkSempra = false,
+  targetRef,
+  className = "",
+  ariaLabel = "Remonter en haut de la page",
+}: ScrollToTopProps) {
   const [scrolled, setScrolled] = useState(false);
   const [overSempra, setOverSempra] = useState(false);
+  const [reducedMotion, setReducedMotion] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    try {
+      const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+      setReducedMotion(Boolean(mq?.matches));
+      const listener = (e: MediaQueryListEvent) => setReducedMotion(e.matches);
+      mq.addEventListener?.("change", listener);
+      return () => mq.removeEventListener?.("change", listener);
+    } catch {
+      // safe fallback
+    }
+  }, []);
 
   useEffect(() => {
     const handleScroll = () => {
-      const scrollY = window.scrollY;
+      const scrollY = targetRef?.current ? targetRef.current.scrollTop : (typeof window !== "undefined" ? window.scrollY : 0);
       setScrolled(scrollY > 60);
 
-      if (checkSempra) {
+      if (checkSempra && !targetRef?.current && typeof document !== "undefined") {
         const sempraEl = document.getElementById("sempra");
-        if (sempraEl) {
+        if (sempraEl && typeof window !== "undefined") {
           const rect = sempraEl.getBoundingClientRect();
           setOverSempra(rect.top <= window.innerHeight - 90);
         }
       }
     };
 
-    window.addEventListener("scroll", handleScroll, { passive: true });
-    handleScroll();
-    return () => window.removeEventListener("scroll", handleScroll);
-  }, [checkSempra]);
+    if (targetRef?.current) {
+      const el = targetRef.current;
+      el.addEventListener("scroll", handleScroll, { passive: true });
+      handleScroll();
+      return () => el.removeEventListener("scroll", handleScroll);
+    } else if (typeof window !== "undefined") {
+      window.addEventListener("scroll", handleScroll, { passive: true });
+      handleScroll();
+      return () => window.removeEventListener("scroll", handleScroll);
+    }
+  }, [checkSempra, targetRef]);
 
   const scrollToTop = () => {
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    const behavior = reducedMotion ? "auto" : "smooth";
+    if (targetRef?.current) {
+      if (typeof targetRef.current.scrollTo === "function") {
+        targetRef.current.scrollTo({ top: 0, behavior });
+      } else {
+        targetRef.current.scrollTop = 0;
+      }
+    } else if (typeof window !== "undefined") {
+      if (typeof window.scrollTo === "function") {
+        window.scrollTo({ top: 0, behavior });
+      }
+    }
   };
 
   const arrowColor = overSempra ? "#FBF6F0" : "#F5F6F7";
@@ -38,8 +78,10 @@ export function ScrollToTop({ checkSempra = false }: ScrollToTopProps) {
     <button
       type="button"
       onClick={scrollToTop}
-      className={`${styles.btn} ${scrolled ? styles.visible : styles.hidden} ${overSempra ? styles.btnSempra : ""}`}
-      aria-label="Remonter en haut de la page"
+      tabIndex={scrolled ? 0 : -1}
+      aria-hidden={!scrolled}
+      className={`${styles.btn} ${scrolled ? styles.visible : styles.hidden} ${overSempra ? styles.btnSempra : ""} ${className}`}
+      aria-label={ariaLabel}
     >
       <svg
         width="18"

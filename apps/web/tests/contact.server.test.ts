@@ -215,7 +215,7 @@ describe("Contact Server & Security Pipeline", () => {
         name: "Acme Studio",
         email: "contact@acme.test",
         phone: "+32 470 00 11 22",
-        timeline: "Printemps 2027",
+        timeline: "2027-05-15",
         type: "music-video",
         message: "Projet de clip musical dans un décor urbain.",
         website: "", // honeypot
@@ -526,7 +526,7 @@ describe("Contact Server & Security Pipeline", () => {
         name: "Synthetic Visitor",
         email: "visitor@example.test",
         phone: "",
-        timeline: "Juin",
+        timeline: "2027-06-01",
         type: "other",
         message: "documentary:Second message",
       };
@@ -535,7 +535,7 @@ describe("Contact Server & Security Pipeline", () => {
         name: "Synthetic Visitor",
         email: "visitor@example.test",
         phone: "",
-        timeline: "Juin:other",
+        timeline: "2027-06-15",
         type: "documentary",
         message: "Second message",
       };
@@ -587,7 +587,7 @@ describe("Contact Server & Security Pipeline", () => {
       expect(resB.status).toBe(409);
       const jsonB = await resB.json();
       expect(jsonB.ok).toBe(false);
-      expect(jsonB.values.timeline).toBe("Juin:other");
+      expect(jsonB.values.timeline).toBe("2027-06-15");
       expect(jsonB.values.type).toBe("documentary");
       expect(jsonB.values.message).toBe("Second message");
       expect(sendSpy).toHaveBeenCalledTimes(1);

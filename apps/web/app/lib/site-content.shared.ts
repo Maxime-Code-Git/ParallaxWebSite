@@ -307,8 +307,8 @@ export const DEFAULT_CONTACT_PAGE_MESSAGES = {
     en: "Phone number format is invalid.",
   },
   timelineInvalid: {
-    fr: "L'échéance ne doit pas dépasser 120 caractères.",
-    en: "Timeline cannot exceed 120 characters.",
+    fr: "Veuillez sélectionner une date de calendrier valide (AAAA-MM-JJ).",
+    en: "Please select a valid calendar date (YYYY-MM-DD).",
   },
   typeRequired: {
     fr: "Veuillez sélectionner un type de projet valide.",
@@ -369,7 +369,7 @@ export const DEFAULT_CONTACT_PAGE_CONTENT: ContactPageContent = {
     phoneLabel: { fr: "Téléphone (optionnel)", en: "Phone (optional)" },
     phonePlaceholder: { fr: "04XX XX XX XX", en: "04XX XX XX XX" },
     timelineLabel: { fr: "Échéance souhaitée", en: "Preferred timeline" },
-    timelinePlaceholder: { fr: "JJ / MM / AAAA", en: "DD / MM / YYYY" },
+    timelinePlaceholder: { fr: "AAAA-MM-JJ", en: "YYYY-MM-DD" },
     typeLabel: { fr: "Type de projet", en: "Project type" },
     typePlaceholder: { fr: "Sélectionner…", en: "Select…" },
     projectTypes: [...DEFAULT_PROJECT_TYPES],
@@ -960,3 +960,20 @@ export interface SiteContent {
   legalPages: LegalPagesContent;
   media?: Record<string, UploadedMediaMetadata>;
 }
+
+export function resolveSempraButtonUrl(url: string | null | undefined): string {
+  const trimmed = (url || "").trim();
+  if (!trimmed || trimmed === "#") {
+    return "https://sempra.be/";
+  }
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+      return trimmed;
+    }
+  } catch {
+    // If not a full URL or invalid protocol, fallback to canonical destination
+  }
+  return "https://sempra.be/";
+}
+
