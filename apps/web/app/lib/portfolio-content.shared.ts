@@ -1,7 +1,7 @@
 import { parseVideoUrl } from "./video";
 
 export const PORTFOLIO_CATEGORIES = ["documentary", "advertising"] as const;
-export type PortfolioCategory = (typeof PORTFOLIO_CATEGORIES)[number];
+export type PortfolioCategory = string;
 
 export const PORTFOLIO_MEDIA_SLOTS = [
   "cover",
@@ -21,6 +21,7 @@ export type PortfolioVariantName = (typeof PORTFOLIO_VARIANT_NAMES)[number];
 
 export const SLUG_REGEX = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 export const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const CATEGORY_ID_REGEX = /^[a-zA-Z0-9_-]{2,64}$/;
 
 export interface LocalizedString {
   fr: string;
@@ -90,20 +91,28 @@ export interface PortfolioProject {
   updatedAt: number;
 }
 
-export interface PortfolioSection {
-  category: PortfolioCategory;
+export interface PortfolioCategoryItem {
+  id: string;
+  slugFr: string;
+  slugEn: string;
+  slugAliases?: {
+    fr?: string[];
+    en?: string[];
+  };
   title: LocalizedString;
   intro: LocalizedString;
+  entrySummary?: LocalizedString;
+  entrySide?: "auto" | "left" | "right";
+  order: number;
+  status: "draft" | "published";
   seo: {
     title: LocalizedString;
     description: LocalizedString;
   };
-  coverImageId: string | null;
-  coverAlt: LocalizedString;
+  coverImageId?: string | null;
+  coverAlt?: LocalizedString;
   entryImageId?: string | null;
   entryAlt?: LocalizedString;
-  entrySummary?: LocalizedString;
-  entrySide?: "left" | "right";
   bannerImageId?: string | null;
   bannerAlt?: LocalizedString;
   showreelTitle: LocalizedString;
@@ -112,7 +121,10 @@ export interface PortfolioSection {
   morePhotosButton: LocalizedString;
   lessPhotosButton: LocalizedString;
   backButton: LocalizedString;
+  category?: string;
 }
+
+export type PortfolioSection = PortfolioCategoryItem;
 
 export interface PortfolioOverview {
   title: LocalizedString;
@@ -125,14 +137,12 @@ export interface PortfolioOverview {
 }
 
 export interface PortfolioContent {
-  schemaVersion: 1;
+  schemaVersion: 2;
   revision: string;
   updatedAt: string;
   overview: PortfolioOverview;
-  sections: {
-    documentary: PortfolioSection;
-    advertising: PortfolioSection;
-  };
+  categories: PortfolioCategoryItem[];
+  sections: Record<string, PortfolioCategoryItem>;
   projects: PortfolioProject[];
   media: Record<string, PortfolioMediaItem>;
 }
@@ -164,7 +174,7 @@ function isObject(val: unknown): val is Record<string, unknown> {
   return typeof val === "object" && val !== null && !Array.isArray(val);
 }
 
-function validateLocalizedString(
+export function validateLocalizedString(
   val: unknown,
   path: (string | number)[],
   errors: ValidationErrorDetail[]
@@ -185,7 +195,7 @@ function validateLocalizedString(
   return valid;
 }
 
-function validatePortfolioVideo(
+export function validatePortfolioVideo(
   val: unknown,
   path: (string | number)[],
   errors: ValidationErrorDetail[],
@@ -236,7 +246,7 @@ function validatePortfolioVideo(
   return valid;
 }
 
-function validateDetailedBlocks(
+export function validateDetailedBlocks(
   val: unknown,
   path: (string | number)[],
   errors: ValidationErrorDetail[]
@@ -268,10 +278,12 @@ function validateDetailedBlocks(
   return valid;
 }
 
-function validateMediaItem(
+export function validateMediaItem(
   id: string,
   val: unknown,
-  errors: ValidationErrorDetail[]
+  errors: ValidationErrorDetail[],
+  categoryIds?: Set<string>,
+  _projectIds?: Set<string>
 ): boolean {
   const mPath = ["media", id];
   if (!isObject(val)) {
@@ -297,8 +309,8 @@ function validateMediaItem(
     errors.push({ path: [...mPath, "ownerId"], message: "ownerId requis" });
     valid = false;
   } else if (val.ownerType === "section") {
-    if (val.ownerId !== "documentary" && val.ownerId !== "advertising") {
-      errors.push({ path: [...mPath, "ownerId"], message: "ownerId de section invalide" });
+    if (categoryIds && !categoryIds.has(val.ownerId)) {
+      errors.push({ path: [...mPath, "ownerId"], message: `ownerId de rubrique "${val.ownerId}" introuvable` });
       valid = false;
     }
   } else if (val.ownerType === "project") {
@@ -384,13 +396,221 @@ function validateMediaItem(
   return valid;
 }
 
-function validatePortfolioProject(
+export function validatePortfolioCategoryItem(
+  val: unknown,
+  index: number,
+  errors: ValidationErrorDetail[],
+  seenIds: Set<string>,
+  seenSlugsFr: Set<string>,
+  seenSlugsEn: Set<string>,
+  mediaRegistry?: Record<string, PortfolioMediaItem>
+): boolean {
+  if (!isObject(val)) {
+    errors.push({ path: ["categories", index], message: "La rubrique doit être un objet" });
+    return false;
+  }
+  const cPath = ["categories", index];
+  let valid = true;
+
+  if (typeof val.id !== "string" || !val.id.trim() || val.id.length > 64 || !CATEGORY_ID_REGEX.test(val.id)) {
+    errors.push({ path: [...cPath, "id"], message: "Identifiant de rubrique invalide" });
+    valid = false;
+  } else if (seenIds.has(val.id)) {
+    errors.push({ path: [...cPath, "id"], message: `Identifiant de rubrique "${val.id}" dupliqué` });
+    valid = false;
+  } else {
+    seenIds.add(val.id);
+  }
+
+  const categoryId = String(val.id || "");
+
+  if (
+    typeof val.slugFr !== "string" ||
+    val.slugFr.length < 2 ||
+    val.slugFr.length > 100 ||
+    !SLUG_REGEX.test(val.slugFr)
+  ) {
+    errors.push({ path: [...cPath, "slugFr"], message: "Format slug FR invalide" });
+    valid = false;
+  } else if (seenSlugsFr.has(val.slugFr)) {
+    errors.push({ path: [...cPath, "slugFr"], message: `Le slug FR "${val.slugFr}" est dupliqué` });
+    valid = false;
+  } else {
+    seenSlugsFr.add(val.slugFr);
+  }
+
+  if (
+    typeof val.slugEn !== "string" ||
+    val.slugEn.length < 2 ||
+    val.slugEn.length > 100 ||
+    !SLUG_REGEX.test(val.slugEn)
+  ) {
+    errors.push({ path: [...cPath, "slugEn"], message: "Format slug EN invalide" });
+    valid = false;
+  } else if (seenSlugsEn.has(val.slugEn)) {
+    errors.push({ path: [...cPath, "slugEn"], message: `Le slug EN "${val.slugEn}" est dupliqué` });
+    valid = false;
+  } else {
+    seenSlugsEn.add(val.slugEn);
+  }
+
+  // Validate aliases if present
+  if (val.slugAliases !== undefined && val.slugAliases !== null) {
+    if (!isObject(val.slugAliases)) {
+      errors.push({ path: [...cPath, "slugAliases"], message: "slugAliases doit être un objet { fr, en }" });
+      valid = false;
+    } else {
+      if (Array.isArray(val.slugAliases.fr)) {
+        for (const alias of val.slugAliases.fr) {
+          if (typeof alias !== "string" || !SLUG_REGEX.test(alias)) {
+            errors.push({ path: [...cPath, "slugAliases", "fr"], message: `Alias FR invalide: "${alias}"` });
+            valid = false;
+          } else if (alias === val.slugFr) {
+            errors.push({ path: [...cPath, "slugAliases", "fr"], message: `L'alias FR "${alias}" ne peut être identique au slug actif` });
+            valid = false;
+          }
+        }
+      }
+      if (Array.isArray(val.slugAliases.en)) {
+        for (const alias of val.slugAliases.en) {
+          if (typeof alias !== "string" || !SLUG_REGEX.test(alias)) {
+            errors.push({ path: [...cPath, "slugAliases", "en"], message: `Alias EN invalide: "${alias}"` });
+            valid = false;
+          } else if (alias === val.slugEn) {
+            errors.push({ path: [...cPath, "slugAliases", "en"], message: `L'alias EN "${alias}" ne peut être identique au slug actif` });
+            valid = false;
+          }
+        }
+      }
+    }
+  }
+
+  if (typeof val.order !== "number" || val.order < 0) {
+    errors.push({ path: [...cPath, "order"], message: "order doit être un entier positif" });
+    valid = false;
+  }
+
+  if (val.status !== "draft" && val.status !== "published") {
+    errors.push({ path: [...cPath, "status"], message: "status doit être 'draft' ou 'published'" });
+    valid = false;
+  }
+
+  if (!validateLocalizedString(val.title, [...cPath, "title"], errors)) valid = false;
+  if (!validateLocalizedString(val.intro, [...cPath, "intro"], errors)) valid = false;
+
+  if (isObject(val.seo)) {
+    validateLocalizedString(val.seo.title, [...cPath, "seo", "title"], errors);
+    validateLocalizedString(val.seo.description, [...cPath, "seo", "description"], errors);
+  } else {
+    errors.push({ path: [...cPath, "seo"], message: "SEO requis" });
+    valid = false;
+  }
+
+  if (val.coverImageId !== null && val.coverImageId !== undefined) {
+    if (typeof val.coverImageId !== "string" || !UUID_REGEX.test(val.coverImageId)) {
+      errors.push({ path: [...cPath, "coverImageId"], message: "UUID de couverture invalide" });
+      valid = false;
+    } else if (mediaRegistry) {
+      const item = mediaRegistry[val.coverImageId];
+      if (!item) {
+        errors.push({ path: [...cPath, "coverImageId"], message: `Média de couverture ${val.coverImageId} introuvable` });
+        valid = false;
+      } else if (item.ownerType !== "section" || item.ownerId !== categoryId) {
+        errors.push({ path: [...cPath, "coverImageId"], message: `Le média ${val.coverImageId} n'appartient pas à cette rubrique` });
+        valid = false;
+      }
+    }
+  }
+
+  if (val.coverAlt !== undefined && val.coverAlt !== null && !validateLocalizedString(val.coverAlt, [...cPath, "coverAlt"], errors)) {
+    valid = false;
+  }
+
+  if (val.entryImageId !== null && val.entryImageId !== undefined) {
+    if (typeof val.entryImageId !== "string" || !UUID_REGEX.test(val.entryImageId)) {
+      errors.push({ path: [...cPath, "entryImageId"], message: "UUID d'image d'entrée invalide" });
+      valid = false;
+    } else if (mediaRegistry) {
+      const item = mediaRegistry[val.entryImageId];
+      if (!item) {
+        errors.push({ path: [...cPath, "entryImageId"], message: `Média d'entrée ${val.entryImageId} introuvable` });
+        valid = false;
+      } else if (item.ownerType !== "section" || item.ownerId !== categoryId) {
+        errors.push({ path: [...cPath, "entryImageId"], message: `Le média ${val.entryImageId} n'appartient pas à cette rubrique` });
+        valid = false;
+      }
+    }
+  }
+
+  if (val.entryAlt !== undefined && val.entryAlt !== null && !validateLocalizedString(val.entryAlt, [...cPath, "entryAlt"], errors)) {
+    valid = false;
+  }
+
+  if (val.entrySummary !== undefined && val.entrySummary !== null && !validateLocalizedString(val.entrySummary, [...cPath, "entrySummary"], errors)) {
+    valid = false;
+  }
+
+  if (val.entrySide !== undefined && val.entrySide !== null && val.entrySide !== "left" && val.entrySide !== "right" && val.entrySide !== "auto") {
+    errors.push({ path: [...cPath, "entrySide"], message: "entrySide doit être 'auto', 'left' ou 'right'" });
+    valid = false;
+  }
+
+  if (val.bannerImageId !== null && val.bannerImageId !== undefined) {
+    if (typeof val.bannerImageId !== "string" || !UUID_REGEX.test(val.bannerImageId)) {
+      errors.push({ path: [...cPath, "bannerImageId"], message: "UUID de bannière invalide" });
+      valid = false;
+    } else if (mediaRegistry) {
+      const item = mediaRegistry[val.bannerImageId];
+      if (!item) {
+        errors.push({ path: [...cPath, "bannerImageId"], message: `Média de bannière ${val.bannerImageId} introuvable` });
+        valid = false;
+      } else if (item.ownerType !== "section" || item.ownerId !== categoryId) {
+        errors.push({ path: [...cPath, "bannerImageId"], message: `Le média ${val.bannerImageId} n'appartient pas à cette rubrique` });
+        valid = false;
+      }
+    }
+  }
+
+  if (val.bannerAlt !== undefined && val.bannerAlt !== null && !validateLocalizedString(val.bannerAlt, [...cPath, "bannerAlt"], errors)) {
+    valid = false;
+  }
+
+  if (val.showreelTitle && !validateLocalizedString(val.showreelTitle, [...cPath, "showreelTitle"], errors)) valid = false;
+  if (!validatePortfolioVideo(val.showreelVideo, [...cPath, "showreelVideo"], errors, mediaRegistry, "section", categoryId)) {
+    valid = false;
+  }
+
+  if (val.showreelCoverImageId !== null && val.showreelCoverImageId !== undefined) {
+    if (typeof val.showreelCoverImageId !== "string" || !UUID_REGEX.test(val.showreelCoverImageId)) {
+      errors.push({ path: [...cPath, "showreelCoverImageId"], message: "UUID d'affiche de showreel invalide" });
+      valid = false;
+    } else if (mediaRegistry) {
+      const item = mediaRegistry[val.showreelCoverImageId];
+      if (!item) {
+        errors.push({ path: [...cPath, "showreelCoverImageId"], message: `Média d'affiche de showreel ${val.showreelCoverImageId} introuvable` });
+        valid = false;
+      } else if (item.ownerType !== "section" || item.ownerId !== categoryId) {
+        errors.push({ path: [...cPath, "showreelCoverImageId"], message: `Le média ${val.showreelCoverImageId} n'appartient pas à cette rubrique` });
+        valid = false;
+      }
+    }
+  }
+
+  if (val.morePhotosButton && !validateLocalizedString(val.morePhotosButton, [...cPath, "morePhotosButton"], errors)) valid = false;
+  if (val.lessPhotosButton && !validateLocalizedString(val.lessPhotosButton, [...cPath, "lessPhotosButton"], errors)) valid = false;
+  if (val.backButton && !validateLocalizedString(val.backButton, [...cPath, "backButton"], errors)) valid = false;
+
+  return valid;
+}
+
+export function validatePortfolioProject(
   val: unknown,
   index: number,
   errors: ValidationErrorDetail[],
   seenSlugsFr: Map<string, string>,
   seenSlugsEn: Map<string, string>,
-  mediaRegistry?: Record<string, PortfolioMediaItem>
+  mediaRegistry?: Record<string, PortfolioMediaItem>,
+  allowedCategoryIds?: Set<string>
 ): boolean {
   if (!isObject(val)) {
     errors.push({ path: ["projects", index], message: "Le projet doit être un objet" });
@@ -406,8 +626,11 @@ function validatePortfolioProject(
 
   const projectId = String(val.id || "");
 
-  if (typeof val.category !== "string" || !PORTFOLIO_CATEGORIES.includes(val.category as PortfolioCategory)) {
-    errors.push({ path: [...pPath, "category"], message: "Catégorie invalide" });
+  if (typeof val.category !== "string" || !val.category.trim()) {
+    errors.push({ path: [...pPath, "category"], message: "Catégorie requise" });
+    valid = false;
+  } else if (allowedCategoryIds && !allowedCategoryIds.has(val.category)) {
+    errors.push({ path: [...pPath, "category"], message: `Catégorie "${val.category}" introuvable` });
     valid = false;
   }
 
@@ -661,150 +884,31 @@ function validatePortfolioProject(
   return valid;
 }
 
-function validatePortfolioSection(
-  val: unknown,
-  category: PortfolioCategory,
-  errors: ValidationErrorDetail[],
-  mediaRegistry?: Record<string, PortfolioMediaItem>
-): boolean {
-  if (!isObject(val)) {
-    errors.push({ path: ["sections", category], message: "La section doit être un objet" });
-    return false;
-  }
-  const sPath = ["sections", category];
-  let valid = true;
-
-  if (val.category !== category) {
-    errors.push({ path: [...sPath, "category"], message: `La catégorie doit être "${category}"` });
-    valid = false;
-  }
-
-  if (!validateLocalizedString(val.title, [...sPath, "title"], errors)) valid = false;
-  if (!validateLocalizedString(val.intro, [...sPath, "intro"], errors)) valid = false;
-
-  if (isObject(val.seo)) {
-    validateLocalizedString(val.seo.title, [...sPath, "seo", "title"], errors);
-    validateLocalizedString(val.seo.description, [...sPath, "seo", "description"], errors);
-  } else {
-    errors.push({ path: [...sPath, "seo"], message: "SEO requis" });
-    valid = false;
-  }
-
-  if (val.coverImageId !== null && val.coverImageId !== undefined) {
-    if (typeof val.coverImageId !== "string" || !UUID_REGEX.test(val.coverImageId)) {
-      errors.push({ path: [...sPath, "coverImageId"], message: "UUID de couverture invalide" });
-      valid = false;
-    } else if (mediaRegistry) {
-      const item = mediaRegistry[val.coverImageId];
-      if (!item) {
-        errors.push({ path: [...sPath, "coverImageId"], message: `Média de couverture ${val.coverImageId} introuvable dans le registre` });
-        valid = false;
-      } else if (item.ownerType !== "section" || item.ownerId !== category) {
-        errors.push({ path: [...sPath, "coverImageId"], message: `Le média ${val.coverImageId} n'appartient pas à cette rubrique` });
-        valid = false;
-      }
-    }
-  }
-
-  if (!validateLocalizedString(val.coverAlt, [...sPath, "coverAlt"], errors)) valid = false;
-
-  if (val.entryImageId !== null && val.entryImageId !== undefined) {
-    if (typeof val.entryImageId !== "string" || !UUID_REGEX.test(val.entryImageId)) {
-      errors.push({ path: [...sPath, "entryImageId"], message: "UUID d'image d'entrée invalide" });
-      valid = false;
-    } else if (mediaRegistry) {
-      const item = mediaRegistry[val.entryImageId];
-      if (!item) {
-        errors.push({ path: [...sPath, "entryImageId"], message: `Média d'entrée ${val.entryImageId} introuvable dans le registre` });
-        valid = false;
-      } else if (item.ownerType !== "section" || item.ownerId !== category) {
-        errors.push({ path: [...sPath, "entryImageId"], message: `Le média ${val.entryImageId} n'appartient pas à cette rubrique` });
-        valid = false;
-      }
-    }
-  }
-
-  if (val.entryAlt !== undefined && !validateLocalizedString(val.entryAlt, [...sPath, "entryAlt"], errors)) {
-    valid = false;
-  }
-
-  if (val.entrySummary !== undefined && !validateLocalizedString(val.entrySummary, [...sPath, "entrySummary"], errors)) {
-    valid = false;
-  }
-
-  if (val.entrySide !== undefined && val.entrySide !== "left" && val.entrySide !== "right") {
-    errors.push({ path: [...sPath, "entrySide"], message: "entrySide doit être 'left' ou 'right'" });
-    valid = false;
-  }
-
-  if (val.bannerImageId !== null && val.bannerImageId !== undefined) {
-    if (typeof val.bannerImageId !== "string" || !UUID_REGEX.test(val.bannerImageId)) {
-      errors.push({ path: [...sPath, "bannerImageId"], message: "UUID de bannière invalide" });
-      valid = false;
-    } else if (mediaRegistry) {
-      const item = mediaRegistry[val.bannerImageId];
-      if (!item) {
-        errors.push({ path: [...sPath, "bannerImageId"], message: `Média de bannière ${val.bannerImageId} introuvable dans le registre` });
-        valid = false;
-      } else if (item.ownerType !== "section" || item.ownerId !== category) {
-        errors.push({ path: [...sPath, "bannerImageId"], message: `Le média ${val.bannerImageId} n'appartient pas à cette rubrique` });
-        valid = false;
-      }
-    }
-  }
-
-  if (val.bannerAlt !== undefined && !validateLocalizedString(val.bannerAlt, [...sPath, "bannerAlt"], errors)) {
-    valid = false;
-  }
-
-  if (!validateLocalizedString(val.showreelTitle, [...sPath, "showreelTitle"], errors)) valid = false;
-  if (!validatePortfolioVideo(val.showreelVideo, [...sPath, "showreelVideo"], errors, mediaRegistry, "section", category)) {
-    valid = false;
-  }
-
-  if (val.showreelCoverImageId !== null && val.showreelCoverImageId !== undefined) {
-    if (typeof val.showreelCoverImageId !== "string" || !UUID_REGEX.test(val.showreelCoverImageId)) {
-      errors.push({ path: [...sPath, "showreelCoverImageId"], message: "UUID d'affiche de showreel invalide" });
-      valid = false;
-    } else if (mediaRegistry) {
-      const item = mediaRegistry[val.showreelCoverImageId];
-      if (!item) {
-        errors.push({ path: [...sPath, "showreelCoverImageId"], message: `Média d'affiche de showreel ${val.showreelCoverImageId} introuvable` });
-        valid = false;
-      } else if (item.ownerType !== "section" || item.ownerId !== category) {
-        errors.push({ path: [...sPath, "showreelCoverImageId"], message: `Le média ${val.showreelCoverImageId} n'appartient pas à cette rubrique` });
-        valid = false;
-      }
-    }
-  }
-
-  if (!validateLocalizedString(val.morePhotosButton, [...sPath, "morePhotosButton"], errors)) valid = false;
-  if (!validateLocalizedString(val.lessPhotosButton, [...sPath, "lessPhotosButton"], errors)) valid = false;
-  if (!validateLocalizedString(val.backButton, [...sPath, "backButton"], errors)) valid = false;
-
-  return valid;
-}
-
-export const portfolioSectionSchema = {
-  safeParse(val: unknown): SchemaParseResult<PortfolioSection> {
+export const portfolioCategorySchema = {
+  safeParse(val: unknown): SchemaParseResult<PortfolioCategoryItem> {
     const errors: ValidationErrorDetail[] = [];
     if (!isObject(val)) {
-      return { success: false, error: { errors: [{ path: [], message: "Doit être un objet section" }] } };
+      return { success: false, error: { errors: [{ path: [], message: "Doit être un objet rubrique" }] } };
     }
-    const cat = (val.category as PortfolioCategory) || "documentary";
-    validatePortfolioSection(val, cat, errors);
+    const seenIds = new Set<string>();
+    const seenSlugsFr = new Set<string>();
+    const seenSlugsEn = new Set<string>();
+    validatePortfolioCategoryItem(val, 0, errors, seenIds, seenSlugsFr, seenSlugsEn);
     if (errors.length > 0) {
       return { success: false, error: { errors } };
     }
-    return { success: true, data: val as unknown as PortfolioSection };
+    return { success: true, data: val as unknown as PortfolioCategoryItem };
   },
 };
+
+export const portfolioSectionSchema = portfolioCategorySchema;
 
 const ALLOWED_ROOT_KEYS = new Set([
   "schemaVersion",
   "revision",
   "updatedAt",
   "overview",
+  "categories",
   "sections",
   "projects",
   "media",
@@ -827,8 +931,8 @@ export const portfolioContentSchema = {
       }
     }
 
-    if (val.schemaVersion !== 1) {
-      errors.push({ path: ["schemaVersion"], message: "schemaVersion doit être 1" });
+    if (val.schemaVersion !== 2) {
+      errors.push({ path: ["schemaVersion"], message: "schemaVersion doit être 2" });
     }
 
     if (typeof val.revision !== "string" || val.revision.length < 8 || val.revision.length > 64) {
@@ -853,41 +957,231 @@ export const portfolioContentSchema = {
       errors.push({ path: ["overview"], message: "Overview requis" });
     }
 
-    // First validate media registry
+    // Media registry
     let mediaRegistry: Record<string, PortfolioMediaItem> | undefined;
     if (isObject(val.media)) {
       mediaRegistry = val.media as Record<string, PortfolioMediaItem>;
-      for (const [id, item] of Object.entries(val.media)) {
-        validateMediaItem(id, item, errors);
-      }
     } else {
       errors.push({ path: ["media"], message: "media doit être un objet" });
     }
 
-    if (isObject(val.sections)) {
-      validatePortfolioSection(val.sections.documentary, "documentary", errors, mediaRegistry);
-      validatePortfolioSection(val.sections.advertising, "advertising", errors, mediaRegistry);
+    // Categories
+    const categoryIds = new Set<string>();
+    const seenSlugsFr = new Set<string>();
+    const seenSlugsEn = new Set<string>();
+
+    if (Array.isArray(val.categories)) {
+      for (let i = 0; i < val.categories.length; i++) {
+        validatePortfolioCategoryItem(
+          val.categories[i],
+          i,
+          errors,
+          categoryIds,
+          seenSlugsFr,
+          seenSlugsEn,
+          mediaRegistry
+        );
+      }
     } else {
-      errors.push({ path: ["sections"], message: "Sections requises" });
+      errors.push({ path: ["categories"], message: "categories doit être un tableau" });
     }
 
+    // Projects
+    const projectIds = new Set<string>();
     if (Array.isArray(val.projects)) {
       const seenFr = new Map<string, string>();
       const seenEn = new Map<string, string>();
       for (let i = 0; i < val.projects.length; i++) {
-        validatePortfolioProject(val.projects[i], i, errors, seenFr, seenEn, mediaRegistry);
+        const p = val.projects[i];
+        if (p && typeof p === "object" && "id" in p && typeof (p as { id: unknown }).id === "string") {
+          projectIds.add((p as { id: string }).id);
+        }
+        validatePortfolioProject(p, i, errors, seenFr, seenEn, mediaRegistry, categoryIds);
       }
     } else {
       errors.push({ path: ["projects"], message: "projects doit être un tableau" });
+    }
+
+    // Validate media items against collected categoryIds and projectIds
+    if (mediaRegistry) {
+      for (const [id, item] of Object.entries(mediaRegistry)) {
+        validateMediaItem(id, item, errors, categoryIds, projectIds);
+      }
     }
 
     if (errors.length > 0) {
       return { success: false, error: { errors } };
     }
 
-    return { success: true, data: val as unknown as PortfolioContent };
+    // Ensure sections map is synchronized
+    const categories = val.categories as PortfolioCategoryItem[];
+    const sections: Record<string, PortfolioCategoryItem> = {};
+    for (const c of categories) {
+      sections[c.id] = c;
+    }
+
+    const data: PortfolioContent = {
+      ...(val as unknown as PortfolioContent),
+      schemaVersion: 2,
+      categories,
+      sections,
+    };
+
+    return { success: true, data };
   },
 };
+
+/**
+ * Idempotent migration from Schema V1 to Schema V2.
+ * Preserves documentary and advertising with their original stable IDs,
+ * projects, media, slugs, and editorial configurations.
+ */
+export function migratePortfolioContentV1ToV2(raw: unknown): PortfolioContent {
+  if (!raw || typeof raw !== "object") {
+    throw new Error("Contenu portfolio invalide pour la migration");
+  }
+  const obj = raw as Record<string, unknown>;
+
+  // If already V2, return with synchronized sections map
+  if (obj.schemaVersion === 2 && Array.isArray(obj.categories)) {
+    const cats = obj.categories as PortfolioCategoryItem[];
+    const sections: Record<string, PortfolioCategoryItem> = {};
+    for (const c of cats) {
+      sections[c.id] = c;
+    }
+    return {
+      ...(obj as unknown as PortfolioContent),
+      schemaVersion: 2,
+      categories: cats,
+      sections,
+    };
+  }
+
+  // Schema V1 migration
+  const categories: PortfolioCategoryItem[] = [];
+  const oldSections = (obj.sections && typeof obj.sections === "object" ? obj.sections : {}) as Record<string, Partial<PortfolioCategoryItem>>;
+
+  // 1. Documentary
+  if (oldSections.documentary) {
+    const doc = oldSections.documentary;
+    categories.push({
+      id: "documentary",
+      slugFr: doc.slugFr || "documentaire",
+      slugEn: doc.slugEn || "documentary",
+      order: typeof doc.order === "number" ? doc.order : 0,
+      status: doc.status || "published",
+      title: doc.title || { fr: "Documentaire", en: "Documentary" },
+      intro: doc.intro || {
+        fr: "Des films qui racontent le réel — portraits de métiers, de lieux et de savoir-faire, du repérage au montage.",
+        en: "Films that tell real stories — portraits of trades, places and craft, from scouting to the edit.",
+      },
+      entrySummary: doc.entrySummary || doc.intro,
+      entrySide: doc.entrySide || "left",
+      seo: doc.seo || {
+        title: { fr: "Documentaire — Parallax | Films documentaires", en: "Documentary — Parallax | Documentary films" },
+        description: { fr: "Portraits de métiers, de lieux et de savoir-faire, du repérage au montage.", en: "Portraits of trades, places and craft, from scouting to the edit." },
+      },
+      coverImageId: doc.coverImageId ?? null,
+      coverAlt: doc.coverAlt || { fr: "Bannière documentaire", en: "Documentary banner" },
+      entryImageId: doc.entryImageId ?? null,
+      entryAlt: doc.entryAlt || doc.coverAlt || { fr: "Visuel documentaire", en: "Documentary visual" },
+      bannerImageId: doc.bannerImageId ?? null,
+      bannerAlt: doc.bannerAlt || doc.coverAlt || { fr: "Bannière documentaire", en: "Documentary banner" },
+      showreelTitle: doc.showreelTitle || { fr: "Showreel documentaire", en: "Documentary showreel" },
+      showreelVideo: doc.showreelVideo ?? null,
+      showreelCoverImageId: doc.showreelCoverImageId ?? null,
+      morePhotosButton: doc.morePhotosButton || { fr: "Voir plus de photos", en: "See more photos" },
+      lessPhotosButton: doc.lessPhotosButton || { fr: "Voir moins", en: "See less" },
+      backButton: doc.backButton || { fr: "Retour aux projets", en: "Back to projects" },
+    });
+  }
+
+  // 2. Advertising
+  if (oldSections.advertising) {
+    const ad = oldSections.advertising;
+    categories.push({
+      id: "advertising",
+      slugFr: ad.slugFr || "publicite",
+      slugEn: ad.slugEn || "advertising",
+      order: typeof ad.order === "number" ? ad.order : categories.length,
+      status: ad.status || "published",
+      title: ad.title || { fr: "Publicité", en: "Advertising" },
+      intro: ad.intro || {
+        fr: "Des films de marque et de produit — studio, extérieur, rythme et lumière au service du message.",
+        en: "Brand and product films — studio, outdoor, rhythm and light serving the message.",
+      },
+      entrySummary: ad.entrySummary || ad.intro,
+      entrySide: ad.entrySide || "right",
+      seo: ad.seo || {
+        title: { fr: "Publicité — Parallax | Films de marque et produit", en: "Advertising — Parallax | Brand and product films" },
+        description: { fr: "Films de marque et de produit — studio, extérieur, rythme et lumière au service du message.", en: "Brand and product films — studio, outdoor, rhythm and light serving the message." },
+      },
+      coverImageId: ad.coverImageId ?? null,
+      coverAlt: ad.coverAlt || { fr: "Bannière publicité", en: "Advertising banner" },
+      entryImageId: ad.entryImageId ?? null,
+      entryAlt: ad.entryAlt || ad.coverAlt || { fr: "Visuel publicité", en: "Advertising visual" },
+      bannerImageId: ad.bannerImageId ?? null,
+      bannerAlt: ad.bannerAlt || ad.coverAlt || { fr: "Bannière publicité", en: "Advertising banner" },
+      showreelTitle: ad.showreelTitle || { fr: "Showreel publicité", en: "Advertising showreel" },
+      showreelVideo: ad.showreelVideo ?? null,
+      showreelCoverImageId: ad.showreelCoverImageId ?? null,
+      morePhotosButton: ad.morePhotosButton || { fr: "Voir plus de photos", en: "See more photos" },
+      lessPhotosButton: ad.lessPhotosButton || { fr: "Voir moins", en: "See less" },
+      backButton: ad.backButton || { fr: "Retour aux projets", en: "Back to projects" },
+    });
+  }
+
+  // 3. Any additional custom sections
+  for (const [key, sec] of Object.entries(oldSections)) {
+    if (key === "documentary" || key === "advertising") continue;
+    if (sec && typeof sec === "object") {
+      categories.push({
+        id: sec.id || key,
+        slugFr: sec.slugFr || slugify(sec.title?.fr || key),
+        slugEn: sec.slugEn || slugify(sec.title?.en || key),
+        order: typeof sec.order === "number" ? sec.order : categories.length,
+        status: sec.status || "published",
+        title: sec.title || { fr: key, en: key },
+        intro: sec.intro || { fr: "", en: "" },
+        entrySummary: sec.entrySummary,
+        entrySide: sec.entrySide || "auto",
+        seo: sec.seo || { title: sec.title || { fr: key, en: key }, description: sec.intro || { fr: "", en: "" } },
+        coverImageId: sec.coverImageId ?? null,
+        coverAlt: sec.coverAlt,
+        entryImageId: sec.entryImageId ?? null,
+        entryAlt: sec.entryAlt,
+        bannerImageId: sec.bannerImageId ?? null,
+        bannerAlt: sec.bannerAlt,
+        showreelTitle: sec.showreelTitle || { fr: `Showreel ${key}`, en: `${key} showreel` },
+        showreelVideo: sec.showreelVideo ?? null,
+        showreelCoverImageId: sec.showreelCoverImageId ?? null,
+        morePhotosButton: sec.morePhotosButton || { fr: "Voir plus de photos", en: "See more photos" },
+        lessPhotosButton: sec.lessPhotosButton || { fr: "Voir moins", en: "See less" },
+        backButton: sec.backButton || { fr: "Retour aux projets", en: "Back to projects" },
+      });
+    }
+  }
+
+  const sections: Record<string, PortfolioCategoryItem> = {};
+  for (const c of categories) {
+    sections[c.id] = c;
+  }
+
+  const projects = Array.isArray(obj.projects) ? (obj.projects as PortfolioProject[]) : [];
+  const media = (obj.media && typeof obj.media === "object" ? obj.media : {}) as Record<string, PortfolioMediaItem>;
+  const overview = (obj.overview && typeof obj.overview === "object" ? obj.overview : {}) as PortfolioOverview;
+
+  return {
+    schemaVersion: 2,
+    revision: typeof obj.revision === "string" ? obj.revision : "rev-" + Date.now().toString(36),
+    updatedAt: typeof obj.updatedAt === "string" ? obj.updatedAt : new Date().toISOString(),
+    overview,
+    categories,
+    sections,
+    projects,
+    media,
+  };
+}
 
 /**
  * Resolves the presentation mode ("photo" | "video") for a project,

@@ -47,13 +47,13 @@ export async function loader({ params }: LoaderFunctionArgs) {
     let isPubliclyReferenced = false;
 
     if (ownerType === "section") {
-      if (ownerId === "documentary" || ownerId === "advertising") {
-        const sec = content.sections[ownerId];
+      const category = content.categories.find((c) => c.id === ownerId && c.status === "published");
+      if (category) {
         if (
-          (slot === "cover" && sec.coverImageId === imageId) ||
-          (slot === "showreel_cover" && sec.showreelCoverImageId === imageId) ||
-          (slot === "category_entry" && sec.entryImageId === imageId) ||
-          (slot === "category_banner" && sec.bannerImageId === imageId)
+          (slot === "cover" && category.coverImageId === imageId) ||
+          (slot === "showreel_cover" && category.showreelCoverImageId === imageId) ||
+          (slot === "category_entry" && category.entryImageId === imageId) ||
+          (slot === "category_banner" && category.bannerImageId === imageId)
         ) {
           isPubliclyReferenced = true;
         }
@@ -61,12 +61,17 @@ export async function loader({ params }: LoaderFunctionArgs) {
     } else if (ownerType === "project") {
       const project = content.projects.find((p) => p.id === ownerId);
       if (project && project.status === "published" && !project.archived) {
-        if (
-          project.coverImageId === imageId ||
-          project.video?.coverImageId === imageId ||
-          project.galleryImageIds.includes(imageId)
-        ) {
-          isPubliclyReferenced = true;
+        const parentCategory = content.categories.find(
+          (c) => c.id === project.category && c.status === "published"
+        );
+        if (parentCategory) {
+          if (
+            project.coverImageId === imageId ||
+            project.video?.coverImageId === imageId ||
+            project.galleryImageIds.includes(imageId)
+          ) {
+            isPubliclyReferenced = true;
+          }
         }
       }
     }

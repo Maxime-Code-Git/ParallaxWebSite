@@ -11,11 +11,9 @@ import { validateOrigin } from "../../lib/security.server";
 import {
   PORTFOLIO_MEDIA_OWNER_TYPES,
   PORTFOLIO_MEDIA_SLOTS,
-  PORTFOLIO_CATEGORIES,
   UUID_REGEX,
   type PortfolioMediaOwnerType,
   type PortfolioMediaSlot,
-  type PortfolioCategory,
   type PortfolioMediaItem,
 } from "../../lib/portfolio-content.shared";
 import {
@@ -290,7 +288,8 @@ export async function action({ request }: ActionFunctionArgs) {
     ) {
       return jsonError("Emplacement de média non autorisé pour une rubrique.", 400);
     }
-    if (!PORTFOLIO_CATEGORIES.includes(ownerId as PortfolioCategory)) {
+    const categoryExists = currentContent.categories.some((c) => c.id === ownerId);
+    if (!categoryExists) {
       return jsonError("Rubrique inconnue.", 404);
     }
   } else if (ownerType === "project") {
@@ -408,7 +407,7 @@ export async function action({ request }: ActionFunctionArgs) {
     nextContent.media[processedResult.imageId] = metadataToStore;
 
     if (ownerType === "section") {
-      const sec = nextContent.sections[ownerId as PortfolioCategory];
+      const sec = nextContent.categories?.find((c) => c.id === ownerId);
       if (sec) {
         if (mediaSlot === "cover") {
           sec.coverImageId = processedResult.imageId;
@@ -419,6 +418,13 @@ export async function action({ request }: ActionFunctionArgs) {
         } else if (mediaSlot === "category_banner") {
           sec.bannerImageId = processedResult.imageId;
         }
+      }
+      if (nextContent.sections?.[ownerId]) {
+        const secMap = nextContent.sections[ownerId];
+        if (mediaSlot === "cover") secMap.coverImageId = processedResult.imageId;
+        else if (mediaSlot === "showreel_cover") secMap.showreelCoverImageId = processedResult.imageId;
+        else if (mediaSlot === "category_entry") secMap.entryImageId = processedResult.imageId;
+        else if (mediaSlot === "category_banner") secMap.bannerImageId = processedResult.imageId;
       }
     } else if (ownerType === "project") {
       const proj = nextContent.projects.find((p) => p.id === ownerId);

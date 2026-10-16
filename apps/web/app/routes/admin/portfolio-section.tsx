@@ -29,7 +29,7 @@ import {
   type PortfolioSection,
   type PortfolioOverview,
   type PortfolioMediaItem,
-  PORTFOLIO_CATEGORIES,
+  type PortfolioContent,
 } from "../../lib/portfolio-content.shared";
 import { parseVideoUrl } from "../../lib/video";
 import { ResponsivePortfolioImage } from "../../components/public/ResponsivePortfolioImage";
@@ -48,6 +48,8 @@ export function headers(args: HeadersArgs): Headers {
   return composeAdminHeaders(args);
 }
 
+import { slugify } from "../../lib/portfolio-content.shared";
+
 const ALLOWED_SECTION_FIELDS = [
   "csrfToken",
   "revision",
@@ -57,6 +59,8 @@ const ALLOWED_SECTION_FIELDS = [
   "bannerImageId",
   "title_fr",
   "title_en",
+  "slugFr",
+  "slugEn",
   "intro_fr",
   "intro_en",
   "entrySummary_fr",
@@ -94,18 +98,18 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     responseHeaders.set("Set-Cookie", await commitSession(session));
   }
 
-  const category = params.category as PortfolioCategory;
-  if (!PORTFOLIO_CATEGORIES.includes(category)) {
+  const categoryId = params.category;
+  const { content } = getRawPortfolioContent();
+  const section = content.categories?.find((c) => c.id === categoryId) || content.sections?.[categoryId!];
+
+  if (!section) {
     throw new Response("Rubrique introuvable", { status: 404, headers: responseHeaders });
   }
-
-  const { content } = getRawPortfolioContent();
-  const section = content.sections[category];
 
   return Response.json(
     {
       section,
-      category,
+      category: categoryId,
       overview: content.overview,
       contentRevision: content.revision,
       media: content.media,
@@ -129,8 +133,12 @@ export async function action({ request, params }: ActionFunctionArgs) {
     return Response.json({ error: "Origine non autorisée." }, { status: 403, headers: createAdminHeaders() });
   }
 
-  const category = params.category as PortfolioCategory;
-  if (!PORTFOLIO_CATEGORIES.includes(category)) {
+  const categoryId = params.category;
+  const { content } = getRawPortfolioContent();
+  const nextContent: PortfolioContent = JSON.parse(JSON.stringify(content));
+  const section = nextContent.categories?.find((c) => c.id === categoryId);
+
+  if (!section) {
     return Response.json({ error: "Rubrique introuvable." }, { status: 404, headers: createAdminHeaders() });
   }
 
@@ -154,16 +162,64 @@ export async function action({ request, params }: ActionFunctionArgs) {
   }
 
   const expectedRevision = String(formData.get("revision") || "");
-  const { content } = getRawPortfolioContent();
-
-  const nextContent = JSON.parse(JSON.stringify(content));
-  const section = nextContent.sections[category] as PortfolioSection;
 
   // 1. Textes et intro
   section.title = {
     fr: String(formData.get("title_fr") || "").trim(),
     en: String(formData.get("title_en") || "").trim(),
   };
+
+  // 2. Slugs et alias
+  const rawSlugFr = String(formData.get("slugFr") || "").trim() || section.title.fr;
+  const rawSlugEn = String(formData.get("slugEn") || "").trim() || section.title.en;
+  const newSlugFr = slugify(rawSlugFr);
+  const newSlugEn = slugify(rawSlugEn);
+
+  if (!newSlugFr || !newSlugEn) {
+    return Response.json(
+      { error: "Les slugs publics FR et EN sont requis et doivent être valides." },
+      { status: 422, headers: createAdminHeaders() }
+    );
+  }
+
+  // Check collision with other categories
+  for (const other of nextContent.categories) {
+    if (other.id !== categoryId) {
+      if (other.slugFr === newSlugFr || other.slugAliases?.fr?.includes(newSlugFr)) {
+        return Response.json(
+          { error: `Le slug FR "${newSlugFr}" est déjà utilisé par la rubrique "${other.title.fr}".` },
+          { status: 422, headers: createAdminHeaders() }
+        );
+      }
+      if (other.slugEn === newSlugEn || other.slugAliases?.en?.includes(newSlugEn)) {
+        return Response.json(
+          { error: `Le slug EN "${newSlugEn}" est déjà utilisé par la rubrique "${other.title.en}".` },
+          { status: 422, headers: createAdminHeaders() }
+        );
+      }
+    }
+  }
+
+  if (!section.slugAliases) {
+    section.slugAliases = { fr: [], en: [] };
+  }
+  if (!Array.isArray(section.slugAliases.fr)) section.slugAliases.fr = [];
+  if (!Array.isArray(section.slugAliases.en)) section.slugAliases.en = [];
+
+  if (section.slugFr && section.slugFr !== newSlugFr) {
+    if (!section.slugAliases.fr.includes(section.slugFr)) {
+      section.slugAliases.fr.push(section.slugFr);
+    }
+  }
+  if (section.slugEn && section.slugEn !== newSlugEn) {
+    if (!section.slugAliases.en.includes(section.slugEn)) {
+      section.slugAliases.en.push(section.slugEn);
+    }
+  }
+
+  section.slugFr = newSlugFr;
+  section.slugEn = newSlugEn;
+
   section.intro = {
     fr: String(formData.get("intro_fr") || "").trim(),
     en: String(formData.get("intro_en") || "").trim(),
@@ -176,7 +232,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     en: entrySummaryEn || section.intro.en,
   };
   const entrySideRaw = String(formData.get("entrySide") || "").trim();
-  section.entrySide = entrySideRaw === "left" || entrySideRaw === "right" ? entrySideRaw : (category === "documentary" ? "left" : "right");
+  section.entrySide = entrySideRaw === "left" || entrySideRaw === "right" ? entrySideRaw : "auto";
 
   // 2. SEO
   section.seo = {
@@ -324,6 +380,12 @@ export default function AdminPortfolioSectionPage() {
   // Form states initialized to preserve unsaved user input across uploads
   const [titleFr, setTitleFr] = useState(section.title.fr);
   const [titleEn, setTitleEn] = useState(section.title.en);
+  const [slugFr, setSlugFr] = useState(
+    section.slugFr || (category === "documentary" ? "documentaire" : category === "advertising" ? "publicite" : slugify(section.title.fr))
+  );
+  const [slugEn, setSlugEn] = useState(
+    section.slugEn || (category === "documentary" ? "documentary" : category === "advertising" ? "advertising" : slugify(section.title.en))
+  );
   const [introFr, setIntroFr] = useState(section.intro.fr);
   const [introEn, setIntroEn] = useState(section.intro.en);
   const [showreelTitleFr, setShowreelTitleFr] = useState(section.showreelTitle.fr);
@@ -347,7 +409,7 @@ export default function AdminPortfolioSectionPage() {
   const [entryAltEn, setEntryAltEn] = useState(section.entryAlt?.en || "");
   const [entrySummaryFr, setEntrySummaryFr] = useState(section.entrySummary?.fr || section.intro.fr);
   const [entrySummaryEn, setEntrySummaryEn] = useState(section.entrySummary?.en || section.intro.en);
-  const [entrySide, setEntrySide] = useState<"left" | "right">(section.entrySide || (category === "documentary" ? "left" : "right"));
+  const [entrySide, setEntrySide] = useState<"auto" | "left" | "right">(section.entrySide || "auto");
 
   const [bannerImageId, setBannerImageId] = useState<string | null>(
     section.bannerImageId !== undefined ? section.bannerImageId : (section.coverImageId || null)
@@ -369,7 +431,7 @@ export default function AdminPortfolioSectionPage() {
   const bannerInputRef = useRef<HTMLInputElement>(null);
   const showreelCoverInputRef = useRef<HTMLInputElement>(null);
 
-  const categoryName = category === "documentary" ? "Documentaire" : "Publicité";
+  const categoryName = section.title?.fr || (category === "documentary" ? "Documentaire" : "Publicité");
 
   const handleUploadImage = async (
     file: File,
@@ -518,6 +580,29 @@ export default function AdminPortfolioSectionPage() {
                 </div>
 
                 <div className={styles.formGroup}>
+                  <label htmlFor="slugFr" className={styles.label}>
+                    Slug public d'URL (FR) *
+                  </label>
+                  <input
+                    id="slugFr"
+                    name="slugFr"
+                    type="text"
+                    required
+                    value={slugFr}
+                    onChange={(e) => setSlugFr(slugify(e.target.value))}
+                    className={styles.input}
+                  />
+                  <div className={styles.helperText}>
+                    URL publique : <code>/fr/projets/{slugify(slugFr || titleFr)}</code>
+                    {section.slugAliases?.fr && section.slugAliases.fr.length > 0 && (
+                      <span style={{ display: "block", marginTop: 4 }}>
+                        Alias redirigés (301) : {section.slugAliases.fr.join(", ")}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className={styles.formGroup}>
                   <label htmlFor="intro_fr" className={styles.label}>
                     Introduction / Accroche (FR)
                   </label>
@@ -559,9 +644,10 @@ export default function AdminPortfolioSectionPage() {
                     id="entrySide"
                     name="entrySide"
                     value={entrySide}
-                    onChange={(e) => setEntrySide(e.target.value as "left" | "right")}
+                    onChange={(e) => setEntrySide(e.target.value as "auto" | "left" | "right")}
                     className={styles.input}
                   >
+                    <option value="auto">Automatique (alternance selon l'ordre)</option>
                     <option value="left">Image à gauche (texte à droite)</option>
                     <option value="right">Image à droite (texte à gauche)</option>
                   </select>
@@ -582,6 +668,29 @@ export default function AdminPortfolioSectionPage() {
                     onChange={(e) => setTitleEn(e.target.value)}
                     className={styles.input}
                   />
+                </div>
+
+                <div className={styles.formGroup}>
+                  <label htmlFor="slugEn" className={styles.label}>
+                    Public URL Slug (EN) *
+                  </label>
+                  <input
+                    id="slugEn"
+                    name="slugEn"
+                    type="text"
+                    required
+                    value={slugEn}
+                    onChange={(e) => setSlugEn(slugify(e.target.value))}
+                    className={styles.input}
+                  />
+                  <div className={styles.helperText}>
+                    Public URL: <code>/en/projects/{slugify(slugEn || titleEn)}</code>
+                    {section.slugAliases?.en && section.slugAliases.en.length > 0 && (
+                      <span style={{ display: "block", marginTop: 4 }}>
+                        Redirected aliases (301): {section.slugAliases.en.join(", ")}
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 <div className={styles.formGroup}>

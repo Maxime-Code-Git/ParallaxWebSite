@@ -11,8 +11,10 @@ import {
 import {
   type PortfolioContent,
   type PortfolioProject,
+  type PortfolioCategoryItem,
   type PortfolioMediaItem,
   portfolioContentSchema,
+  migratePortfolioContentV1ToV2,
 } from "./portfolio-content.shared";
 import {
   verifySecurePathChain,
@@ -32,8 +34,136 @@ export function createDefaultPortfolioContent(): PortfolioContent {
   const iso = new Date(now).toISOString();
   const revision = crypto.randomBytes(16).toString("hex");
 
+  const documentaryCategory: PortfolioCategoryItem = {
+    id: "documentary",
+    slugFr: "documentaire",
+    slugEn: "documentary",
+    order: 0,
+    status: "published",
+    title: {
+      fr: "Documentaire",
+      en: "Documentary",
+    },
+    intro: {
+      fr: "Des films qui racontent le réel — portraits de métiers, de lieux et de savoir-faire, du repérage au montage.",
+      en: "Films that tell real stories — portraits of trades, places and craft, from scouting to the edit.",
+    },
+    seo: {
+      title: {
+        fr: "Documentaire — Parallax | Films documentaires",
+        en: "Documentary — Parallax | Documentary films",
+      },
+      description: {
+        fr: "Portraits de métiers, de lieux et de savoir-faire, du repérage au montage.",
+        en: "Portraits of trades, places and craft, from scouting to the edit.",
+      },
+    },
+    coverImageId: null,
+    coverAlt: {
+      fr: "Bannière documentaire",
+      en: "Documentary banner",
+    },
+    entryImageId: null,
+    entryAlt: {
+      fr: "Visuel documentaire",
+      en: "Documentary visual",
+    },
+    entrySummary: {
+      fr: "Un court documentaire sur une boulangerie artisanale, du fournil à la vitrine.",
+      en: "A short documentary on an artisan bakery, from oven to storefront.",
+    },
+    entrySide: "left",
+    bannerImageId: null,
+    bannerAlt: {
+      fr: "Bannière documentaire",
+      en: "Documentary banner",
+    },
+    showreelTitle: {
+      fr: "Showreel documentaire",
+      en: "Documentary showreel",
+    },
+    showreelVideo: null,
+    showreelCoverImageId: null,
+    morePhotosButton: {
+      fr: "Voir plus de photos",
+      en: "See more photos",
+    },
+    lessPhotosButton: {
+      fr: "Voir moins",
+      en: "See less",
+    },
+    backButton: {
+      fr: "Retour aux projets",
+      en: "Back to projects",
+    },
+  };
+
+  const advertisingCategory: PortfolioCategoryItem = {
+    id: "advertising",
+    slugFr: "publicite",
+    slugEn: "advertising",
+    order: 1,
+    status: "published",
+    title: {
+      fr: "Publicité",
+      en: "Advertising",
+    },
+    intro: {
+      fr: "Des films de marque et de produit — studio, extérieur, rythme et lumière au service du message.",
+      en: "Brand and product films — studio, outdoor, rhythm and light serving the message.",
+    },
+    seo: {
+      title: {
+        fr: "Publicité — Parallax | Films de marque et produit",
+        en: "Advertising — Parallax | Brand and product films",
+      },
+      description: {
+        fr: "Films de marque et de produit — studio, extérieur, rythme et lumière au service du message.",
+        en: "Brand and product films — studio, outdoor, rhythm and light serving the message.",
+      },
+    },
+    coverImageId: null,
+    coverAlt: {
+      fr: "Bannière publicité",
+      en: "Advertising banner",
+    },
+    entryImageId: null,
+    entryAlt: {
+      fr: "Visuel publicité",
+      en: "Advertising visual",
+    },
+    entrySummary: {
+      fr: "Film publicitaire pour une marque de vélo, entre studio et grand air.",
+      en: "Commercial for a bike brand, between studio and open air.",
+    },
+    entrySide: "right",
+    bannerImageId: null,
+    bannerAlt: {
+      fr: "Bannière publicité",
+      en: "Advertising banner",
+    },
+    showreelTitle: {
+      fr: "Showreel publicité",
+      en: "Advertising showreel",
+    },
+    showreelVideo: null,
+    showreelCoverImageId: null,
+    morePhotosButton: {
+      fr: "Voir plus de photos",
+      en: "See more photos",
+    },
+    lessPhotosButton: {
+      fr: "Voir moins",
+      en: "See less",
+    },
+    backButton: {
+      fr: "Retour aux projets",
+      en: "Back to projects",
+    },
+  };
+
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     revision,
     updatedAt: iso,
     overview: {
@@ -60,127 +190,11 @@ export function createDefaultPortfolioContent(): PortfolioContent {
         en: "See more projects like this",
       },
     },
+    categories: [documentaryCategory, advertisingCategory],
     sections: {
-      documentary: {
-        category: "documentary",
-        title: {
-          fr: "Documentaire",
-          en: "Documentary",
-        },
-        intro: {
-          fr: "Des films qui racontent le réel — portraits de métiers, de lieux et de savoir-faire, du repérage au montage.",
-          en: "Films that tell real stories — portraits of trades, places and craft, from scouting to the edit.",
-        },
-        seo: {
-          title: {
-            fr: "Documentaire — Parallax | Films documentaires",
-            en: "Documentary — Parallax | Documentary films",
-          },
-          description: {
-            fr: "Portraits de métiers, de lieux et de savoir-faire, du repérage au montage.",
-            en: "Portraits of trades, places and craft, from scouting to the edit.",
-          },
-        },
-        coverImageId: null,
-        coverAlt: {
-          fr: "Bannière documentaire",
-          en: "Documentary banner",
-        },
-        entryImageId: null,
-        entryAlt: {
-          fr: "Visuel documentaire",
-          en: "Documentary visual",
-        },
-        entrySummary: {
-          fr: "Un court documentaire sur une boulangerie artisanale, du fournil à la vitrine.",
-          en: "A short documentary on an artisan bakery, from oven to storefront.",
-        },
-        entrySide: "left",
-        bannerImageId: null,
-        bannerAlt: {
-          fr: "Bannière documentaire",
-          en: "Documentary banner",
-        },
-        showreelTitle: {
-          fr: "Showreel documentaire",
-          en: "Documentary showreel",
-        },
-        showreelVideo: null,
-        showreelCoverImageId: null,
-        morePhotosButton: {
-          fr: "Voir plus de photos",
-          en: "See more photos",
-        },
-        lessPhotosButton: {
-          fr: "Voir moins",
-          en: "See less",
-        },
-        backButton: {
-          fr: "Retour aux projets",
-          en: "Back to projects",
-        },
-      },
-      advertising: {
-        category: "advertising",
-        title: {
-          fr: "Publicité",
-          en: "Advertising",
-        },
-        intro: {
-          fr: "Des films de marque et de produit — studio, extérieur, rythme et lumière au service du message.",
-          en: "Brand and product films — studio, outdoor, rhythm and light serving the message.",
-        },
-        seo: {
-          title: {
-            fr: "Publicité — Parallax | Films de marque et produit",
-            en: "Advertising — Parallax | Brand and product films",
-          },
-          description: {
-            fr: "Films de marque et de produit — studio, extérieur, rythme et lumière au service du message.",
-            en: "Brand and product films — studio, outdoor, rhythm and light serving the message.",
-          },
-        },
-        coverImageId: null,
-        coverAlt: {
-          fr: "Bannière publicité",
-          en: "Advertising banner",
-        },
-        entryImageId: null,
-        entryAlt: {
-          fr: "Visuel publicité",
-          en: "Advertising visual",
-        },
-        entrySummary: {
-          fr: "Film publicitaire pour une marque de vélo, entre studio et grand air.",
-          en: "Commercial for a bike brand, between studio and open air.",
-        },
-        entrySide: "right",
-        bannerImageId: null,
-        bannerAlt: {
-          fr: "Bannière publicité",
-          en: "Advertising banner",
-        },
-        showreelTitle: {
-          fr: "Showreel publicité",
-          en: "Advertising showreel",
-        },
-        showreelVideo: null,
-        showreelCoverImageId: null,
-        morePhotosButton: {
-          fr: "Voir plus de photos",
-          en: "See more photos",
-        },
-        lessPhotosButton: {
-          fr: "Voir moins",
-          en: "See less",
-        },
-        backButton: {
-          fr: "Retour aux projets",
-          en: "Back to projects",
-        },
-      },
+      documentary: documentaryCategory,
+      advertising: advertisingCategory,
     },
-    // Initial draft projects reflecting prototype layout (not published commercially)
     projects: [
       {
         id: "11111111-1111-4111-8111-111111111111",
@@ -330,6 +344,7 @@ export function createDefaultPortfolioContent(): PortfolioContent {
 
 /**
  * Loads the raw portfolio content JSON file or initializes default.
+ * Idempotently migrates Schema V1 to V2 with backup and validation.
  */
 export function getRawPortfolioContent(customPath?: string): {
   content: PortfolioContent;
@@ -357,6 +372,34 @@ export function getRawPortfolioContent(customPath?: string): {
     throw new CorruptedContentError("Format JSON portfolio invalide");
   }
 
+  if (!parsed || typeof parsed !== "object") {
+    throw new ValidationError("Le contenu portfolio doit être un objet JSON racine.");
+  }
+
+  const obj = parsed as Record<string, unknown>;
+
+  // Check if migration is needed from Schema V1 or unversioned content
+  if (obj.schemaVersion === 1 || (!Array.isArray(obj.categories) && obj.sections)) {
+    let migrated: PortfolioContent;
+    try {
+      migrated = migratePortfolioContentV1ToV2(parsed);
+    } catch (migErr) {
+      throw new ValidationError(
+        `Échec de la migration du portfolio : ${migErr instanceof Error ? migErr.message : String(migErr)}`
+      );
+    }
+
+    const valResult = portfolioContentSchema.safeParse(migrated);
+    if (!valResult.success) {
+      const details = valResult.error.errors.map((e) => `${e.path.join(".")}: ${e.message}`).join(", ");
+      throw new ValidationError(`Migration du portfolio non conforme au schéma : ${details}`);
+    }
+
+    // Atomically persist the migrated V2 content to disk with backup rotation
+    atomicWriteJson(filePath, valResult.data);
+    return { content: valResult.data, fileExists: true };
+  }
+
   const result = portfolioContentSchema.safeParse(parsed);
   if (!result.success) {
     const details = result.error.errors.map((e) => `${e.path.join(".")}: ${e.message}`).join(", ");
@@ -368,26 +411,32 @@ export function getRawPortfolioContent(customPath?: string): {
 
 /**
  * Returns portfolio content filtered for public viewing.
- * Excludes drafts, unpublished projects, archived projects, and internal paths.
+ * Excludes drafts, unpublished projects, archived projects, and unpublished categories.
  */
 export function getPublicPortfolioContent(customPath?: string): {
   content: PortfolioContent;
   publicProjects: PortfolioProject[];
+  publicCategories: PortfolioCategoryItem[];
 } {
   const { content } = getRawPortfolioContent(customPath);
 
-  const publicProjects = content.projects
-    .filter((p) => p.status === "published" && !p.archived)
+  const publicCategories = content.categories
+    .filter((c) => c.status === "published")
     .sort((a, b) => a.order - b.order);
 
-  // Collect ONLY media IDs referenced by public sections and published projects
+  const publishedCategoryIds = new Set(publicCategories.map((c) => c.id));
+
+  const publicProjects = content.projects
+    .filter((p) => p.status === "published" && !p.archived && publishedCategoryIds.has(p.category))
+    .sort((a, b) => a.order - b.order);
+
+  // Collect ONLY media IDs referenced by public categories and published projects
   const publicMediaIds = new Set<string>();
-  for (const cat of ["documentary", "advertising"] as const) {
-    const sec = content.sections?.[cat];
-    if (sec?.coverImageId) publicMediaIds.add(sec.coverImageId);
-    if (sec?.showreelCoverImageId) publicMediaIds.add(sec.showreelCoverImageId);
-    if (sec?.entryImageId) publicMediaIds.add(sec.entryImageId);
-    if (sec?.bannerImageId) publicMediaIds.add(sec.bannerImageId);
+  for (const cat of publicCategories) {
+    if (cat.coverImageId) publicMediaIds.add(cat.coverImageId);
+    if (cat.showreelCoverImageId) publicMediaIds.add(cat.showreelCoverImageId);
+    if (cat.entryImageId) publicMediaIds.add(cat.entryImageId);
+    if (cat.bannerImageId) publicMediaIds.add(cat.bannerImageId);
   }
 
   for (const p of publicProjects) {
@@ -409,12 +458,18 @@ export function getPublicPortfolioContent(customPath?: string): {
     }
   }
 
+  const sections: Record<string, PortfolioCategoryItem> = {};
+  for (const c of publicCategories) {
+    sections[c.id] = c;
+  }
+
   const publicContent: PortfolioContent = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     revision: content.revision,
     updatedAt: content.updatedAt,
     overview: content.overview,
-    sections: content.sections,
+    categories: publicCategories,
+    sections,
     projects: publicProjects,
     media: publicMedia,
   };
@@ -422,39 +477,54 @@ export function getPublicPortfolioContent(customPath?: string): {
   return {
     content: publicContent,
     publicProjects,
+    publicCategories,
   };
 }
 
 /**
  * Prunes the media registry to retain only images actively referenced
- * in projects (draft or published) and sections.
+ * in projects (draft or published) and categories.
  */
 export function prunePortfolioMediaRegistry(
   content: PortfolioContent
 ): Record<string, PortfolioMediaItem> {
   const activeIds = new Set<string>();
 
-  for (const cat of ["documentary", "advertising"] as const) {
-    const sec = content.sections?.[cat];
-    if (sec?.coverImageId) activeIds.add(sec.coverImageId);
-    if (sec?.showreelCoverImageId) activeIds.add(sec.showreelCoverImageId);
-    if (sec?.entryImageId) activeIds.add(sec.entryImageId);
-    if (sec?.bannerImageId) activeIds.add(sec.bannerImageId);
+  if (Array.isArray(content.categories)) {
+    for (const cat of content.categories) {
+      if (cat.coverImageId) activeIds.add(cat.coverImageId);
+      if (cat.showreelCoverImageId) activeIds.add(cat.showreelCoverImageId);
+      if (cat.entryImageId) activeIds.add(cat.entryImageId);
+      if (cat.bannerImageId) activeIds.add(cat.bannerImageId);
+    }
   }
 
-  for (const project of content.projects) {
-    if (project.coverImageId) activeIds.add(project.coverImageId);
-    if (project.draftVideoCoverImageId) activeIds.add(project.draftVideoCoverImageId);
-    if (project.video?.coverImageId) activeIds.add(project.video.coverImageId);
-    for (const gid of project.galleryImageIds) {
-      activeIds.add(gid);
+  if (content.sections && typeof content.sections === "object") {
+    for (const sec of Object.values(content.sections) as (PortfolioCategoryItem | null | undefined)[]) {
+      if (sec?.coverImageId) activeIds.add(sec.coverImageId);
+      if (sec?.showreelCoverImageId) activeIds.add(sec.showreelCoverImageId);
+      if (sec?.entryImageId) activeIds.add(sec.entryImageId);
+      if (sec?.bannerImageId) activeIds.add(sec.bannerImageId);
+    }
+  }
+
+  if (Array.isArray(content.projects)) {
+    for (const project of content.projects) {
+      if (project.coverImageId) activeIds.add(project.coverImageId);
+      if (project.draftVideoCoverImageId) activeIds.add(project.draftVideoCoverImageId);
+      if (project.video?.coverImageId) activeIds.add(project.video.coverImageId);
+      for (const gid of project.galleryImageIds) {
+        activeIds.add(gid);
+      }
     }
   }
 
   const pruned: Record<string, PortfolioMediaItem> = {};
-  for (const [id, meta] of Object.entries(content.media)) {
-    if (activeIds.has(id)) {
-      pruned[id] = meta;
+  if (content.media) {
+    for (const [id, meta] of Object.entries(content.media)) {
+      if (activeIds.has(id)) {
+        pruned[id] = meta;
+      }
     }
   }
   return pruned;
@@ -477,16 +547,24 @@ export async function savePortfolioContent(
     );
   }
 
-  // Prune unreferenced media from the current active registry
-  const prunedMedia = prunePortfolioMediaRegistry(nextContent);
+  const categories = Array.isArray(nextContent.categories) ? nextContent.categories : [];
+  const sections: Record<string, PortfolioCategoryItem> = {};
+  for (const c of categories) {
+    sections[c.id] = c;
+  }
 
   const newRevision = crypto.randomBytes(16).toString("hex");
   const toSave: PortfolioContent = {
     ...nextContent,
+    schemaVersion: 2,
     revision: newRevision,
     updatedAt: new Date().toISOString(),
-    media: prunedMedia,
+    categories,
+    sections,
   };
+
+  // Prune unreferenced media from the current active registry
+  toSave.media = prunePortfolioMediaRegistry(toSave);
 
   const validation = portfolioContentSchema.safeParse(toSave);
   if (!validation.success) {
@@ -505,6 +583,7 @@ export async function savePortfolioContent(
 
 /**
  * Collects all media IDs referenced across current active content and up to 5 real backups.
+ * Fully compatible with Schema V2 (categories) and Schema V1 (sections).
  */
 export function getReferencedPortfolioMediaIds(
   content: PortfolioContent,
@@ -513,23 +592,38 @@ export function getReferencedPortfolioMediaIds(
   const referencedIds = new Set<string>();
   let hasUnreadableBackup = false;
 
-  const collectFromContent = (c: PortfolioContent) => {
-    if (c.sections?.documentary?.coverImageId) referencedIds.add(c.sections.documentary.coverImageId);
-    if (c.sections?.documentary?.showreelCoverImageId) referencedIds.add(c.sections.documentary.showreelCoverImageId);
-    if (c.sections?.documentary?.entryImageId) referencedIds.add(c.sections.documentary.entryImageId);
-    if (c.sections?.documentary?.bannerImageId) referencedIds.add(c.sections.documentary.bannerImageId);
-    if (c.sections?.advertising?.coverImageId) referencedIds.add(c.sections.advertising.coverImageId);
-    if (c.sections?.advertising?.showreelCoverImageId) referencedIds.add(c.sections.advertising.showreelCoverImageId);
-    if (c.sections?.advertising?.entryImageId) referencedIds.add(c.sections.advertising.entryImageId);
-    if (c.sections?.advertising?.bannerImageId) referencedIds.add(c.sections.advertising.bannerImageId);
+  const collectFromContent = (c: unknown) => {
+    if (!c || typeof c !== "object") return;
+    const obj = c as Record<string, unknown>;
 
-    if (Array.isArray(c.projects)) {
-      for (const p of c.projects) {
-        if (p.coverImageId) referencedIds.add(p.coverImageId);
-        if (p.draftVideoCoverImageId) referencedIds.add(p.draftVideoCoverImageId);
-        if (p.video?.coverImageId) referencedIds.add(p.video.coverImageId);
-        if (Array.isArray(p.galleryImageIds)) {
-          for (const gid of p.galleryImageIds) referencedIds.add(gid);
+    if (Array.isArray(obj.categories)) {
+      for (const cat of obj.categories as Array<Record<string, unknown> | null | undefined>) {
+        if (typeof cat?.coverImageId === "string") referencedIds.add(cat.coverImageId);
+        if (typeof cat?.showreelCoverImageId === "string") referencedIds.add(cat.showreelCoverImageId);
+        if (typeof cat?.entryImageId === "string") referencedIds.add(cat.entryImageId);
+        if (typeof cat?.bannerImageId === "string") referencedIds.add(cat.bannerImageId);
+      }
+    }
+
+    if (obj.sections && typeof obj.sections === "object") {
+      for (const sec of Object.values(obj.sections) as Array<Record<string, unknown> | null | undefined>) {
+        if (typeof sec?.coverImageId === "string") referencedIds.add(sec.coverImageId);
+        if (typeof sec?.showreelCoverImageId === "string") referencedIds.add(sec.showreelCoverImageId);
+        if (typeof sec?.entryImageId === "string") referencedIds.add(sec.entryImageId);
+        if (typeof sec?.bannerImageId === "string") referencedIds.add(sec.bannerImageId);
+      }
+    }
+
+    if (Array.isArray(obj.projects)) {
+      for (const p of obj.projects as Array<Record<string, unknown> | null | undefined>) {
+        if (typeof p?.coverImageId === "string") referencedIds.add(p.coverImageId);
+        if (typeof p?.draftVideoCoverImageId === "string") referencedIds.add(p.draftVideoCoverImageId);
+        const pVideo = p?.video as Record<string, unknown> | null | undefined;
+        if (typeof pVideo?.coverImageId === "string") referencedIds.add(pVideo.coverImageId);
+        if (Array.isArray(p?.galleryImageIds)) {
+          for (const gid of p.galleryImageIds) {
+            if (typeof gid === "string") referencedIds.add(gid);
+          }
         }
       }
     }
@@ -543,7 +637,7 @@ export function getReferencedPortfolioMediaIds(
     try {
       const bPath = path.join(dir, bName);
       const raw = fs.readFileSync(bPath, "utf-8");
-      const parsed = JSON.parse(raw) as PortfolioContent;
+      const parsed = JSON.parse(raw);
       collectFromContent(parsed);
     } catch {
       hasUnreadableBackup = true;
@@ -590,7 +684,7 @@ export async function cleanupUnreferencedPortfolioMedia(
       continue;
     }
 
-    // Iterate owner directories (e.g. sections/documentary, projects/<projectId>)
+    // Iterate owner directories (e.g. sections/<categoryId>, projects/<projectId>)
     const ownerEntries = fs.readdirSync(rootPath, { withFileTypes: true });
     for (const ownerEntry of ownerEntries) {
       if (!ownerEntry.isDirectory()) continue;
