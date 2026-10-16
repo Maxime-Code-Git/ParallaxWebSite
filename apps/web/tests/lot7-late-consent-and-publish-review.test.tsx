@@ -18,6 +18,7 @@ import {
   hasProviderConsent,
   fetchValidatedPreferences,
   persistProviderPreferences,
+  persistProviderPreferencesDetailed,
   revokeAllProviderConsent,
   resetClientPrivacyState,
   getClientValidatedPreferences,
@@ -293,6 +294,7 @@ describe("Lot 7 - Late Consent Responses & Atomic Publication Quality Verificati
 
     it("1. Real accept button with late response after modal close & revocation does NOT restore consent nor re-create iframe upon reopening", async () => {
       const acceptDeferred = createDeferred<{ ok: boolean; preferences: { youtube: boolean; vimeo: boolean } }>();
+      const fetchAStartedDeferred = createDeferred<void>();
 
       const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
         const method = init?.method || "GET";
@@ -304,6 +306,7 @@ describe("Lot 7 - Late Consent Responses & Atomic Publication Quality Verificati
           });
         }
         if (method === "POST" && bodyStr.includes("youtube")) {
+          fetchAStartedDeferred.resolve();
           const res = await acceptDeferred.promise;
           return new Response(JSON.stringify(res), {
             status: 200,
@@ -330,20 +333,22 @@ describe("Lot 7 - Late Consent Responses & Atomic Publication Quality Verificati
 
       // Click accept -> POST starts and remains pending
       fireEvent.click(acceptButton);
+      await fetchAStartedDeferred.promise; // Witness: fetch A genuinely started in flight
 
       // 3. Close the modal, then revoke all consents
       rerender(<VideoModal isOpen={false} onClose={vi.fn()} videoUrl={videoUrl} lang="fr" />);
 
-      await act(async () => {
-        const revoked = await revokeAllProviderConsent();
-        expect(revoked).toBe(true);
+      let revokePromise!: Promise<boolean>;
+      act(() => {
+        revokePromise = revokeAllProviderConsent();
       });
       expect(hasProviderConsent("youtube", videoUrl)).toBe(false);
 
-      // 4. Resolve the stale accept POST
+      // 4. Resolve the stale accept POST so A finishes on network and unblocks revocation
       await act(async () => {
         acceptDeferred.resolve({ ok: true, preferences: { youtube: true, vimeo: false } });
-        await Promise.resolve();
+        const revoked = await revokePromise;
+        expect(revoked).toBe(true);
       });
 
       // Verification: one-time consent must NOT have been granted
@@ -362,6 +367,7 @@ describe("Lot 7 - Late Consent Responses & Atomic Publication Quality Verificati
 
     it("2. Generation guard after res.json() prevents stale JSON body from overwriting newer choices", async () => {
       const jsonDeferred = createDeferred<{ ok: boolean; preferences: { youtube: boolean; vimeo: boolean } }>();
+      const jsonAStartedDeferred = createDeferred<void>();
 
       const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
         const bodyStr = String(init?.body || "");
@@ -370,7 +376,10 @@ describe("Lot 7 - Late Consent Responses & Atomic Publication Quality Verificati
           return {
             ok: true,
             status: 200,
-            json: () => jsonDeferred.promise,
+            json: () => {
+              jsonAStartedDeferred.resolve();
+              return jsonDeferred.promise;
+            },
           } as unknown as Response;
         }
         if (bodyStr.includes('"youtube":false')) {
@@ -386,8 +395,8 @@ describe("Lot 7 - Late Consent Responses & Atomic Publication Quality Verificati
       // 1. Start save A: YouTube allowed (in flight)
       const savePromiseA = persistProviderPreferences({ youtube: true, vimeo: false });
 
-      // Yield event loop so fetch is resolved and json() is called & pending
-      await new Promise((r) => setTimeout(r, 10));
+      // Explicit witness: wait until res.json() of A has been genuinely invoked and is pending
+      await jsonAStartedDeferred.promise;
 
       // 2. Start save B: YouTube and Vimeo refused
       const savePromiseB = persistProviderPreferences({ youtube: false, vimeo: false });
@@ -412,9 +421,10 @@ describe("Lot 7 - Late Consent Responses & Atomic Publication Quality Verificati
 
     it("3. Bounded mutation serialization guarantees chronological Set-Cookie order with real handler", async () => {
       let cookieJar = "";
+      const fetchAStartedDeferred = createDeferred<void>();
       const acceptFetchDeferred = createDeferred<void>();
 
-      // Mock fetch: routes to real privacyPreferencesAction, but allows deferring the accept response
+      // Mock fetch: routes to real preferencesAction, but allows deferring the accept response
       const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
         const url = String(input);
         const method = init?.method || "GET";
@@ -432,7 +442,8 @@ describe("Lot 7 - Late Consent Responses & Atomic Publication Quality Verificati
           });
 
           if (bodyStr.includes('"youtube":true')) {
-            // Wait for test to release A
+            // Witness: fetch A genuinely started and is in flight!
+            fetchAStartedDeferred.resolve();
             await acceptFetchDeferred.promise;
           }
 
@@ -449,6 +460,9 @@ describe("Lot 7 - Late Consent Responses & Atomic Publication Quality Verificati
 
       // 1. User starts accept A: YouTube authorized (held in flight)
       const savePromiseA = persistProviderPreferences({ youtube: true, vimeo: false });
+
+      // Explicit witness: wait until fetch(A) has genuinely started on network
+      await fetchAStartedDeferred.promise;
 
       // 2. While A is in flight, user triggers revocation B
       // Revocation updates local state immediately:
@@ -477,6 +491,198 @@ describe("Lot 7 - Late Consent Responses & Atomic Publication Quality Verificati
       expect(json.preferences.youtube).toBe(false);
       expect(json.preferences.vimeo).toBe(false);
 
+      fetchSpy.mockRestore();
+    });
+
+    it("4. In-flight mutation exceeding 6s timeout is aborted so later revocation Set-Cookie is never overwritten", async () => {
+      vi.useFakeTimers();
+      let cookieJar = "";
+      const fetchAStartedDeferred = createDeferred<void>();
+      const acceptFetchDeferred = createDeferred<void>();
+
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+        const url = String(input);
+        const method = init?.method || "GET";
+        const bodyStr = String(init?.body || "");
+        const signal = init?.signal;
+
+        if (url.includes("/api/privacy/preferences") && method === "POST") {
+          const req = new Request("http://127.0.0.1:3000/api/privacy/preferences", {
+            method: "POST",
+            headers: {
+              Origin: "http://127.0.0.1:3000",
+              "Content-Type": "application/json",
+              Cookie: cookieJar,
+            },
+            body: bodyStr,
+          });
+
+          if (bodyStr.includes('"youtube":true')) {
+            // Signal that fetch A has genuinely started
+            fetchAStartedDeferred.resolve();
+
+            // Wait for either deferred release OR abort signal
+            const responsePromise = new Promise<void>((resolve, reject) => {
+              if (signal?.aborted) {
+                return reject(new DOMException("The operation was aborted.", "AbortError"));
+              }
+              const onAbort = () => {
+                reject(new DOMException("The operation was aborted.", "AbortError"));
+              };
+              signal?.addEventListener("abort", onAbort, { once: true });
+
+              acceptFetchDeferred.promise.then(
+                () => {
+                  signal?.removeEventListener("abort", onAbort);
+                  if (signal?.aborted) {
+                    reject(new DOMException("The operation was aborted.", "AbortError"));
+                  } else {
+                    resolve();
+                  }
+                },
+                reject
+              );
+            });
+
+            // Generate real action response
+            const res = await preferencesAction(makeActionArgs(req));
+            await responsePromise;
+
+            // Only apply Set-Cookie if not aborted before delivery
+            if (!signal?.aborted) {
+              const setCookie = res.headers.get("Set-Cookie");
+              if (setCookie) {
+                cookieJar = setCookie.split(";")[0];
+              }
+            }
+            return res;
+          }
+
+          if (bodyStr.includes("revoke_all")) {
+            const res = await preferencesAction(makeActionArgs(req));
+            if (!signal?.aborted) {
+              const setCookie = res.headers.get("Set-Cookie");
+              if (setCookie) {
+                cookieJar = setCookie.split(";")[0];
+              }
+            }
+            return res;
+          }
+        }
+
+        return new Response("Not Found", { status: 404 });
+      });
+
+      try {
+        // 1. Start accept A: YouTube authorized (in flight)
+        const savePromiseA = persistProviderPreferences({ youtube: true, vimeo: false });
+
+        // 2. Wait explicitly until fetch(A) has genuinely started
+        await fetchAStartedDeferred.promise;
+
+        // 3. Trigger revocation B: local refusal is immediate
+        const revokePromiseB = revokeAllProviderConsent();
+        expect(hasProviderConsent("youtube")).toBe(false);
+
+        // 4. Advance clock past the 6000ms threshold (6001ms) without delivering A
+        await vi.advanceTimersByTimeAsync(6001);
+
+        // 5. A timed out at 6000ms and was aborted; B proceeds and succeeds
+        const resB = await revokePromiseB;
+        expect(resB).toBe(true);
+
+        // 6. Deliver A late: because A was aborted, its Set-Cookie must NOT be applied to cookieJar
+        acceptFetchDeferred.resolve();
+        const resA = await savePromiseA;
+        expect(resA).toBe(false);
+
+        // 7. Clear in-memory state (simulate page reload) and verify final cookie with real loader
+        resetClientPrivacyState();
+        const loaderReq = new Request("http://127.0.0.1:3000/api/privacy/preferences", {
+          headers: { Cookie: cookieJar },
+        });
+        const loaderRes = await preferencesLoader(makeLoaderArgs(loaderReq));
+        const json = (await loaderRes.json()) as { ok: boolean; preferences: { youtube: boolean; vimeo: boolean } };
+
+        // Loader must confirm revocation B won: YouTube is false
+        expect(json.preferences.youtube).toBe(false);
+        expect(json.preferences.vimeo).toBe(false);
+      } finally {
+        vi.useRealTimers();
+        fetchSpy.mockRestore();
+      }
+    });
+
+    it("5. Mutation whose fetch or res.json() never completes times out cleanly without hanging indefinitely", async () => {
+      vi.useFakeTimers();
+
+      // Case 1: fetch never completes
+      const hangingFetchDeferred = createDeferred<Response>();
+      const fetchStartedDeferred = createDeferred<void>();
+
+      let fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+        const signal = init?.signal;
+        fetchStartedDeferred.resolve();
+        return new Promise<Response>((resolve, reject) => {
+          signal?.addEventListener("abort", () => {
+            reject(new DOMException("The operation was aborted.", "AbortError"));
+          });
+          hangingFetchDeferred.promise.then(resolve, reject);
+        });
+      });
+
+      const hangPromise1 = persistProviderPreferencesDetailed({ youtube: true });
+      await fetchStartedDeferred.promise;
+
+      // Advance timers past 6000ms
+      await vi.advanceTimersByTimeAsync(6001);
+
+      const result1 = await hangPromise1;
+      expect(result1.ok).toBe(false);
+      expect(result1.status).toBe("error");
+
+      fetchSpy.mockRestore();
+
+      // Case 2: fetch completes, but res.json() never completes
+      const jsonStartedDeferred = createDeferred<void>();
+      const hangingJsonDeferred = createDeferred<unknown>();
+
+      fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+        return {
+          ok: true,
+          status: 200,
+          json: () => {
+            jsonStartedDeferred.resolve();
+            return hangingJsonDeferred.promise;
+          },
+        } as unknown as Response;
+      });
+
+      const hangPromise2 = persistProviderPreferencesDetailed({ vimeo: true });
+      await jsonStartedDeferred.promise;
+
+      // Advance timers past 6000ms
+      await vi.advanceTimersByTimeAsync(6001);
+
+      const result2 = await hangPromise2;
+      expect(result2.ok).toBe(false);
+      expect(result2.status).toBe("error");
+
+      // Verify that subsequent mutation can still run and is not blocked
+      fetchSpy.mockRestore();
+      resetClientPrivacyState();
+      fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+        return new Response(JSON.stringify({ ok: true, preferences: { youtube: true, vimeo: false } }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      });
+
+      const nextMutation = await persistProviderPreferencesDetailed({ youtube: true });
+      expect(nextMutation.ok).toBe(true);
+      expect(nextMutation.status).toBe("success");
+
+      vi.useRealTimers();
       fetchSpy.mockRestore();
     });
   });

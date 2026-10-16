@@ -16,6 +16,26 @@ let tabExplicitRefusal = false;
 // arrive and are processed in exact chronological order without race conditions.
 let mutationFetchQueue: Promise<unknown> = Promise.resolve();
 
+export const PRIVACY_MUTATION_FETCH_TIMEOUT_MS = 6000;
+export const PRIVACY_MUTATION_JSON_TIMEOUT_MS = 6000;
+
+async function readJsonWithTimeout<T>(res: Response, timeoutMs: number): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(`JSON body read timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+  });
+
+  try {
+    return (await Promise.race([res.json(), timeoutPromise])) as T;
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
+
 export type PersistStatus = "success" | "stale" | "error";
 
 export interface PersistResult {
@@ -88,13 +108,23 @@ export async function fetchValidatedPreferences(): Promise<{ youtube: boolean; v
   }
 
   const reqEpoch = privacyEpoch;
+  const controller = new AbortController();
+  const timeoutHandle = setTimeout(() => {
+    controller.abort(new Error(`Preferences GET timed out after ${PRIVACY_MUTATION_FETCH_TIMEOUT_MS}ms`));
+  }, PRIVACY_MUTATION_FETCH_TIMEOUT_MS);
 
   try {
-    const res = await fetch("/api/privacy/preferences", {
-      headers: {
-        Accept: "application/json",
-      },
-    });
+    let res: Response;
+    try {
+      res = await fetch("/api/privacy/preferences", {
+        headers: {
+          Accept: "application/json",
+        },
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeoutHandle);
+    }
 
     // Boundary 1: Check after fetch()
     if (reqEpoch !== privacyEpoch || tabExplicitRefusal) {
@@ -102,10 +132,10 @@ export async function fetchValidatedPreferences(): Promise<{ youtube: boolean; v
     }
 
     if (res.ok) {
-      const data = (await res.json()) as {
+      const data = await readJsonWithTimeout<{
         ok: boolean;
         preferences: { youtube: boolean; vimeo: boolean };
-      };
+      }>(res, PRIVACY_MUTATION_JSON_TIMEOUT_MS);
 
       // Boundary 2: Check after res.json()
       if (reqEpoch !== privacyEpoch || tabExplicitRefusal) {
@@ -121,7 +151,7 @@ export async function fetchValidatedPreferences(): Promise<{ youtube: boolean; v
       }
     }
   } catch {
-    // Network or server error
+    // Network, timeout, or server error
   }
 
   if (tabExplicitRefusal) {
@@ -163,7 +193,7 @@ export async function persistProviderPreferencesDetailed(prefs: {
     vimeo: prefs.vimeo !== undefined ? prefs.vimeo : current.vimeo,
   };
 
-  // Wait for previous in-flight mutation's fetch to complete before sending this one,
+  // Wait for previous in-flight mutation's fetch to settle before sending this one,
   // guaranteeing sequential delivery and deterministic Set-Cookie order.
   const previousFetch = mutationFetchQueue;
   let releaseMyFetch!: () => void;
@@ -173,19 +203,10 @@ export async function persistProviderPreferencesDetailed(prefs: {
   mutationFetchQueue = myFetchCompleted;
 
   const executeMutation = async (): Promise<PersistResult> => {
-    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-    const waitPrevious = new Promise<void>((resolve) => {
-      timeoutHandle = setTimeout(resolve, 6000);
-      previousFetch.catch(() => {}).then(() => {
-        clearTimeout(timeoutHandle);
-        resolve();
-      });
-    });
-
     try {
-      await waitPrevious;
+      await previousFetch;
     } catch {
-      // Proceed even if previous wait encountered an issue
+      // Previous fetch settled with error or timeout; safe to proceed
     }
 
     // Check if superseded while waiting in queue before fetch
@@ -193,6 +214,11 @@ export async function persistProviderPreferencesDetailed(prefs: {
       releaseMyFetch();
       return { ok: false, status: "stale" };
     }
+
+    const controller = new AbortController();
+    const timeoutHandle = setTimeout(() => {
+      controller.abort(new Error(`Mutation network fetch timed out after ${PRIVACY_MUTATION_FETCH_TIMEOUT_MS}ms`));
+    }, PRIVACY_MUTATION_FETCH_TIMEOUT_MS);
 
     try {
       let res: Response;
@@ -204,10 +230,12 @@ export async function persistProviderPreferencesDetailed(prefs: {
             Accept: "application/json",
           },
           body: JSON.stringify(updated),
+          signal: controller.signal,
         });
       } finally {
-        // Release the fetch lock immediately once the HTTP response headers arrive
-        // (and browser commits Set-Cookie), or if fetch fails, so the next mutation can fetch.
+        clearTimeout(timeoutHandle);
+        // Release the fetch lock immediately once HTTP response headers arrive
+        // (and browser commits Set-Cookie), or if fetch fails/times out, so the next mutation can fetch.
         releaseMyFetch();
       }
 
@@ -220,10 +248,10 @@ export async function persistProviderPreferencesDetailed(prefs: {
         return { ok: false, status: "error" };
       }
 
-      const data = (await res.json()) as {
+      const data = await readJsonWithTimeout<{
         ok: boolean;
         preferences?: { youtube: boolean; vimeo: boolean };
-      };
+      }>(res, PRIVACY_MUTATION_JSON_TIMEOUT_MS);
 
       // Boundary 2: Check after res.json()
       if (reqEpoch !== privacyEpoch) {
@@ -293,25 +321,21 @@ export async function revokeAllProviderConsent(): Promise<boolean> {
   mutationFetchQueue = myFetchCompleted;
 
   const executeRevoke = async (): Promise<boolean> => {
-    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-    const waitPrevious = new Promise<void>((resolve) => {
-      timeoutHandle = setTimeout(resolve, 6000);
-      previousFetch.catch(() => {}).then(() => {
-        clearTimeout(timeoutHandle);
-        resolve();
-      });
-    });
-
     try {
-      await waitPrevious;
+      await previousFetch;
     } catch {
-      // Proceed even if previous wait encountered an issue
+      // Previous fetch settled with error or timeout; safe to proceed
     }
 
     if (reqEpoch !== privacyEpoch) {
       releaseMyFetch();
       return false;
     }
+
+    const controller = new AbortController();
+    const timeoutHandle = setTimeout(() => {
+      controller.abort(new Error(`Revocation network fetch timed out after ${PRIVACY_MUTATION_FETCH_TIMEOUT_MS}ms`));
+    }, PRIVACY_MUTATION_FETCH_TIMEOUT_MS);
 
     try {
       let res: Response;
@@ -323,8 +347,10 @@ export async function revokeAllProviderConsent(): Promise<boolean> {
             Accept: "application/json",
           },
           body: JSON.stringify({ action: "revoke_all" }),
+          signal: controller.signal,
         });
       } finally {
+        clearTimeout(timeoutHandle);
         releaseMyFetch();
       }
 
@@ -335,9 +361,9 @@ export async function revokeAllProviderConsent(): Promise<boolean> {
 
       if (res.ok) {
         try {
-          await res.json();
+          await readJsonWithTimeout(res, PRIVACY_MUTATION_JSON_TIMEOUT_MS);
         } catch {
-          // Ignore json parse error on revoke
+          // Ignore json parse error or timeout on revoke
         }
         // Boundary 2: Check after body read
         if (reqEpoch !== privacyEpoch) {
