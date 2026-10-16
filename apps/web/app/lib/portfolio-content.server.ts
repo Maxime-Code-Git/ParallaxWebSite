@@ -372,14 +372,29 @@ export function getRawPortfolioContent(customPath?: string): {
     throw new CorruptedContentError("Format JSON portfolio invalide");
   }
 
-  if (!parsed || typeof parsed !== "object") {
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new ValidationError("Le contenu portfolio doit être un objet JSON racine.");
   }
 
   const obj = parsed as Record<string, unknown>;
 
-  // Check if migration is needed from Schema V1 or unversioned content
-  if (obj.schemaVersion === 1 || (!Array.isArray(obj.categories) && obj.sections)) {
+  // Reject unsupported schema versions immediately
+  if (obj.schemaVersion !== undefined && obj.schemaVersion !== 1 && obj.schemaVersion !== 2) {
+    throw new ValidationError(`Version de schéma non prise en charge : ${String(obj.schemaVersion)}`);
+  }
+
+  // If already Schema V2
+  if (obj.schemaVersion === 2) {
+    const result = portfolioContentSchema.safeParse(parsed);
+    if (!result.success) {
+      const details = result.error.errors.map((e) => `${e.path.join(".")}: ${e.message}`).join(", ");
+      throw new ValidationError(`Contenu portfolio non conforme au schéma : ${details}`);
+    }
+    return { content: result.data, fileExists: true };
+  }
+
+  // Check if migration is needed from Schema V1 or unversioned V1 content
+  if (obj.schemaVersion === 1 || (obj.schemaVersion === undefined && obj.sections && !Array.isArray(obj.categories))) {
     let migrated: PortfolioContent;
     try {
       migrated = migratePortfolioContentV1ToV2(parsed);
@@ -395,7 +410,7 @@ export function getRawPortfolioContent(customPath?: string): {
       throw new ValidationError(`Migration du portfolio non conforme au schéma : ${details}`);
     }
 
-    // Atomically persist the migrated V2 content to disk with backup rotation
+    // Atomically persist the migrated V2 content to disk with backup rotation only after full validation
     atomicWriteJson(filePath, valResult.data);
     return { content: valResult.data, fileExists: true };
   }

@@ -217,6 +217,14 @@ export async function action({ request, params }: ActionFunctionArgs) {
     }
   }
 
+  // Normaliser les alias : retirer le nouveau slug actif de ses propres alias, filtrer les vides et dédupliquer
+  section.slugAliases.fr = Array.from(
+    new Set(section.slugAliases.fr.filter((a: string) => typeof a === "string" && a !== newSlugFr && a.trim() !== ""))
+  );
+  section.slugAliases.en = Array.from(
+    new Set(section.slugAliases.en.filter((a: string) => typeof a === "string" && a !== newSlugEn && a.trim() !== ""))
+  );
+
   section.slugFr = newSlugFr;
   section.slugEn = newSlugEn;
 

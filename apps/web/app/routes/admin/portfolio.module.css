@@ -414,6 +414,10 @@
   color: #8A92A6;
 }
 
+.emptyTableText {
+  margin-bottom: 16px;
+}
+
 .tableHeaderRow {
   color: #8A92A6;
   font-size: 12px;
@@ -699,5 +703,9 @@
   justify-content: flex-end;
   gap: 12px;
   margin-top: 24px;
+}
+
+.reassignFieldGroup {
+  margin-bottom: 20px;
 }
 

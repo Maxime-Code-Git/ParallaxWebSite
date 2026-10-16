@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import {
   type ActionFunctionArgs,
   type LoaderFunctionArgs,
@@ -264,7 +264,11 @@ export async function action({ request }: ActionFunctionArgs) {
       void cleanupUnreferencedPortfolioMedia().catch(() => undefined);
 
       return Response.json(
-        { success: "Rubrique supprimée définitivement.", newRevision: saveResult.newRevision },
+        {
+          success: "Rubrique supprimée définitivement.",
+          deletedCategoryId: categoryId,
+          newRevision: saveResult.newRevision,
+        },
         { headers: createAdminHeaders() }
       );
     }
@@ -305,6 +309,7 @@ export async function action({ request }: ActionFunctionArgs) {
       return Response.json(
         {
           success: `Rubrique supprimée et ${reassignedCount} projet(s) déplacé(s) vers "${targetCat.title.fr}".`,
+          deletedCategoryId: categoryId,
           newRevision: saveResult.newRevision,
         },
         { headers: createAdminHeaders() }
@@ -356,14 +361,24 @@ export async function action({ request }: ActionFunctionArgs) {
       if (!Array.isArray(nextContent.categories) || nextContent.categories.length === 0) {
         return Response.json(
           { error: "Veuillez créer une rubrique avant d'ajouter un projet." },
-          { status: 400, headers: createAdminHeaders() }
+          { status: 422, headers: createAdminHeaders() }
         );
       }
 
-      let category = String(formData.get("category") || "");
+      const category = String(formData.get("category") || "").trim();
+      if (!category) {
+        return Response.json(
+          { error: "Veuillez spécifier une rubrique pour ce projet." },
+          { status: 422, headers: createAdminHeaders() }
+        );
+      }
+
       const catExists = nextContent.categories.some((c: PortfolioCategoryItem) => c.id === category);
       if (!catExists) {
-        category = nextContent.categories[0].id;
+        return Response.json(
+          { error: "La rubrique sélectionnée est introuvable ou a été supprimée." },
+          { status: 422, headers: createAdminHeaders() }
+        );
       }
 
       const newId = crypto.randomUUID();
@@ -487,7 +502,11 @@ export async function action({ request }: ActionFunctionArgs) {
       void cleanupUnreferencedPortfolioMedia().catch(() => undefined);
 
       return Response.json(
-        { success: "Projet supprimé définitivement.", newRevision: saveResult.newRevision },
+        {
+          success: "Projet supprimé définitivement.",
+          deletedProjectId: projectId,
+          newRevision: saveResult.newRevision,
+        },
         { headers: createAdminHeaders() }
       );
     }
@@ -552,6 +571,8 @@ export default function AdminPortfolioPage() {
     success?: string;
     createdId?: string;
     createdCategoryId?: string;
+    deletedCategoryId?: string;
+    deletedProjectId?: string;
   }>();
   const navigation = useNavigation();
   const isSubmitting = navigation.state === "submitting";
@@ -563,8 +584,113 @@ export default function AdminPortfolioPage() {
   const [targetReassignCategory, setTargetReassignCategory] = useState<string>("");
   const [isOverviewOpen, setIsOverviewOpen] = useState(false);
 
+  const categoryModalRef = useRef<HTMLDivElement | null>(null);
+  const projectModalRef = useRef<HTMLDivElement | null>(null);
+  const previousActiveElementRef = useRef<HTMLElement | null>(null);
+  const addCategoryBtnRef = useRef<HTMLButtonElement | null>(null);
+  const addProjectBtnRef = useRef<HTMLButtonElement | null>(null);
+
   const categories = Array.isArray(content.categories) ? content.categories : [];
   const sortedCategories = [...categories].sort((a, b) => a.order - b.order);
+
+  // Reset category filter if the active filtered category is removed
+  useEffect(() => {
+    if (categoryFilter !== "all" && !categories.some((c) => c.id === categoryFilter)) {
+      setCategoryFilter("all");
+    }
+  }, [categoryFilter, categories]);
+
+  // Modal helpers
+  const closeCategoryModal = useCallback(() => {
+    setCategoryToDelete(null);
+    setTargetReassignCategory("");
+    if (previousActiveElementRef.current && document.body.contains(previousActiveElementRef.current)) {
+      previousActiveElementRef.current.focus();
+    }
+  }, []);
+
+  const closeProjectModal = useCallback(() => {
+    setProjectToDelete(null);
+    if (previousActiveElementRef.current && document.body.contains(previousActiveElementRef.current)) {
+      previousActiveElementRef.current.focus();
+    }
+  }, []);
+
+  // Close modal on mutation success, preserve on error
+  useEffect(() => {
+    if (actionData?.success) {
+      if (actionData.deletedCategoryId && categoryToDelete?.id === actionData.deletedCategoryId) {
+        setCategoryToDelete(null);
+        setTargetReassignCategory("");
+        if (previousActiveElementRef.current && document.body.contains(previousActiveElementRef.current)) {
+          previousActiveElementRef.current.focus();
+        } else if (addCategoryBtnRef.current) {
+          addCategoryBtnRef.current.focus();
+        }
+      }
+      if (actionData.deletedProjectId && projectToDelete?.id === actionData.deletedProjectId) {
+        setProjectToDelete(null);
+        if (previousActiveElementRef.current && document.body.contains(previousActiveElementRef.current)) {
+          previousActiveElementRef.current.focus();
+        } else if (addProjectBtnRef.current) {
+          addProjectBtnRef.current.focus();
+        }
+      }
+    }
+  }, [actionData, categoryToDelete, projectToDelete]);
+
+  // Focus trap & Escape key listener for open modals
+  useEffect(() => {
+    if (!categoryToDelete && !projectToDelete) return;
+
+    const modalEl = categoryToDelete ? categoryModalRef.current : projectModalRef.current;
+    if (modalEl) {
+      setTimeout(() => {
+        const focusable = modalEl.querySelectorAll<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        );
+        if (focusable.length > 0) {
+          focusable[0].focus();
+        } else {
+          modalEl.focus();
+        }
+      }, 50);
+    }
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        if (categoryToDelete) {
+          closeCategoryModal();
+        } else if (projectToDelete) {
+          closeProjectModal();
+        }
+        return;
+      }
+
+      if (e.key === "Tab") {
+        const currentModal = categoryToDelete ? categoryModalRef.current : projectModalRef.current;
+        if (!currentModal) return;
+        const focusable = currentModal.querySelectorAll<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        );
+        if (focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [categoryToDelete, projectToDelete, closeCategoryModal, closeProjectModal]);
 
   const filteredProjects = content.projects
     .filter((p) => {
@@ -789,7 +915,12 @@ export default function AdminPortfolioPage() {
             <input type="hidden" name="csrfToken" value={csrfToken} />
             <input type="hidden" name="revision" value={content.revision} />
             <input type="hidden" name="intent" value="create_category" />
-            <button type="submit" disabled={isSubmitting} className={styles.primaryBtn}>
+            <button
+              ref={addCategoryBtnRef}
+              type="submit"
+              disabled={isSubmitting}
+              className={styles.primaryBtn}
+            >
               + Ajouter une rubrique
             </button>
           </Form>
@@ -797,7 +928,7 @@ export default function AdminPortfolioPage() {
 
         {sortedCategories.length === 0 ? (
           <div className={styles.emptyTable}>
-            <p style={{ marginBottom: "16px" }}>
+            <p className={styles.emptyTableText}>
               Le portfolio ne contient aucune rubrique actuellement.
             </p>
             <Form method="post">
@@ -915,7 +1046,8 @@ export default function AdminPortfolioPage() {
                         <button
                           type="button"
                           className={`${styles.actionBtn} ${styles.actionBtnDanger}`}
-                          onClick={() => {
+                          onClick={(e) => {
+                            previousActiveElementRef.current = e.currentTarget;
                             setCategoryToDelete(cat);
                             const others = categories.filter((c) => c.id !== cat.id);
                             if (others.length > 0) {
@@ -957,6 +1089,7 @@ export default function AdminPortfolioPage() {
               value={categoryFilter !== "all" ? categoryFilter : sortedCategories[0]?.id || ""}
             />
             <button
+              ref={addProjectBtnRef}
               type="submit"
               disabled={isSubmitting || sortedCategories.length === 0}
               className={styles.primaryBtn}
@@ -1165,7 +1298,10 @@ export default function AdminPortfolioPage() {
                       <button
                         type="button"
                         className={`${styles.actionBtn} ${styles.actionBtnDanger}`}
-                        onClick={() => setProjectToDelete(p)}
+                        onClick={(e) => {
+                          previousActiveElementRef.current = e.currentTarget;
+                          setProjectToDelete(p);
+                        }}
                       >
                         Supprimer
                       </button>
@@ -1180,18 +1316,36 @@ export default function AdminPortfolioPage() {
 
       {/* Delete Project Modal */}
       {projectToDelete && (
-        <div className={styles.modalOverlay}>
-          <div className={styles.modalDialog} role="dialog" aria-modal="true">
-            <h3 className={styles.modalTitle}>Confirmer la suppression</h3>
+        <div
+          className={styles.modalOverlay}
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !isSubmitting) closeProjectModal();
+          }}
+        >
+          <div
+            className={styles.modalDialog}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="project-delete-title"
+            ref={projectModalRef}
+            tabIndex={-1}
+          >
+            <h3 id="project-delete-title" className={styles.modalTitle}>Confirmer la suppression</h3>
             <p className={styles.modalDesc}>
               Êtes-vous certain de vouloir supprimer définitivement le projet « {projectToDelete.title.fr} » ?
               Cette action est irréversible.
             </p>
+            {actionData?.error && (
+              <div className={styles.modalWarning} role="alert">
+                {actionData.error}
+              </div>
+            )}
             <div className={styles.modalActions}>
               <button
                 type="button"
                 className={styles.secondaryBtn}
-                onClick={() => setProjectToDelete(null)}
+                onClick={closeProjectModal}
+                disabled={isSubmitting}
               >
                 Annuler
               </button>
@@ -1215,12 +1369,30 @@ export default function AdminPortfolioPage() {
 
       {/* Delete Category Modal with Reassignment Control */}
       {categoryToDelete && (
-        <div className={styles.modalOverlay}>
-          <div className={styles.modalDialog} role="dialog" aria-modal="true">
-            <h3 className={styles.modalTitle}>Suppression de rubrique</h3>
+        <div
+          className={styles.modalOverlay}
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !isSubmitting) closeCategoryModal();
+          }}
+        >
+          <div
+            className={styles.modalDialog}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="category-delete-title"
+            ref={categoryModalRef}
+            tabIndex={-1}
+          >
+            <h3 id="category-delete-title" className={styles.modalTitle}>Suppression de rubrique</h3>
             <p className={styles.modalDesc}>
               Vous êtes sur le point de supprimer la rubrique « {categoryToDelete.title.fr} ».
             </p>
+
+            {actionData?.error && (
+              <div className={styles.modalWarning} role="alert">
+                {actionData.error}
+              </div>
+            )}
 
             {projectsInDeletingCategory.length > 0 ? (
               otherCategories.length === 0 ? (
@@ -1238,7 +1410,7 @@ export default function AdminPortfolioPage() {
                     <button
                       type="button"
                       className={styles.secondaryBtn}
-                      onClick={() => setCategoryToDelete(null)}
+                      onClick={closeCategoryModal}
                     >
                       Fermer
                     </button>
@@ -1257,7 +1429,7 @@ export default function AdminPortfolioPage() {
                     <input type="hidden" name="intent" value="delete_category_reassign" />
                     <input type="hidden" name="categoryId" value={categoryToDelete.id} />
 
-                    <div className={styles.fieldGroup} style={{ marginBottom: "20px" }}>
+                    <div className={`${styles.fieldGroup} ${styles.reassignFieldGroup}`}>
                       <label className={styles.fieldLabel} htmlFor="targetCategoryId">
                         Déplacer les {projectsInDeletingCategory.length} projet(s) vers :
                       </label>
@@ -1281,7 +1453,8 @@ export default function AdminPortfolioPage() {
                       <button
                         type="button"
                         className={styles.secondaryBtn}
-                        onClick={() => setCategoryToDelete(null)}
+                        onClick={closeCategoryModal}
+                        disabled={isSubmitting}
                       >
                         Annuler
                       </button>
@@ -1305,7 +1478,8 @@ export default function AdminPortfolioPage() {
                   <button
                     type="button"
                     className={styles.secondaryBtn}
-                    onClick={() => setCategoryToDelete(null)}
+                    onClick={closeCategoryModal}
+                    disabled={isSubmitting}
                   >
                     Annuler
                   </button>

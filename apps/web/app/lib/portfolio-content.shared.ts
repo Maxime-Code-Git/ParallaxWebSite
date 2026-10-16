@@ -1037,10 +1037,15 @@ export const portfolioContentSchema = {
  * projects, media, slugs, and editorial configurations.
  */
 export function migratePortfolioContentV1ToV2(raw: unknown): PortfolioContent {
-  if (!raw || typeof raw !== "object") {
-    throw new Error("Contenu portfolio invalide pour la migration");
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error("Contenu portfolio invalide pour la migration : racine non-objet");
   }
   const obj = raw as Record<string, unknown>;
+
+  // Reject unsupported schema versions
+  if (obj.schemaVersion !== undefined && obj.schemaVersion !== 1 && obj.schemaVersion !== 2) {
+    throw new Error(`Version de schéma non prise en charge : ${String(obj.schemaVersion)}`);
+  }
 
   // If already V2, return with synchronized sections map
   if (obj.schemaVersion === 2 && Array.isArray(obj.categories)) {
@@ -1057,9 +1062,46 @@ export function migratePortfolioContentV1ToV2(raw: unknown): PortfolioContent {
     };
   }
 
+  // Strict structural validation of V1 source before migration
+  if (typeof obj.revision !== "string" || obj.revision.trim().length === 0) {
+    throw new Error("revision doit être une chaîne non-vide");
+  }
+  if (typeof obj.updatedAt !== "string" || obj.updatedAt.trim().length === 0) {
+    throw new Error("updatedAt doit être une chaîne non-vide");
+  }
+
+  if (!isObject(obj.overview)) {
+    throw new Error("overview doit être un objet valide");
+  }
+  const ov = obj.overview as Record<string, unknown>;
+  if (!isObject(ov.title) || typeof (ov.title as Record<string, unknown>).fr !== "string" || typeof (ov.title as Record<string, unknown>).en !== "string") {
+    throw new Error("overview.title doit être un objet { fr, en }");
+  }
+  if (!isObject(ov.intro) || typeof (ov.intro as Record<string, unknown>).fr !== "string" || typeof (ov.intro as Record<string, unknown>).en !== "string") {
+    throw new Error("overview.intro doit être un objet { fr, en }");
+  }
+  if (!isObject(ov.seo) || !isObject((ov.seo as Record<string, unknown>).title) || !isObject((ov.seo as Record<string, unknown>).description)) {
+    throw new Error("overview.seo doit être un objet avec title et description { fr, en }");
+  }
+  if (!isObject(ov.seeMoreButton) || typeof (ov.seeMoreButton as Record<string, unknown>).fr !== "string" || typeof (ov.seeMoreButton as Record<string, unknown>).en !== "string") {
+    throw new Error("overview.seeMoreButton doit être un objet { fr, en }");
+  }
+
+  if (!isObject(obj.sections)) {
+    throw new Error("sections doit être un objet valide");
+  }
+
+  if (!Array.isArray(obj.projects)) {
+    throw new Error("projects doit être un tableau");
+  }
+
+  if (obj.media !== undefined && (!isObject(obj.media) || Array.isArray(obj.media))) {
+    throw new Error("media doit être un objet valide");
+  }
+
   // Schema V1 migration
   const categories: PortfolioCategoryItem[] = [];
-  const oldSections = (obj.sections && typeof obj.sections === "object" ? obj.sections : {}) as Record<string, Partial<PortfolioCategoryItem>>;
+  const oldSections = obj.sections as Record<string, Partial<PortfolioCategoryItem>>;
 
   // 1. Documentary
   if (oldSections.documentary) {
@@ -1167,9 +1209,9 @@ export function migratePortfolioContentV1ToV2(raw: unknown): PortfolioContent {
     sections[c.id] = c;
   }
 
-  const projects = Array.isArray(obj.projects) ? (obj.projects as PortfolioProject[]) : [];
+  const projects = obj.projects as PortfolioProject[];
   const media = (obj.media && typeof obj.media === "object" ? obj.media : {}) as Record<string, PortfolioMediaItem>;
-  const overview = (obj.overview && typeof obj.overview === "object" ? obj.overview : {}) as PortfolioOverview;
+  const overview = obj.overview as unknown as PortfolioOverview;
 
   return {
     schemaVersion: 2,

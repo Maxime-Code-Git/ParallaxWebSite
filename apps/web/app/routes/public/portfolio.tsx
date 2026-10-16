@@ -927,7 +927,7 @@ export default function PortfolioPage() {
 
                           <div className={styles.videoProjectMeta}>
                             <Link
-                              to={`${getPortfolioProjectUrl(p, lang)}${dirParam}`}
+                              to={`${getPortfolioProjectUrl(p, lang, content.categories)}${dirParam}`}
                               preventScrollReset
                               className={styles.videoProjectTitleLink}
                             >
@@ -966,7 +966,7 @@ export default function PortfolioPage() {
                       >
                         <div className={photoBoxClass}>
                           <Link
-                            to={`${getPortfolioProjectUrl(p, lang)}${dirParam}`}
+                            to={`${getPortfolioProjectUrl(p, lang, content.categories)}${dirParam}`}
                             preventScrollReset
                             className={styles.projectImageLink}
                             aria-label={`Voir le projet ${p.title[lang]}`}
@@ -988,7 +988,7 @@ export default function PortfolioPage() {
 
                         <div className={isLeft ? styles.projectTextEven : styles.projectTextOdd}>
                           <Link
-                            to={`${getPortfolioProjectUrl(p, lang)}${dirParam}`}
+                            to={`${getPortfolioProjectUrl(p, lang, content.categories)}${dirParam}`}
                             preventScrollReset
                             className={styles.projectTitleLink}
                           >
