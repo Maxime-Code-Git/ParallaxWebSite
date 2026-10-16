@@ -596,9 +596,41 @@ function validatePortfolioProject(
       valid = false;
     }
 
-    if (!val.coverImageId) {
-      errors.push({ path: [...pPath, "coverImageId"], message: "Un projet publié doit posséder une image de couverture" });
-      valid = false;
+    const mode = resolveProjectPresentationMode(val as { presentationMode?: "photo" | "video"; video?: { url?: string } | null });
+    if (mode === "video") {
+      const vid = val.video as PortfolioVideo | null | undefined;
+      if (!vid || !vid.url || typeof vid.url !== "string" || !vid.url.trim()) {
+        errors.push({
+          path: [...pPath, "video"],
+          message: "Un projet publié en mode Vidéo doit comporter une URL vidéo valide (YouTube ou Vimeo)",
+        });
+        valid = false;
+      } else {
+        const parsed = parseVideoUrl(vid.url);
+        if (!parsed || parsed.provider !== vid.provider || parsed.videoId !== vid.videoId) {
+          errors.push({
+            path: [...pPath, "video", "url"],
+            message: "L'URL vidéo doit être un lien YouTube ou Vimeo valide",
+          });
+          valid = false;
+        }
+      }
+      const posterId = vid?.coverImageId || val.coverImageId;
+      if (!posterId) {
+        errors.push({
+          path: [...pPath, "video", "coverImageId"],
+          message: "Un projet publié en mode Vidéo doit posséder une affiche vidéo ou une image de couverture",
+        });
+        valid = false;
+      }
+    } else {
+      if (!val.coverImageId) {
+        errors.push({
+          path: [...pPath, "coverImageId"],
+          message: "Un projet publié en mode Photo doit posséder une image de couverture",
+        });
+        valid = false;
+      }
     }
 
     const seo = val.seo as { title?: LocalizedString; description?: LocalizedString } | undefined;
@@ -856,6 +888,21 @@ export const portfolioContentSchema = {
     return { success: true, data: val as unknown as PortfolioContent };
   },
 };
+
+/**
+ * Resolves the presentation mode ("photo" | "video") for a project,
+ * ensuring backwards compatibility with legacy projects lacking presentationMode.
+ */
+export function resolveProjectPresentationMode(
+  project: { presentationMode?: "photo" | "video"; video?: { url?: string } | null }
+): "photo" | "video" {
+  if (project.presentationMode === "video") return "video";
+  if (project.presentationMode === "photo") return "photo";
+  if (project.video?.url && typeof project.video.url === "string" && project.video.url.trim().length > 0) {
+    return "video";
+  }
+  return "photo";
+}
 
 /**
  * Normalizes a string into a clean URL-friendly slug

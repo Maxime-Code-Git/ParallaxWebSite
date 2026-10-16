@@ -817,9 +817,25 @@
     gap: 32px;
     margin-bottom: 80px;
   }
-  .projectRow > div {
+  .projectRow > div,
+  .photoBoxLandscape,
+  .photoBoxPortrait,
+  .photoBoxSquare,
+  .projectBoxEven,
+  .projectBoxOdd {
     transform: none !important;
     width: 100% !important;
+    max-width: 100% !important;
+  }
+  .projectTextEven,
+  .projectTextOdd {
+    text-align: left !important;
+  }
+  .projectDescEven,
+  .projectDescOdd {
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+    max-width: 100% !important;
   }
 }
 
@@ -903,16 +919,44 @@
   flex-direction: row-reverse;
 }
 
+.photoBoxLandscape {
+  flex: none;
+  width: 600px;
+  max-width: 100%;
+  position: relative;
+  z-index: 2;
+}
+
+.photoBoxPortrait {
+  flex: none;
+  width: 440px;
+  max-width: 100%;
+  position: relative;
+  z-index: 2;
+}
+
+.photoBoxSquare {
+  flex: none;
+  width: 480px;
+  max-width: 100%;
+  position: relative;
+  z-index: 2;
+}
+
 .projectBoxEven {
   flex: none;
-  width: 560px;
+  width: 600px;
   max-width: 100%;
+  position: relative;
+  z-index: 2;
 }
 
 .projectBoxOdd {
   flex: none;
-  width: 480px;
+  width: 440px;
   max-width: 100%;
+  position: relative;
+  z-index: 2;
 }
 
 .projectTextEven {

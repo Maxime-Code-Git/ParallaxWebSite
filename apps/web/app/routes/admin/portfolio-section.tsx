@@ -206,12 +206,12 @@ export async function action({ request, params }: ActionFunctionArgs) {
     en: String(formData.get("bannerAlt_en") || "").trim(),
   };
 
-  // 5. Couverture (compatibilité)
+  // 5. Couverture (compatibilité historique - préservée indépendamment)
   const coverImageId = String(formData.get("coverImageId") || "").trim();
-  section.coverImageId = coverImageId ? coverImageId : (section.bannerImageId || section.entryImageId || null);
+  section.coverImageId = coverImageId ? coverImageId : (section.coverImageId || null);
   section.coverAlt = {
-    fr: String(formData.get("coverAlt_fr") || "").trim() || section.bannerAlt.fr,
-    en: String(formData.get("coverAlt_en") || "").trim() || section.bannerAlt.en,
+    fr: String(formData.get("coverAlt_fr") || "").trim() || section.coverAlt?.fr || section.bannerAlt.fr,
+    en: String(formData.get("coverAlt_en") || "").trim() || section.coverAlt?.en || section.bannerAlt.en,
   };
 
   // 4. Showreel
@@ -349,9 +349,11 @@ export default function AdminPortfolioSectionPage() {
   const [entrySummaryEn, setEntrySummaryEn] = useState(section.entrySummary?.en || section.intro.en);
   const [entrySide, setEntrySide] = useState<"left" | "right">(section.entrySide || (category === "documentary" ? "left" : "right"));
 
-  const [bannerImageId, setBannerImageId] = useState<string | null>(section.bannerImageId || section.coverImageId || null);
-  const [bannerAltFr, setBannerAltFr] = useState(section.bannerAlt?.fr || section.coverAlt.fr || "");
-  const [bannerAltEn, setBannerAltEn] = useState(section.bannerAlt?.en || section.coverAlt.en || "");
+  const [bannerImageId, setBannerImageId] = useState<string | null>(
+    section.bannerImageId !== undefined ? section.bannerImageId : (section.coverImageId || null)
+  );
+  const [bannerAltFr, setBannerAltFr] = useState(section.bannerAlt?.fr || section.coverAlt?.fr || "");
+  const [bannerAltEn, setBannerAltEn] = useState(section.bannerAlt?.en || section.coverAlt?.en || "");
 
   const [showreelCoverImageId, setShowreelCoverImageId] = useState<string | null>(
     section.showreelCoverImageId
@@ -489,7 +491,7 @@ export default function AdminPortfolioSectionPage() {
         <input type="hidden" name="revision" value={currentRevision} />
         <input type="hidden" name="entryImageId" value={entryImageId || ""} />
         <input type="hidden" name="bannerImageId" value={bannerImageId || ""} />
-        <input type="hidden" name="coverImageId" value={coverImageId || bannerImageId || entryImageId || ""} />
+        <input type="hidden" name="coverImageId" value={coverImageId || ""} />
         <input type="hidden" name="showreelCoverImageId" value={showreelCoverImageId || ""} />
 
         <div className={styles.formGrid}>

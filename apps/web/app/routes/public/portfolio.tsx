@@ -15,6 +15,7 @@ import {
   type PortfolioContent,
   type PortfolioProject,
   type PortfolioCategory,
+  resolveProjectPresentationMode,
 } from "../../lib/portfolio-content.shared";
 import { getPublicPortfolioContent } from "../../lib/portfolio-content.server";
 import { getSiteContent, type CommonContent } from "../../lib/site-content.server";
@@ -684,7 +685,7 @@ export default function PortfolioPage() {
               <p className={styles.detailSummary}>{effectiveProject.summary[lang]}</p>
 
               {/* Hero Media according to Presentation Mode */}
-              {effectiveProject.presentationMode === "video" && effectiveProject.video?.url ? (
+              {resolveProjectPresentationMode(effectiveProject) === "video" && effectiveProject.video?.url ? (
                 <div className={styles.detailCoverWrap}>
                   <div className={styles.showreelCard}>
                     {effectiveProject.video.coverImageId ? (
@@ -841,9 +842,7 @@ export default function PortfolioPage() {
               <div className={styles.projectsList}>
                 {categoryProjects.length > 0 ? (
                   categoryProjects.map((p, pIdx) => {
-                    const isVideoMode =
-                      p.presentationMode === "video" ||
-                      (Boolean(p.video?.url) && p.presentationMode !== "photo");
+                    const isVideoMode = resolveProjectPresentationMode(p) === "video";
                     const isEven = pIdx % 2 === 0;
 
                     if (isVideoMode && p.video?.url) {
@@ -899,6 +898,13 @@ export default function PortfolioPage() {
 
                     // PHOTO PRESENTATION MODE (Alternating sides, customizable aspect ratio, text alongside)
                     const isLeft = p.side === "left" || (p.side === "auto" && isEven);
+                    const isPortrait = p.aspectRatio === "4:5";
+                    const isSquare = p.aspectRatio === "1:1";
+                    const photoBoxClass = isPortrait
+                      ? styles.photoBoxPortrait
+                      : isSquare
+                      ? styles.photoBoxSquare
+                      : styles.photoBoxLandscape;
                     const ratioClass =
                       p.aspectRatio === "4:5"
                         ? styles.aspect45
@@ -915,7 +921,7 @@ export default function PortfolioPage() {
                           isLeft ? styles.projectRowEven : styles.projectRowOdd
                         }`}
                       >
-                        <div className={isLeft ? styles.projectBoxEven : styles.projectBoxOdd}>
+                        <div className={photoBoxClass}>
                           <Link
                             to={`${getPortfolioProjectUrl(p, lang)}${dirParam}`}
                             preventScrollReset

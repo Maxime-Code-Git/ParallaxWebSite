@@ -17,6 +17,7 @@ import {
   type PortfolioMediaItem,
   PORTFOLIO_CATEGORIES,
   slugify,
+  resolveProjectPresentationMode,
 } from "../../lib/portfolio-content.shared";
 import {
   getRawPortfolioContent,
@@ -218,6 +219,31 @@ export async function action({ request, params }: ActionFunctionArgs) {
   const rawAspectRatio = String(formData.get("aspectRatio") || "3:2");
   const aspectRatio = (["3:2", "4:5", "16:9", "1:1"].includes(rawAspectRatio) ? rawAspectRatio : "3:2") as "3:2" | "4:5" | "16:9" | "1:1";
 
+  // Pre-validate publication constraints before mutating
+  if (status === "published") {
+    if (presentationMode === "video") {
+      if (!rawVideoUrl) {
+        return Response.json(
+          { error: "Un projet publié en mode Vidéo doit comporter une URL vidéo valide (YouTube ou Vimeo)." },
+          { status: 422, headers: createAdminHeaders() }
+        );
+      }
+      if (!videoCoverImageId && !coverImageId) {
+        return Response.json(
+          { error: "Un projet publié en mode Vidéo doit posséder une affiche vidéo ou une image de couverture." },
+          { status: 422, headers: createAdminHeaders() }
+        );
+      }
+    } else {
+      if (!coverImageId) {
+        return Response.json(
+          { error: "Un projet publié en mode Photo doit posséder une image de couverture." },
+          { status: 422, headers: createAdminHeaders() }
+        );
+      }
+    }
+  }
+
   proj.presentationMode = presentationMode;
   proj.aspectRatio = aspectRatio;
   proj.showcase = showcase;
@@ -312,7 +338,7 @@ export default function AdminPortfolioEditPage() {
   const [showcase, setShowcase] = useState(project.showcase);
   const [side, setSide] = useState(project.side);
   const [presentationMode, setPresentationMode] = useState<"photo" | "video">(
-    project.presentationMode || (project.video?.url && !project.coverImageId ? "video" : "photo")
+    resolveProjectPresentationMode(project)
   );
   const [aspectRatio, setAspectRatio] = useState<"3:2" | "4:5" | "16:9" | "1:1">(
     project.aspectRatio || "3:2"
