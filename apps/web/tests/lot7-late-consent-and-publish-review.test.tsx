@@ -4,9 +4,10 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import React from "react";
-import { render, screen, act } from "@testing-library/react";
-import type { ActionFunctionArgs } from "react-router";
+import { render, screen, act, fireEvent } from "@testing-library/react";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { action as legalEditAction } from "../app/routes/admin/legal-edit";
+import { action as preferencesAction, loader as preferencesLoader } from "../app/routes/api/privacy-preferences";
 import {
   getSiteContent,
   publishLegalPage,
@@ -42,6 +43,13 @@ const makeActionArgs = (req: Request, params: Record<string, string> = {}): Acti
     params,
     context: {} as never,
   }) as unknown as ActionFunctionArgs;
+
+const makeLoaderArgs = (req: Request, params: Record<string, string> = {}): LoaderFunctionArgs =>
+  ({
+    request: req,
+    params,
+    context: {} as never,
+  }) as unknown as LoaderFunctionArgs;
 
 // Helper to create a deferred promise for controlled async resolutions
 function createDeferred<T>() {
@@ -279,6 +287,195 @@ describe("Lot 7 - Late Consent Responses & Atomic Publication Quality Verificati
       // 4. Consent must remain strictly false
       expect(hasProviderConsent("youtube")).toBe(false);
       expect(getClientValidatedPreferences()?.youtube).toBe(false);
+
+      fetchSpy.mockRestore();
+    });
+
+    it("1. Real accept button with late response after modal close & revocation does NOT restore consent nor re-create iframe upon reopening", async () => {
+      const acceptDeferred = createDeferred<{ ok: boolean; preferences: { youtube: boolean; vimeo: boolean } }>();
+
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+        const method = init?.method || "GET";
+        const bodyStr = String(init?.body || "");
+        if (method === "POST" && bodyStr.includes("revoke_all")) {
+          return new Response(JSON.stringify({ ok: true }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (method === "POST" && bodyStr.includes("youtube")) {
+          const res = await acceptDeferred.promise;
+          return new Response(JSON.stringify(res), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response("Not Found", { status: 404 });
+      });
+
+      const videoUrl = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
+
+      // 1. Open YouTube video modal without prior consent
+      const { container, rerender } = render(
+        <VideoModal isOpen={true} onClose={vi.fn()} videoUrl={videoUrl} lang="fr" />
+      );
+
+      expect(container.querySelector("iframe")).toBeNull();
+      expect(screen.getByText(/Lecture externe \(YouTube\)/i)).toBeInTheDocument();
+
+      // 2. Check "Mémoriser mon accord" and click "Accepter et lire"
+      const rememberCheckbox = screen.getByRole("checkbox");
+      fireEvent.click(rememberCheckbox);
+      const acceptButton = screen.getByRole("button", { name: /Accepter et lire/i });
+
+      // Click accept -> POST starts and remains pending
+      fireEvent.click(acceptButton);
+
+      // 3. Close the modal, then revoke all consents
+      rerender(<VideoModal isOpen={false} onClose={vi.fn()} videoUrl={videoUrl} lang="fr" />);
+
+      await act(async () => {
+        const revoked = await revokeAllProviderConsent();
+        expect(revoked).toBe(true);
+      });
+      expect(hasProviderConsent("youtube", videoUrl)).toBe(false);
+
+      // 4. Resolve the stale accept POST
+      await act(async () => {
+        acceptDeferred.resolve({ ok: true, preferences: { youtube: true, vimeo: false } });
+        await Promise.resolve();
+      });
+
+      // Verification: one-time consent must NOT have been granted
+      expect(hasProviderConsent("youtube", videoUrl)).toBe(false);
+
+      // 5. Reopen the same video modal
+      rerender(<VideoModal isOpen={true} onClose={vi.fn()} videoUrl={videoUrl} lang="fr" />);
+
+      // Must NOT render an iframe! Consent prompt must be shown!
+      expect(container.querySelector("iframe")).toBeNull();
+      expect(screen.getByText(/Lecture externe \(YouTube\)/i)).toBeInTheDocument();
+      expect(hasProviderConsent("youtube", videoUrl)).toBe(false);
+
+      fetchSpy.mockRestore();
+    });
+
+    it("2. Generation guard after res.json() prevents stale JSON body from overwriting newer choices", async () => {
+      const jsonDeferred = createDeferred<{ ok: boolean; preferences: { youtube: boolean; vimeo: boolean } }>();
+
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+        const bodyStr = String(init?.body || "");
+        if (bodyStr.includes('"youtube":true')) {
+          // Response A: fetch resolves immediately, but res.json() is delayed
+          return {
+            ok: true,
+            status: 200,
+            json: () => jsonDeferred.promise,
+          } as unknown as Response;
+        }
+        if (bodyStr.includes('"youtube":false')) {
+          // Response B: completes immediately
+          return new Response(JSON.stringify({ ok: true, preferences: { youtube: false, vimeo: false } }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response("Not Found", { status: 404 });
+      });
+
+      // 1. Start save A: YouTube allowed (in flight)
+      const savePromiseA = persistProviderPreferences({ youtube: true, vimeo: false });
+
+      // Yield event loop so fetch is resolved and json() is called & pending
+      await new Promise((r) => setTimeout(r, 10));
+
+      // 2. Start save B: YouTube and Vimeo refused
+      const savePromiseB = persistProviderPreferences({ youtube: false, vimeo: false });
+      const resultB = await savePromiseB;
+      expect(resultB).toBe(true);
+      expect(hasProviderConsent("youtube")).toBe(false);
+      expect(getClientValidatedPreferences()?.youtube).toBe(false);
+
+      // 3. Now resolve A's json() with stale positive preference
+      jsonDeferred.resolve({ ok: true, preferences: { youtube: true, vimeo: false } });
+      const resultA = await savePromiseA;
+
+      // A must be detected as stale after its res.json()
+      expect(resultA).toBe(false);
+
+      // 4. Consent must remain strictly false
+      expect(hasProviderConsent("youtube")).toBe(false);
+      expect(getClientValidatedPreferences()?.youtube).toBe(false);
+
+      fetchSpy.mockRestore();
+    });
+
+    it("3. Bounded mutation serialization guarantees chronological Set-Cookie order with real handler", async () => {
+      let cookieJar = "";
+      const acceptFetchDeferred = createDeferred<void>();
+
+      // Mock fetch: routes to real privacyPreferencesAction, but allows deferring the accept response
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+        const url = String(input);
+        const method = init?.method || "GET";
+        const bodyStr = String(init?.body || "");
+
+        if (url.includes("/api/privacy/preferences") && method === "POST") {
+          const req = new Request("http://127.0.0.1:3000/api/privacy/preferences", {
+            method: "POST",
+            headers: {
+              Origin: "http://127.0.0.1:3000",
+              "Content-Type": "application/json",
+              Cookie: cookieJar,
+            },
+            body: bodyStr,
+          });
+
+          if (bodyStr.includes('"youtube":true')) {
+            // Wait for test to release A
+            await acceptFetchDeferred.promise;
+          }
+
+          const res = await preferencesAction(makeActionArgs(req));
+          const setCookie = res.headers.get("Set-Cookie");
+          if (setCookie) {
+            cookieJar = setCookie.split(";")[0];
+          }
+          return res;
+        }
+
+        return new Response("Not Found", { status: 404 });
+      });
+
+      // 1. User starts accept A: YouTube authorized (held in flight)
+      const savePromiseA = persistProviderPreferences({ youtube: true, vimeo: false });
+
+      // 2. While A is in flight, user triggers revocation B
+      // Revocation updates local state immediately:
+      const revokePromiseB = revokeAllProviderConsent();
+      expect(hasProviderConsent("youtube")).toBe(false);
+
+      // 3. Release A's response so A finishes first on the network
+      acceptFetchDeferred.resolve();
+
+      // Wait for both mutations to finish in sequential order
+      const [resA, resB] = await Promise.all([savePromiseA, revokePromiseB]);
+      expect(resA).toBe(false); // A was superseded by B
+      expect(resB).toBe(true);  // B succeeded as the final mutation
+
+      // 4. Simulate a page reload: clear all in-memory state
+      resetClientPrivacyState();
+
+      // Read preferences via the real loader using the cookieJar produced by the browser
+      const loaderReq = new Request("http://127.0.0.1:3000/api/privacy/preferences", {
+        headers: { Cookie: cookieJar },
+      });
+      const loaderRes = await preferencesLoader(makeLoaderArgs(loaderReq));
+      const json = (await loaderRes.json()) as { ok: boolean; preferences: { youtube: boolean; vimeo: boolean } };
+
+      // The final cookie must reflect revocation B! YouTube must be false!
+      expect(json.preferences.youtube).toBe(false);
+      expect(json.preferences.vimeo).toBe(false);
 
       fetchSpy.mockRestore();
     });

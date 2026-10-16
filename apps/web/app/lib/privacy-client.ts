@@ -12,6 +12,25 @@ let privacyEpoch = 0;
 // voluntarily grants consent again.
 let tabExplicitRefusal = false;
 
+// Sequential queue for mutation network requests to guarantee that Set-Cookie headers
+// arrive and are processed in exact chronological order without race conditions.
+let mutationFetchQueue: Promise<unknown> = Promise.resolve();
+
+export type PersistStatus = "success" | "stale" | "error";
+
+export interface PersistResult {
+  ok: boolean;
+  status: PersistStatus;
+}
+
+export function getPrivacyEpoch(): number {
+  return privacyEpoch;
+}
+
+export function isTabExplicitRefusal(): boolean {
+  return tabExplicitRefusal;
+}
+
 export function getClientOneTimeConsent(mediaUrl: string): boolean {
   if (!mediaUrl) return false;
   return Boolean(inMemoryOneTimeByMedia.get(mediaUrl));
@@ -42,6 +61,7 @@ export function resetClientPrivacyState(): void {
   inMemoryOneTimeByMedia.clear();
   privacyEpoch = 0;
   tabExplicitRefusal = false;
+  mutationFetchQueue = Promise.resolve();
 }
 
 export function setClientValidatedPreferences(prefs: { youtube: boolean; vimeo: boolean }): void {
@@ -76,8 +96,8 @@ export async function fetchValidatedPreferences(): Promise<{ youtube: boolean; v
       },
     });
 
-    // Check if a newer decision or revocation occurred while this GET was in flight
-    if (reqEpoch !== privacyEpoch) {
+    // Boundary 1: Check after fetch()
+    if (reqEpoch !== privacyEpoch || tabExplicitRefusal) {
       return validatedServerPrefs ? { ...validatedServerPrefs } : { youtube: false, vimeo: false };
     }
 
@@ -86,11 +106,13 @@ export async function fetchValidatedPreferences(): Promise<{ youtube: boolean; v
         ok: boolean;
         preferences: { youtube: boolean; vimeo: boolean };
       };
+
+      // Boundary 2: Check after res.json()
+      if (reqEpoch !== privacyEpoch || tabExplicitRefusal) {
+        return validatedServerPrefs ? { ...validatedServerPrefs } : { youtube: false, vimeo: false };
+      }
+
       if (data && data.ok && data.preferences) {
-        if (tabExplicitRefusal) {
-          // Tab refusal takes precedence over any older or un-cleared server cookie
-          return { youtube: false, vimeo: false };
-        }
         validatedServerPrefs = {
           youtube: Boolean(data.preferences.youtube),
           vimeo: Boolean(data.preferences.vimeo),
@@ -121,11 +143,11 @@ export function hasProviderConsent(provider: VideoProvider, mediaUrl?: string): 
   return false;
 }
 
-export async function persistProviderPreferences(prefs: {
+export async function persistProviderPreferencesDetailed(prefs: {
   youtube?: boolean;
   vimeo?: boolean;
-}): Promise<boolean> {
-  if (typeof window === "undefined") return false;
+}): Promise<PersistResult> {
+  if (typeof window === "undefined") return { ok: false, status: "error" };
 
   // New user decision advances generation
   privacyEpoch += 1;
@@ -135,33 +157,83 @@ export async function persistProviderPreferences(prefs: {
     tabExplicitRefusal = false;
   }
 
-  try {
-    const current = validatedServerPrefs || { youtube: false, vimeo: false };
-    const updated = {
-      youtube: prefs.youtube !== undefined ? prefs.youtube : current.youtube,
-      vimeo: prefs.vimeo !== undefined ? prefs.vimeo : current.vimeo,
-    };
+  const current = validatedServerPrefs || { youtube: false, vimeo: false };
+  const updated = {
+    youtube: prefs.youtube !== undefined ? prefs.youtube : current.youtube,
+    vimeo: prefs.vimeo !== undefined ? prefs.vimeo : current.vimeo,
+  };
 
-    const res = await fetch("/api/privacy/preferences", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-      body: JSON.stringify(updated),
+  // Wait for previous in-flight mutation's fetch to complete before sending this one,
+  // guaranteeing sequential delivery and deterministic Set-Cookie order.
+  const previousFetch = mutationFetchQueue;
+  let releaseMyFetch!: () => void;
+  const myFetchCompleted = new Promise<void>((resolve) => {
+    releaseMyFetch = resolve;
+  });
+  mutationFetchQueue = myFetchCompleted;
+
+  const executeMutation = async (): Promise<PersistResult> => {
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    const waitPrevious = new Promise<void>((resolve) => {
+      timeoutHandle = setTimeout(resolve, 6000);
+      previousFetch.catch(() => {}).then(() => {
+        clearTimeout(timeoutHandle);
+        resolve();
+      });
     });
 
-    // Discard response if another action happened while this POST was in flight
-    if (reqEpoch !== privacyEpoch) {
-      return false;
+    try {
+      await waitPrevious;
+    } catch {
+      // Proceed even if previous wait encountered an issue
     }
 
-    if (res.ok) {
+    // Check if superseded while waiting in queue before fetch
+    if (reqEpoch !== privacyEpoch) {
+      releaseMyFetch();
+      return { ok: false, status: "stale" };
+    }
+
+    try {
+      let res: Response;
+      try {
+        res = await fetch("/api/privacy/preferences", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify(updated),
+        });
+      } finally {
+        // Release the fetch lock immediately once the HTTP response headers arrive
+        // (and browser commits Set-Cookie), or if fetch fails, so the next mutation can fetch.
+        releaseMyFetch();
+      }
+
+      // Boundary 1: Check after fetch()
+      if (reqEpoch !== privacyEpoch) {
+        return { ok: false, status: "stale" };
+      }
+
+      if (!res.ok) {
+        return { ok: false, status: "error" };
+      }
+
       const data = (await res.json()) as {
         ok: boolean;
         preferences?: { youtube: boolean; vimeo: boolean };
       };
+
+      // Boundary 2: Check after res.json()
+      if (reqEpoch !== privacyEpoch) {
+        return { ok: false, status: "stale" };
+      }
+
       if (data && data.ok) {
+        if (tabExplicitRefusal) {
+          return { ok: false, status: "stale" };
+        }
         validatedServerPrefs = {
           youtube: Boolean(data.preferences?.youtube ?? updated.youtube),
           vimeo: Boolean(data.preferences?.vimeo ?? updated.vimeo),
@@ -172,13 +244,27 @@ export async function persistProviderPreferences(prefs: {
             detail: validatedServerPrefs,
           })
         );
-        return true;
+        return { ok: true, status: "success" };
       }
+      return { ok: false, status: "error" };
+    } catch {
+      releaseMyFetch();
+      if (reqEpoch !== privacyEpoch) {
+        return { ok: false, status: "stale" };
+      }
+      return { ok: false, status: "error" };
     }
-  } catch {
-    // Network or server issue
-  }
-  return false;
+  };
+
+  return await executeMutation();
+}
+
+export async function persistProviderPreferences(prefs: {
+  youtube?: boolean;
+  vimeo?: boolean;
+}): Promise<boolean> {
+  const result = await persistProviderPreferencesDetailed(prefs);
+  return result.ok;
 }
 
 export async function revokeAllProviderConsent(): Promise<boolean> {
@@ -199,22 +285,72 @@ export async function revokeAllProviderConsent(): Promise<boolean> {
     );
   }
 
-  try {
-    const res = await fetch("/api/privacy/preferences", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-      body: JSON.stringify({ action: "revoke_all" }),
+  const previousFetch = mutationFetchQueue;
+  let releaseMyFetch!: () => void;
+  const myFetchCompleted = new Promise<void>((resolve) => {
+    releaseMyFetch = resolve;
+  });
+  mutationFetchQueue = myFetchCompleted;
+
+  const executeRevoke = async (): Promise<boolean> => {
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    const waitPrevious = new Promise<void>((resolve) => {
+      timeoutHandle = setTimeout(resolve, 6000);
+      previousFetch.catch(() => {}).then(() => {
+        clearTimeout(timeoutHandle);
+        resolve();
+      });
     });
 
+    try {
+      await waitPrevious;
+    } catch {
+      // Proceed even if previous wait encountered an issue
+    }
+
     if (reqEpoch !== privacyEpoch) {
+      releaseMyFetch();
       return false;
     }
-    return res.ok;
-  } catch {
-    // Even on network failure, tabExplicitRefusal remains true in this tab
-    return false;
-  }
+
+    try {
+      let res: Response;
+      try {
+        res = await fetch("/api/privacy/preferences", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify({ action: "revoke_all" }),
+        });
+      } finally {
+        releaseMyFetch();
+      }
+
+      // Boundary 1: Check after fetch()
+      if (reqEpoch !== privacyEpoch) {
+        return false;
+      }
+
+      if (res.ok) {
+        try {
+          await res.json();
+        } catch {
+          // Ignore json parse error on revoke
+        }
+        // Boundary 2: Check after body read
+        if (reqEpoch !== privacyEpoch) {
+          return false;
+        }
+        return true;
+      }
+      return false;
+    } catch {
+      releaseMyFetch();
+      return false;
+    }
+  };
+
+  return await executeRevoke();
 }

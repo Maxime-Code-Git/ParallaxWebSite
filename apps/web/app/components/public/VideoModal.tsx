@@ -7,8 +7,9 @@ import {
 import {
   hasProviderConsent,
   setClientOneTimeConsent,
-  persistProviderPreferences,
+  persistProviderPreferencesDetailed,
   fetchValidatedPreferences,
+  isTabExplicitRefusal,
 } from "../../lib/privacy-client";
 
 interface VideoModalProps {
@@ -109,6 +110,11 @@ export function VideoModal({ isOpen, onClose, videoUrl, lang }: VideoModalProps)
         }
         return;
       }
+      // If explicit refusal is active in this tab, do not re-read or accept server cookie
+      if (isTabExplicitRefusal()) {
+        setActiveConsent(null);
+        return;
+      }
       // Attempt to load validated server preferences if not yet done
       const verified = await fetchValidatedPreferences();
       if (evaluationSeq !== evaluationSeqRef.current || currentMediaUrlRef.current !== targetUrl) {
@@ -201,7 +207,6 @@ export function VideoModal({ isOpen, onClose, videoUrl, lang }: VideoModalProps)
     }
 
     function handlePrivacyUpdate(e: Event) {
-      evaluationSeqRef.current++;
       const customEvent = e as CustomEvent<{
         youtube?: boolean;
         vimeo?: boolean;
@@ -210,21 +215,24 @@ export function VideoModal({ isOpen, onClose, videoUrl, lang }: VideoModalProps)
       }>;
       if (provider) {
         if (customEvent.detail) {
-          if (customEvent.detail.provider === provider && customEvent.detail.granted === false) {
-            setActiveConsent(null);
-            setClientOneTimeConsent(videoUrl, false);
-            return;
-          }
-          if (customEvent.detail[provider] === false) {
+          if (
+            (customEvent.detail.provider === provider && customEvent.detail.granted === false) ||
+            customEvent.detail[provider] === false
+          ) {
+            evaluationSeqRef.current++;
             setActiveConsent(null);
             setClientOneTimeConsent(videoUrl, false);
             return;
           }
         }
         if (!hasProviderConsent(provider, videoUrl)) {
+          evaluationSeqRef.current++;
           setActiveConsent(null);
+        } else {
+          setActiveConsent({ mediaUrl: videoUrl, provider });
         }
       } else {
+        evaluationSeqRef.current++;
         setActiveConsent(null);
       }
     }
@@ -269,16 +277,45 @@ export function VideoModal({ isOpen, onClose, videoUrl, lang }: VideoModalProps)
     if (!provider) return;
     setPersistenceError(null);
 
+    const acceptSeq = ++evaluationSeqRef.current;
+    const targetVideoUrl = videoUrl;
+    const targetProvider = provider;
+
     if (rememberChoice) {
-      const persisted = await persistProviderPreferences({ [provider]: true });
-      if (!persisted) {
-        setPersistenceError(texts.persistenceErrorMsg);
+      const result = await persistProviderPreferencesDetailed({ [provider]: true });
+
+      // After await boundary:
+      // 1. Did the modal close or did the video change while waiting?
+      if (evaluationSeqRef.current !== acceptSeq || currentMediaUrlRef.current !== targetVideoUrl) {
+        return;
       }
+
+      // 2. Was this operation cancelled/stale, or is explicit refusal active?
+      if (result.status === "stale" || isTabExplicitRefusal()) {
+        return;
+      }
+
+      // 3. Genuine network error: only grant one-time consent if modal is still open,
+      // context matches, and user did not revoke.
+      if (result.status === "error") {
+        setPersistenceError(texts.persistenceErrorMsg);
+        setClientOneTimeConsent(targetVideoUrl, true);
+        setActiveConsent({ mediaUrl: targetVideoUrl, provider: targetProvider });
+        return;
+      }
+
+      // 4. Success:
+      setClientOneTimeConsent(targetVideoUrl, true);
+      setActiveConsent({ mediaUrl: targetVideoUrl, provider: targetProvider });
+      return;
     }
 
-    // Grant one-time consent strictly bound to this videoUrl
-    setClientOneTimeConsent(videoUrl, true);
-    setActiveConsent({ mediaUrl: videoUrl, provider });
+    // Explicit one-time accept clicked by user (rememberChoice is false)
+    if (evaluationSeqRef.current !== acceptSeq || currentMediaUrlRef.current !== targetVideoUrl) {
+      return;
+    }
+    setClientOneTimeConsent(targetVideoUrl, true);
+    setActiveConsent({ mediaUrl: targetVideoUrl, provider: targetProvider });
   };
 
   const handleClose = () => {
