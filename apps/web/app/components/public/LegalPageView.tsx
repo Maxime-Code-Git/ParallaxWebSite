@@ -48,8 +48,11 @@ export function LegalPageView({
       setClientValidatedPreferences(initialPreferences);
     }
     if (pageKey === "cookies") {
+      let isSubscribed = true;
       void fetchValidatedPreferences().then((verified) => {
-        setPrefs(verified);
+        if (isSubscribed) {
+          setPrefs(verified);
+        }
       });
 
       function handlePrivacyUpdated(e: Event) {
@@ -63,7 +66,10 @@ export function LegalPageView({
       }
 
       window.addEventListener("parallax:privacy-updated", handlePrivacyUpdated);
-      return () => window.removeEventListener("parallax:privacy-updated", handlePrivacyUpdated);
+      return () => {
+        isSubscribed = false;
+        window.removeEventListener("parallax:privacy-updated", handlePrivacyUpdated);
+      };
     }
   }, [pageKey, initialPreferences]);
 
@@ -75,6 +81,7 @@ export function LegalPageView({
     const actionType = submitter?.value || "save";
 
     if (actionType === "revoke_all" || actionType === "refuse_all") {
+      setPrefs({ youtube: false, vimeo: false });
       const success = await revokeAllProviderConsent();
       if (success) {
         setPrefs({ youtube: false, vimeo: false });

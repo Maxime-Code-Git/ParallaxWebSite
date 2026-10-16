@@ -12,7 +12,7 @@ Le site Parallax applique une politique de minimisation technique des données. 
 
 | Nom du cookie | Finalité technique | Durée de rétention | Sécurité / Attributs |
 |---|---|---|---|
-| `__parallax_admin_session` | Maintien de la session d'administration authentifiée | 8 heures (glissante) | `HttpOnly`, `SameSite=Strict`, `Path=/admin`, `Secure` (production) |
+| `__parallax_admin_session` | Maintien de la session d'administration authentifiée | 8 heures (glissante) | `HttpOnly`, `SameSite=Strict`, `Path=/`, `Secure` (production) |
 | `__parallax_gallery_session` | Maintien de l'accès client sécurisé par code à une galerie privée | 8 heures maximum technique | `HttpOnly`, `SameSite=Lax`, `Path=/`, `Secure` (production) |
 | `__parallax_contact_ctx` | Contexte éphémère anonyme anti-spam (liaison cryptographique du jeton `_token`) | 2 heures | `HttpOnly`, `SameSite=Lax`, `Path=/`, `Secure` (production) |
 | `__parallax_contact_flash` | Notification éphémère PRG (message de statut après soumission contact) | Usage unique (supprimé à la première lecture) | `HttpOnly`, `SameSite=Lax`, `Path=/`, `Secure` (production) |
@@ -193,3 +193,4 @@ Toutes les routes légales publiques appliquent les en-têtes `Cache-Control: pr
 | **Prévisualisation privée** | **Vérifié** | Authentification session requise, en-têtes `no-store` et `noindex` stricts. |
 | **Conformité CSP** | **Vérifié** | Zéro attribut `style` inline sur les 4 écrans légaux et d'administration. En-tête CSP sans `unsafe-inline` en production. |
 | **Validation juridique des contenus** | **À charge de Maxime** | Les structures techniques et les mécanismes d'édition sont livrés et vérifiés ; les mentions textuelles spécifiques restent à valider sur le plan légal par Maxime et son conseil. |
+| **Portée des tests techniques** | **Contrôle logiciel** | Les tests d'intégration et vérifications automatisées constituent des garanties techniques de bon fonctionnement logiciel (contrôles d'accès, non-chargement d'iframes sans accord, protection cryptographique, absence de fuite de données privées). Ils ne constituent pas une certification légale formelle émise par l'Autorité de Protection des Données (APD) ni une validation juridique des clauses contractuelles, qui relèvent de la responsabilité de l'éditeur du site et de son conseil juridique. |

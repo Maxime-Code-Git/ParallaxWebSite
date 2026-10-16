@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs, HeadersArgs } from "react-router";
 import { Link, useFetcher, useLoaderData } from "react-router";
 import {
@@ -90,6 +90,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
       "intent",
       "draftData",
       "effectiveDate",
+      "clientEditCount",
     ]);
   } catch (err) {
     if (err instanceof ActionSecurityError) {
@@ -107,6 +108,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
   const revision = String(formData.get("revision") || "");
   const intent = String(formData.get("intent") || "save_draft");
+  const clientEditCount = formData.get("clientEditCount");
 
   try {
     if (intent === "save_draft") {
@@ -126,25 +128,26 @@ export async function action({ request, params }: ActionFunctionArgs) {
           action: "save_draft",
           newRevision,
           pageRecord: updated.legalPages[pageKey],
+          clientEditCount,
         },
         { headers }
       );
     }
 
     if (intent === "publish") {
-      let currentRev = revision;
+      let candidateDraft: LegalDocument | undefined;
       const rawDraft = String(formData.get("draftData") || "");
       if (rawDraft) {
-        let draftData: LegalDocument;
         try {
-          draftData = JSON.parse(rawDraft);
+          candidateDraft = JSON.parse(rawDraft);
         } catch {
           return Response.json({ error: "Données de brouillon invalides." }, { status: 400, headers });
         }
-        currentRev = saveLegalPageDraft(pageKey, draftData, currentRev);
       }
       const effectiveDate = String(formData.get("effectiveDate") || "").trim() || undefined;
-      const newRevision = publishLegalPage(pageKey, currentRev, effectiveDate);
+      // Atomic publish: validates candidate draft and conditions before any disk write.
+      // If validation fails, zero mutations occur on disk and the revision remains unchanged.
+      const newRevision = publishLegalPage(pageKey, revision, effectiveDate, candidateDraft);
       const updated = getRawSiteContent().content;
       return Response.json(
         {
@@ -152,6 +155,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
           action: "publish",
           newRevision,
           pageRecord: updated.legalPages[pageKey],
+          clientEditCount,
         },
         { headers }
       );
@@ -166,6 +170,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
           action: "unpublish",
           newRevision,
           pageRecord: updated.legalPages[pageKey],
+          clientEditCount,
         },
         { headers }
       );
@@ -185,7 +190,13 @@ export async function action({ request, params }: ActionFunctionArgs) {
       );
     }
     if (err instanceof ValidationError) {
-      return Response.json({ error: err.message }, { status: 400, headers });
+      return Response.json(
+        {
+          error: err.message,
+          serverRevision: revision,
+        },
+        { status: 400, headers }
+      );
     }
     return Response.json(
       { error: "Une erreur est survenue lors du traitement." },
@@ -202,6 +213,7 @@ interface ActionResponseData {
   error?: string;
   conflict?: boolean;
   serverRevision?: string;
+  clientEditCount?: string | null;
 }
 
 export default function AdminLegalEditPage() {
@@ -243,6 +255,9 @@ export default function AdminLegalEditPage() {
 
   const [hasUnsavedEdits, setHasUnsavedEdits] = useState(false);
 
+  const editCountRef = useRef(0);
+  const lastSavedCountRef = useRef(0);
+
   const isPublished = Boolean(pageRecord.published);
 
   useEffect(() => {
@@ -252,10 +267,30 @@ export default function AdminLegalEditPage() {
       if (fetcher.data.newRevision) {
         setCurrentRevision(fetcher.data.newRevision);
       }
+
+      const returnedCount =
+        fetcher.data.clientEditCount !== undefined && fetcher.data.clientEditCount !== null
+          ? Number(fetcher.data.clientEditCount)
+          : null;
+
+      // Only advance lastSavedCountRef if the action actually saved or published the draft
+      if (
+        (fetcher.data.action === "save_draft" || fetcher.data.action === "publish") &&
+        returnedCount !== null &&
+        Number.isFinite(returnedCount)
+      ) {
+        lastSavedCountRef.current = Math.max(lastSavedCountRef.current, returnedCount);
+      }
+
+      // Check whether user made newer edits since the submitted snapshot was captured
+      const stillHasUnsaved = editCountRef.current > lastSavedCountRef.current;
+      setHasUnsavedEdits(stillHasUnsaved);
+
       if (fetcher.data.pageRecord) {
         setPageRecord(fetcher.data.pageRecord);
-        // Only re-sync draft/raw texts if user hasn't made further edits
-        if (!hasUnsavedEdits) {
+
+        // Never clobber local draft on unpublish, nor if user has unsaved edits
+        if (fetcher.data.action !== "unpublish" && !stillHasUnsaved) {
           setDraft(fetcher.data.pageRecord.draft);
           const updatedRaw: Record<string, { fr: string; en: string }> = {};
           for (const sec of fetcher.data.pageRecord.draft.sections) {
@@ -267,7 +302,6 @@ export default function AdminLegalEditPage() {
           setSectionRawTexts(updatedRaw);
         }
       }
-      setHasUnsavedEdits(false);
 
       if (fetcher.data.action === "save_draft") {
         setFeedback({
@@ -306,6 +340,7 @@ export default function AdminLegalEditPage() {
     field: "publicTitle" | "seoTitle" | "seoDescription" | "intro",
     value: string
   ) => {
+    editCountRef.current += 1;
     setDraft((prev) => ({
       ...prev,
       [field]: {
@@ -317,6 +352,7 @@ export default function AdminLegalEditPage() {
   };
 
   const handleSectionTitleChange = (sectionIdx: number, value: string) => {
+    editCountRef.current += 1;
     setDraft((prev) => {
       const nextSections = [...prev.sections];
       nextSections[sectionIdx] = {
@@ -332,6 +368,7 @@ export default function AdminLegalEditPage() {
   };
 
   const handleSectionParagraphsChange = (sectionId: string, text: string) => {
+    editCountRef.current += 1;
     // Preserve raw input: spaces, empty lines, trailing spaces are NOT modified
     setSectionRawTexts((prev) => ({
       ...prev,
@@ -348,6 +385,7 @@ export default function AdminLegalEditPage() {
     field: "name" | "provider" | "purpose" | "duration",
     val: string
   ) => {
+    editCountRef.current += 1;
     setDraft((prev) => {
       const currentInv = prev.inventory ? [...prev.inventory] : [];
       if (!currentInv[index]) return prev;
@@ -367,6 +405,7 @@ export default function AdminLegalEditPage() {
     index: number,
     cat: "technical" | "preferences"
   ) => {
+    editCountRef.current += 1;
     setDraft((prev) => {
       const currentInv = prev.inventory ? [...prev.inventory] : [];
       if (!currentInv[index]) return prev;
@@ -380,6 +419,7 @@ export default function AdminLegalEditPage() {
   };
 
   const handleAddInventoryRow = () => {
+    editCountRef.current += 1;
     setDraft((prev) => {
       const currentInv = prev.inventory ? [...prev.inventory] : [];
       const newId = `cookie_${Date.now()}`;
@@ -397,6 +437,7 @@ export default function AdminLegalEditPage() {
   };
 
   const handleDeleteInventoryRow = (index: number) => {
+    editCountRef.current += 1;
     setDraft((prev) => {
       const currentInv = prev.inventory ? [...prev.inventory] : [];
       currentInv.splice(index, 1);
@@ -448,6 +489,9 @@ export default function AdminLegalEditPage() {
     body.set("revision", currentRevision);
     body.set("intent", intent);
 
+    const snapshotCount = editCountRef.current;
+    body.set("clientEditCount", String(snapshotCount));
+
     if (intent === "save_draft" || intent === "publish") {
       const fullDraft = buildCurrentDraft();
       body.set("draftData", JSON.stringify(fullDraft));
@@ -494,6 +538,11 @@ export default function AdminLegalEditPage() {
                 ? `Publié (v${pageRecord.published?.version} — ${pageRecord.published?.effectiveDate})`
                 : "Brouillon non publié"}
             </span>
+            {hasUnsavedEdits && (
+              <span className={formStyles.statusBadgeUnsaved} data-testid="unsaved-badge">
+                Modifications non enregistrées
+              </span>
+            )}
           </div>
 
           <div className={formStyles.langTabs}>
@@ -548,8 +597,11 @@ export default function AdminLegalEditPage() {
           <h2 className={formStyles.cardTitle}>En-tête & Métadonnées SEO ({activeLang.toUpperCase()})</h2>
 
           <div className={formStyles.field}>
-            <label className={formStyles.label}>Titre public affiché ({activeLang.toUpperCase()})</label>
+            <label htmlFor="field-publicTitle" className={formStyles.label}>
+              Titre public affiché ({activeLang.toUpperCase()})
+            </label>
             <input
+              id="field-publicTitle"
               type="text"
               className={formStyles.input}
               value={draft.publicTitle[activeLang]}
@@ -767,7 +819,11 @@ export default function AdminLegalEditPage() {
                 id="pub-effectiveDate"
                 type="text"
                 value={effectiveDate}
-                onChange={(e) => setEffectiveDate(e.target.value)}
+                onChange={(e) => {
+                  setEffectiveDate(e.target.value);
+                  editCountRef.current += 1;
+                  setHasUnsavedEdits(true);
+                }}
                 className={formStyles.effectiveDateInput}
               />
             </div>

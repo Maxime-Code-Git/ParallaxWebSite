@@ -72,47 +72,67 @@ export function parseVideoEmbedUrl(url: string | null | undefined): string | nul
 }
 
 export function VideoModal({ isOpen, onClose, videoUrl, lang }: VideoModalProps) {
-  const [consented, setConsented] = useState(false);
+  const [activeConsent, setActiveConsent] = useState<{
+    mediaUrl: string;
+    provider: VideoProvider;
+  } | null>(null);
   const [rememberChoice, setRememberChoice] = useState(false);
   const [persistenceError, setPersistenceError] = useState<string | null>(null);
 
   const modalRef = useRef<HTMLDivElement>(null);
   const previousActiveElementRef = useRef<HTMLElement | null>(null);
   const currentMediaUrlRef = useRef<string>(videoUrl);
+  const evaluationSeqRef = useRef<number>(0);
 
   const provider: VideoProvider | null = detectVideoProvider(videoUrl);
 
+  const isPlayerAuthorized = Boolean(
+    provider &&
+    activeConsent &&
+    activeConsent.mediaUrl === videoUrl &&
+    activeConsent.provider === provider &&
+    hasProviderConsent(provider, videoUrl)
+  );
+
   const evaluateConsent = useCallback(
     async (targetUrl: string) => {
-      if (!provider) {
-        setConsented(false);
+      const evaluationSeq = ++evaluationSeqRef.current;
+      const targetProvider = detectVideoProvider(targetUrl);
+      if (!targetProvider) {
+        setActiveConsent(null);
         return;
       }
       // Check existing validated or one-time consent for this media URL
-      if (hasProviderConsent(provider, targetUrl)) {
-        setConsented(true);
+      if (hasProviderConsent(targetProvider, targetUrl)) {
+        if (evaluationSeq === evaluationSeqRef.current && currentMediaUrlRef.current === targetUrl) {
+          setActiveConsent({ mediaUrl: targetUrl, provider: targetProvider });
+        }
         return;
       }
       // Attempt to load validated server preferences if not yet done
       const verified = await fetchValidatedPreferences();
-      if (verified && verified[provider]) {
-        setConsented(true);
+      if (evaluationSeq !== evaluationSeqRef.current || currentMediaUrlRef.current !== targetUrl) {
+        return;
+      }
+      if (verified && verified[targetProvider] && hasProviderConsent(targetProvider, targetUrl)) {
+        setActiveConsent({ mediaUrl: targetUrl, provider: targetProvider });
       } else {
-        setConsented(false);
+        setActiveConsent(null);
       }
     },
-    [provider]
+    []
   );
 
   // Manage media URL transitions
   useEffect(() => {
     if (videoUrl !== currentMediaUrlRef.current) {
+      evaluationSeqRef.current++;
       // Different video: revoke one-time consent from previous video
       if (currentMediaUrlRef.current) {
         setClientOneTimeConsent(currentMediaUrlRef.current, false);
       }
       currentMediaUrlRef.current = videoUrl;
-      setConsented(false);
+      setActiveConsent(null);
       setRememberChoice(false);
       setPersistenceError(null);
     }
@@ -121,11 +141,12 @@ export function VideoModal({ isOpen, onClose, videoUrl, lang }: VideoModalProps)
   // Open / Close lifecycle, focus trap, and Escape handling
   useEffect(() => {
     if (!isOpen) {
+      evaluationSeqRef.current++;
       // Modal closed: revoke one-time consent for this video context
       if (currentMediaUrlRef.current) {
         setClientOneTimeConsent(currentMediaUrlRef.current, false);
       }
-      setConsented(false);
+      setActiveConsent(null);
       setRememberChoice(false);
       setPersistenceError(null);
 
@@ -180,6 +201,7 @@ export function VideoModal({ isOpen, onClose, videoUrl, lang }: VideoModalProps)
     }
 
     function handlePrivacyUpdate(e: Event) {
+      evaluationSeqRef.current++;
       const customEvent = e as CustomEvent<{
         youtube?: boolean;
         vimeo?: boolean;
@@ -189,19 +211,21 @@ export function VideoModal({ isOpen, onClose, videoUrl, lang }: VideoModalProps)
       if (provider) {
         if (customEvent.detail) {
           if (customEvent.detail.provider === provider && customEvent.detail.granted === false) {
-            setConsented(false);
+            setActiveConsent(null);
             setClientOneTimeConsent(videoUrl, false);
             return;
           }
           if (customEvent.detail[provider] === false) {
-            setConsented(false);
+            setActiveConsent(null);
             setClientOneTimeConsent(videoUrl, false);
             return;
           }
         }
         if (!hasProviderConsent(provider, videoUrl)) {
-          setConsented(false);
+          setActiveConsent(null);
         }
+      } else {
+        setActiveConsent(null);
       }
     }
 
@@ -254,13 +278,15 @@ export function VideoModal({ isOpen, onClose, videoUrl, lang }: VideoModalProps)
 
     // Grant one-time consent strictly bound to this videoUrl
     setClientOneTimeConsent(videoUrl, true);
-    setConsented(true);
+    setActiveConsent({ mediaUrl: videoUrl, provider });
   };
 
   const handleClose = () => {
+    evaluationSeqRef.current++;
     if (videoUrl) {
       setClientOneTimeConsent(videoUrl, false);
     }
+    setActiveConsent(null);
     onClose();
   };
 
@@ -287,7 +313,7 @@ export function VideoModal({ isOpen, onClose, videoUrl, lang }: VideoModalProps)
               {lang === "fr" ? "Fermer" : "Close"}
             </button>
           </div>
-        ) : !consented ? (
+        ) : !isPlayerAuthorized ? (
           <div className={styles.consentContainer}>
             <h3 className={styles.consentTitle}>{texts.title}</h3>
             <p className={styles.consentText}>{texts.notice}</p>

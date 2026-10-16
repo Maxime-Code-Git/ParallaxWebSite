@@ -1508,6 +1508,66 @@ export function saveLegalPageDraft(
   return nextRevision;
 }
 
+const FRENCH_MONTH_MAP: Record<string, number> = {
+  janvier: 1,
+  février: 2,
+  fevrier: 2,
+  mars: 3,
+  avril: 4,
+  mai: 5,
+  juin: 6,
+  juillet: 7,
+  août: 8,
+  aout: 8,
+  septembre: 9,
+  octobre: 10,
+  novembre: 11,
+  décembre: 12,
+  decembre: 12,
+};
+
+const ENGLISH_MONTH_MAP: Record<string, number> = {
+  january: 1,
+  jan: 1,
+  february: 2,
+  feb: 2,
+  march: 3,
+  mar: 3,
+  april: 4,
+  apr: 4,
+  may: 5,
+  june: 6,
+  jun: 6,
+  july: 7,
+  jul: 7,
+  august: 8,
+  aug: 8,
+  september: 9,
+  sep: 9,
+  sept: 9,
+  october: 10,
+  oct: 10,
+  november: 11,
+  nov: 11,
+  december: 12,
+  dec: 12,
+};
+
+function isValidCalendarDate(year: number, month: number, day: number): boolean {
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+    return false;
+  }
+  if (year < 2000 || year > 2099) return false;
+  if (month < 1 || month > 12) return false;
+  if (day < 1 || day > 31) return false;
+  const d = new Date(Date.UTC(year, month - 1, day));
+  return (
+    d.getUTCFullYear() === year &&
+    d.getUTCMonth() === month - 1 &&
+    d.getUTCDate() === day
+  );
+}
+
 export function validateEffectiveDate(dateStr: string): string {
   const trimmed = dateStr.trim();
   if (!trimmed) {
@@ -1516,18 +1576,75 @@ export function validateEffectiveDate(dateStr: string): string {
   if (containsUnresolvedPlaceholders(trimmed)) {
     throw new ValidationError("La date d'entrée en vigueur contient des mentions non complétées (placeholders).");
   }
-  if (trimmed.length < 8 || trimmed.length > 80 || !/\b(20\d{2})\b/.test(trimmed)) {
+
+  // 1. ISO format: YYYY-MM-DD
+  const isoMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoMatch) {
+    const y = parseInt(isoMatch[1], 10);
+    const m = parseInt(isoMatch[2], 10);
+    const d = parseInt(isoMatch[3], 10);
+    if (!isValidCalendarDate(y, m, d)) {
+      throw new ValidationError(
+        `La date d'entrée en vigueur '${trimmed}' n'est pas une date de calendrier valide.`
+      );
+    }
+    return trimmed;
+  }
+
+  // 2. French textual format: e.g. "15 octobre 2026" or "1er octobre 2026" or "le 15 octobre 2026"
+  const frMatch = trimmed.match(/^(?:le\s+)?(\d{1,2}|1er)\s+([a-zA-Zéûùàîïôë]+)\s+(\d{4})$/i);
+  if (frMatch) {
+    const day = frMatch[1].toLowerCase() === "1er" ? 1 : parseInt(frMatch[1], 10);
+    const monthName = frMatch[2].toLowerCase();
+    const year = parseInt(frMatch[3], 10);
+    const month = FRENCH_MONTH_MAP[monthName];
+    if (month && isValidCalendarDate(year, month, day)) {
+      return trimmed;
+    }
     throw new ValidationError(
-      "La date d'entrée en vigueur doit être une date valide avec une année à 4 chiffres (ex: '15 octobre 2026' ou '2026-10-15')."
+      `La date d'entrée en vigueur '${trimmed}' n'est pas une date de calendrier valide.`
     );
   }
-  return trimmed;
+
+  // 3. English textual format: e.g. "October 15, 2026", "15 October 2026", "15th October 2026"
+  const enMatch1 = trimmed.match(/^([a-zA-Z]+)\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})$/i);
+  if (enMatch1) {
+    const monthName = enMatch1[1].toLowerCase();
+    const day = parseInt(enMatch1[2], 10);
+    const year = parseInt(enMatch1[3], 10);
+    const month = ENGLISH_MONTH_MAP[monthName];
+    if (month && isValidCalendarDate(year, month, day)) {
+      return trimmed;
+    }
+    throw new ValidationError(
+      `La date d'entrée en vigueur '${trimmed}' n'est pas une date de calendrier valide.`
+    );
+  }
+
+  const enMatch2 = trimmed.match(/^(\d{1,2})(?:st|nd|rd|th)?\s+([a-zA-Z]+),?\s+(\d{4})$/i);
+  if (enMatch2) {
+    const day = parseInt(enMatch2[1], 10);
+    const monthName = enMatch2[2].toLowerCase();
+    const year = parseInt(enMatch2[3], 10);
+    const month = ENGLISH_MONTH_MAP[monthName];
+    if (month && isValidCalendarDate(year, month, day)) {
+      return trimmed;
+    }
+    throw new ValidationError(
+      `La date d'entrée en vigueur '${trimmed}' n'est pas une date de calendrier valide.`
+    );
+  }
+
+  throw new ValidationError(
+    "La date d'entrée en vigueur doit être une date valide avec une année à 4 chiffres (ex: '15 octobre 2026' ou '2026-10-15')."
+  );
 }
 
 export function publishLegalPage(
   pageKey: LegalPageKey,
   previousRevision: string,
-  effectiveDateOverride?: string
+  effectiveDateOverride?: string,
+  candidateDraft?: LegalDocument
 ): string {
   if (!LEGAL_PAGE_KEYS.includes(pageKey)) {
     throw new ValidationError(`Clé de page légale invalide: '${String(pageKey)}'`);
@@ -1541,7 +1658,11 @@ export function publishLegalPage(
   }
 
   const pageRecord = current.content.legalPages[pageKey];
-  const draft = pageRecord.draft;
+  let draft = pageRecord.draft;
+
+  if (candidateDraft) {
+    draft = validateLegalDocument(candidateDraft, "candidateDraft");
+  }
 
   // Strict server-side validation for publication
   if (!draft.seoTitle.fr?.trim() || !draft.seoTitle.en?.trim()) {

@@ -438,7 +438,7 @@
   padding: 3px 10px;
   border-radius: 999px;
   font-size: 12px;
-  fontWeight: 500;
+  font-weight: 500;
   background: rgba(52, 211, 153, 0.15);
   color: #34d399;
   border: 1px solid rgba(52, 211, 153, 0.3);
@@ -454,6 +454,18 @@
   background: rgba(245, 158, 11, 0.15);
   color: #f59e0b;
   border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.statusBadgeUnsaved {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.3);
 }
 
 .previewButton {
