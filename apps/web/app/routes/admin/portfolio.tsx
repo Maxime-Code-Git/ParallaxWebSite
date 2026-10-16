@@ -564,6 +564,25 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 }
 
+function isElementFocusable(el: HTMLElement): boolean {
+  if (el.hasAttribute("disabled")) return false;
+  if (el.getAttribute("aria-hidden") === "true") return false;
+  if (el.getAttribute("tabindex") === "-1") return false;
+  if (el.hasAttribute("inert")) return false;
+  if (el instanceof HTMLInputElement && el.type === "hidden") return false;
+  if (el.style.display === "none" || el.style.visibility === "hidden") return false;
+  return true;
+}
+
+function getModalFocusableElements(container: HTMLElement): HTMLElement[] {
+  const candidates = Array.from(
+    container.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), [href], input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"]):not([disabled])'
+    )
+  );
+  return candidates.filter(isElementFocusable);
+}
+
 export default function AdminPortfolioPage() {
   const { content, csrfToken } = useLoaderData<LoaderData>();
   const actionData = useActionData<{
@@ -589,9 +608,14 @@ export default function AdminPortfolioPage() {
   const previousActiveElementRef = useRef<HTMLElement | null>(null);
   const addCategoryBtnRef = useRef<HTMLButtonElement | null>(null);
   const addProjectBtnRef = useRef<HTMLButtonElement | null>(null);
+  const mainContentRef = useRef<HTMLDivElement | null>(null);
+  const lastClosedModalRef = useRef<"category" | "project" | null>(null);
+  const modalOpenRef = useRef<boolean>(false);
 
   const categories = Array.isArray(content.categories) ? content.categories : [];
   const sortedCategories = [...categories].sort((a, b) => a.order - b.order);
+
+  const isModalOpen = Boolean(categoryToDelete || projectToDelete);
 
   // Reset category filter if the active filtered category is removed
   useEffect(() => {
@@ -602,39 +626,45 @@ export default function AdminPortfolioPage() {
 
   // Modal helpers
   const closeCategoryModal = useCallback(() => {
+    if (isSubmitting) return;
+    lastClosedModalRef.current = "category";
     setCategoryToDelete(null);
     setTargetReassignCategory("");
-    if (previousActiveElementRef.current && document.body.contains(previousActiveElementRef.current)) {
-      previousActiveElementRef.current.focus();
-    }
-  }, []);
+  }, [isSubmitting]);
 
   const closeProjectModal = useCallback(() => {
+    if (isSubmitting) return;
+    lastClosedModalRef.current = "project";
     setProjectToDelete(null);
-    if (previousActiveElementRef.current && document.body.contains(previousActiveElementRef.current)) {
-      previousActiveElementRef.current.focus();
+  }, [isSubmitting]);
+
+  // Restore focus AFTER modal closes and background is no longer inert
+  useEffect(() => {
+    if (modalOpenRef.current && !isModalOpen) {
+      const target = previousActiveElementRef.current;
+      if (target && target.isConnected && document.body.contains(target)) {
+        target.focus();
+      } else if (lastClosedModalRef.current === "category" && addCategoryBtnRef.current) {
+        addCategoryBtnRef.current.focus();
+      } else if (lastClosedModalRef.current === "project" && addProjectBtnRef.current) {
+        addProjectBtnRef.current.focus();
+      }
+      lastClosedModalRef.current = null;
     }
-  }, []);
+    modalOpenRef.current = isModalOpen;
+  }, [isModalOpen]);
 
   // Close modal on mutation success, preserve on error
   useEffect(() => {
     if (actionData?.success) {
       if (actionData.deletedCategoryId && categoryToDelete?.id === actionData.deletedCategoryId) {
+        lastClosedModalRef.current = "category";
         setCategoryToDelete(null);
         setTargetReassignCategory("");
-        if (previousActiveElementRef.current && document.body.contains(previousActiveElementRef.current)) {
-          previousActiveElementRef.current.focus();
-        } else if (addCategoryBtnRef.current) {
-          addCategoryBtnRef.current.focus();
-        }
       }
       if (actionData.deletedProjectId && projectToDelete?.id === actionData.deletedProjectId) {
+        lastClosedModalRef.current = "project";
         setProjectToDelete(null);
-        if (previousActiveElementRef.current && document.body.contains(previousActiveElementRef.current)) {
-          previousActiveElementRef.current.focus();
-        } else if (addProjectBtnRef.current) {
-          addProjectBtnRef.current.focus();
-        }
       }
     }
   }, [actionData, categoryToDelete, projectToDelete]);
@@ -644,12 +674,20 @@ export default function AdminPortfolioPage() {
     if (!categoryToDelete && !projectToDelete) return;
 
     const modalEl = categoryToDelete ? categoryModalRef.current : projectModalRef.current;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
     if (modalEl) {
-      setTimeout(() => {
-        const focusable = modalEl.querySelectorAll<HTMLElement>(
-          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-        );
-        if (focusable.length > 0) {
+      timer = setTimeout(() => {
+        const focusable = getModalFocusableElements(modalEl);
+        // Prioritize interactive form inputs (e.g. destination select) or cancel button
+        const preferred =
+          modalEl.querySelector<HTMLElement>("select:not([disabled])") ||
+          modalEl.querySelector<HTMLElement>("button[type='button']:not([disabled])") ||
+          (focusable.length > 0 ? focusable[0] : null);
+
+        if (preferred && isElementFocusable(preferred)) {
+          preferred.focus();
+        } else if (focusable.length > 0) {
           focusable[0].focus();
         } else {
           modalEl.focus();
@@ -671,14 +709,27 @@ export default function AdminPortfolioPage() {
       if (e.key === "Tab") {
         const currentModal = categoryToDelete ? categoryModalRef.current : projectModalRef.current;
         if (!currentModal) return;
-        const focusable = currentModal.querySelectorAll<HTMLElement>(
-          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-        );
-        if (focusable.length === 0) return;
+        const focusable = getModalFocusableElements(currentModal);
+        if (focusable.length === 0) {
+          e.preventDefault();
+          currentModal.focus();
+          return;
+        }
         const first = focusable[0];
         const last = focusable[focusable.length - 1];
 
-        if (e.shiftKey && document.activeElement === first) {
+        // Bring focus inside if event originated outside
+        if (!currentModal.contains(document.activeElement)) {
+          e.preventDefault();
+          if (e.shiftKey) {
+            last.focus();
+          } else {
+            first.focus();
+          }
+          return;
+        }
+
+        if (e.shiftKey && (document.activeElement === first || document.activeElement === currentModal)) {
           e.preventDefault();
           last.focus();
         } else if (!e.shiftKey && document.activeElement === last) {
@@ -689,7 +740,10 @@ export default function AdminPortfolioPage() {
     };
 
     window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    return () => {
+      if (timer) clearTimeout(timer);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
   }, [categoryToDelete, projectToDelete, closeCategoryModal, closeProjectModal]);
 
   const filteredProjects = content.projects
@@ -711,8 +765,13 @@ export default function AdminPortfolioPage() {
     : [];
 
   return (
-    <div className={styles.container}>
-      <Link to="/admin/dashboard" className={styles.backLink}>
+    <>
+      <div
+        ref={mainContentRef}
+        className={styles.container}
+        inert={isModalOpen ? true : undefined}
+      >
+        <Link to="/admin/dashboard" className={styles.backLink}>
         ← Retour au Dashboard
       </Link>
 
@@ -1048,6 +1107,7 @@ export default function AdminPortfolioPage() {
                           className={`${styles.actionBtn} ${styles.actionBtnDanger}`}
                           onClick={(e) => {
                             previousActiveElementRef.current = e.currentTarget;
+                            lastClosedModalRef.current = "category";
                             setCategoryToDelete(cat);
                             const others = categories.filter((c) => c.id !== cat.id);
                             if (others.length > 0) {
@@ -1300,6 +1360,7 @@ export default function AdminPortfolioPage() {
                         className={`${styles.actionBtn} ${styles.actionBtnDanger}`}
                         onClick={(e) => {
                           previousActiveElementRef.current = e.currentTarget;
+                          lastClosedModalRef.current = "project";
                           setProjectToDelete(p);
                         }}
                       >
@@ -1313,6 +1374,7 @@ export default function AdminPortfolioPage() {
           </tbody>
         </table>
       )}
+      </div>
 
       {/* Delete Project Modal */}
       {projectToDelete && (
@@ -1502,6 +1564,6 @@ export default function AdminPortfolioPage() {
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 }

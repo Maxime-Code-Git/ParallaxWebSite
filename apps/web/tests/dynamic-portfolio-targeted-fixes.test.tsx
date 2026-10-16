@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
 import React from "react";
-import { render, screen, fireEvent, within } from "@testing-library/react";
+import { render, screen, fireEvent, within, act } from "@testing-library/react";
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
 
 // Mock react-router for component rendering tests
@@ -129,6 +129,7 @@ describe("Dynamic Portfolio Categories — Targeted Fixes Verification", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     process.env = originalEnv;
     try {
       fs.rmSync(tempDir, { recursive: true, force: true });
@@ -505,6 +506,161 @@ describe("Dynamic Portfolio Categories — Targeted Fixes Verification", () => {
   // 4. Migration: strictly rejects malformed source and preserves bytes
   // ==========================================================================
   describe("4. Migration safety", () => {
+    function makeBaseV1Fixture() {
+      return {
+        schemaVersion: 1,
+        revision: "rev-v1-rich-12345",
+        updatedAt: "2026-10-16T12:00:00.000Z",
+        overview: {
+          title: { fr: "Portfolio Réalisations", en: "Portfolio Work" },
+          intro: { fr: "Introduction globale FR", en: "Global introduction EN" },
+          seo: {
+            title: { fr: "SEO Global FR", en: "SEO Global EN" },
+            description: { fr: "SEO Desc FR", en: "SEO Desc EN" },
+          },
+          seeMoreButton: { fr: "Voir plus", en: "See more" },
+        },
+        sections: {
+          documentary: {
+            title: { fr: "Documentaire", en: "Documentary" },
+            intro: { fr: "Films du réel", en: "Real films" },
+            seo: {
+              title: { fr: "Docu SEO", en: "Docu SEO" },
+              description: { fr: "Docu SEO Desc", en: "Docu SEO Desc" },
+            },
+            coverImageId: "11111111-1111-4111-8111-111111111111",
+            coverAlt: { fr: "Cover alt", en: "Cover alt" },
+            showreelTitle: { fr: "Showreel Doc", en: "Showreel Doc" },
+            morePhotosButton: { fr: "Plus de photos", en: "More photos" },
+            lessPhotosButton: { fr: "Moins de photos", en: "Less photos" },
+            backButton: { fr: "Retour", en: "Back" },
+          },
+          advertising: {
+            title: { fr: "Publicité", en: "Advertising" },
+            intro: { fr: "Films de marque", en: "Brand films" },
+            seo: {
+              title: { fr: "Pub SEO", en: "Pub SEO" },
+              description: { fr: "Pub SEO Desc", en: "Pub SEO Desc" },
+            },
+            coverImageId: null,
+            coverAlt: { fr: "Cover pub", en: "Cover pub" },
+            backButton: { fr: "Retour", en: "Back" },
+          },
+        },
+        projects: [],
+        media: {
+          "11111111-1111-4111-8111-111111111111": {
+            imageId: "11111111-1111-4111-8111-111111111111",
+            ownerType: "section" as const,
+            ownerId: "documentary",
+            mediaSlot: "cover" as const,
+            originalFormat: "webp",
+            originalWidth: 1200,
+            originalHeight: 800,
+            variants: [{ name: "640p", width: 640, height: 427, webpSize: 1000, avifSize: 800 }],
+            createdAt: 1000,
+          },
+        },
+      };
+    }
+
+    it("migrates valid rich V1 fixture without modifying existing texts and media", () => {
+      const v1 = makeBaseV1Fixture();
+      fs.writeFileSync(testPortfolioContentPath, JSON.stringify(v1, null, 2), "utf-8");
+
+      const { content: migrated } = getRawPortfolioContent(testPortfolioContentPath);
+      expect(migrated.schemaVersion).toBe(2);
+      expect(migrated.categories.length).toBe(2);
+      expect(migrated.categories[0].title.fr).toBe("Documentaire");
+      expect(migrated.categories[0].coverImageId).toBe("11111111-1111-4111-8111-111111111111");
+      expect(migrated.categories[0].backButton.fr).toBe("Retour");
+      expect(migrated.categories[1].title.fr).toBe("Publicité");
+      expect(migrated.media["11111111-1111-4111-8111-111111111111"]).toBeDefined();
+    });
+
+    it("rejects corrupted V1 fields (title: 0, intro: false, seo: \"\", backButton: null) without altering disk bytes or rotating backups", () => {
+      const corruptions: Array<{ name: string; mutate: (fixture: ReturnType<typeof makeBaseV1Fixture>) => void }> = [
+        {
+          name: "title=0",
+          mutate: (f) => {
+            (f.sections.documentary as Record<string, unknown>).title = 0;
+          },
+        },
+        {
+          name: "intro=false",
+          mutate: (f) => {
+            (f.sections.documentary as Record<string, unknown>).intro = false;
+          },
+        },
+        {
+          name: "seo=\"\"",
+          mutate: (f) => {
+            (f.sections.documentary as Record<string, unknown>).seo = "";
+          },
+        },
+        {
+          name: "backButton=null",
+          mutate: (f) => {
+            (f.sections.documentary as Record<string, unknown>).backButton = null;
+          },
+        },
+      ];
+
+      for (const { name, mutate } of corruptions) {
+        const fixture = makeBaseV1Fixture();
+        mutate(fixture);
+        fs.writeFileSync(testPortfolioContentPath, JSON.stringify(fixture, null, 2), "utf-8");
+        const initialBytes = fs.readFileSync(testPortfolioContentPath);
+        const initialBackups = getBackups(testPortfolioContentPath);
+
+        expect(() => getRawPortfolioContent(testPortfolioContentPath), `corruption ${name} should throw`).toThrow(
+          ValidationError
+        );
+        expect(fs.readFileSync(testPortfolioContentPath)).toEqual(initialBytes);
+        expect(getBackups(testPortfolioContentPath).length).toBe(initialBackups.length);
+      }
+    });
+
+    it("rejects non-object section entry (e.g. sections.documentary = null) without modifying file", () => {
+      const fixture = makeBaseV1Fixture();
+      (fixture.sections as Record<string, unknown>).documentary = null;
+      fs.writeFileSync(testPortfolioContentPath, JSON.stringify(fixture, null, 2), "utf-8");
+      const initialBytes = fs.readFileSync(testPortfolioContentPath);
+      const initialBackups = getBackups(testPortfolioContentPath);
+
+      expect(() => getRawPortfolioContent(testPortfolioContentPath)).toThrow(ValidationError);
+      expect(fs.readFileSync(testPortfolioContentPath)).toEqual(initialBytes);
+      expect(getBackups(testPortfolioContentPath).length).toBe(initialBackups.length);
+    });
+
+    it("rejects incomplete bilingual structures (missing en) without modifying file", () => {
+      const fixture = makeBaseV1Fixture();
+      (fixture.sections.documentary as Record<string, unknown>).title = { fr: "Seulement FR" };
+      fs.writeFileSync(testPortfolioContentPath, JSON.stringify(fixture, null, 2), "utf-8");
+      const initialBytes = fs.readFileSync(testPortfolioContentPath);
+
+      expect(() => getRawPortfolioContent(testPortfolioContentPath)).toThrow(ValidationError);
+      expect(fs.readFileSync(testPortfolioContentPath)).toEqual(initialBytes);
+    });
+
+    it("migrates cleanly when V2-only fields are absent from V1 sections", () => {
+      const fixture = makeBaseV1Fixture();
+      delete (fixture.sections.documentary as Record<string, unknown>).entryImageId;
+      delete (fixture.sections.documentary as Record<string, unknown>).bannerImageId;
+      delete (fixture.sections.documentary as Record<string, unknown>).slugAliases;
+      delete (fixture.sections.documentary as Record<string, unknown>).order;
+      delete (fixture.sections.documentary as Record<string, unknown>).status;
+      delete (fixture.sections.documentary as Record<string, unknown>).entrySummary;
+
+      fs.writeFileSync(testPortfolioContentPath, JSON.stringify(fixture, null, 2), "utf-8");
+      const { content: migrated } = getRawPortfolioContent(testPortfolioContentPath);
+
+      expect(migrated.categories[0].entryImageId).toBeNull();
+      expect(migrated.categories[0].slugAliases?.fr).toEqual([]);
+      expect(migrated.categories[0].status).toBe("published");
+      expect(migrated.categories[0].entrySummary?.fr).toBe(fixture.sections.documentary.intro.fr);
+    });
+
     it("rejects malformed V1 source (e.g. non-array projects) without rewriting the file or rotating backups", () => {
       const v1Fixture = {
         schemaVersion: 1,
@@ -520,10 +676,12 @@ describe("Dynamic Portfolio Categories — Targeted Fixes Verification", () => {
           documentary: {
             title: { fr: "Doc", en: "Doc" },
             intro: { fr: "Intro", en: "Intro" },
+            seo: { title: { fr: "Doc SEO", en: "Doc SEO" }, description: { fr: "Doc Desc", en: "Doc Desc" } },
           },
           advertising: {
             title: { fr: "Pub", en: "Ad" },
             intro: { fr: "Intro", en: "Intro" },
+            seo: { title: { fr: "Pub SEO", en: "Pub SEO" }, description: { fr: "Pub Desc", en: "Pub Desc" } },
           },
         },
         projects: { invalid: "object instead of array" }, // CORRUPTED PROJECTS SHAPE!
@@ -569,34 +727,158 @@ describe("Dynamic Portfolio Categories — Targeted Fixes Verification", () => {
   // 5. Accessible modal lifecycle & closing on mutation success
   // ==========================================================================
   describe("5. Delete modal accessible lifecycle", () => {
-    it("closes modal on successful deletion, closes on Escape, and preserves modal on error", async () => {
+    it("manages initial focus on destination select, excludes hidden inputs, applies inert to background, loops Tab and Shift+Tab, and restores focus after inert removal", async () => {
+      vi.useFakeTimers();
       const { content } = getRawPortfolioContent(testPortfolioContentPath);
 
-      // Initial render with no actionData
+      // Ensure documentary category has at least 1 project, so reassignment modal is triggered
+      vi.mocked(useLoaderData).mockReturnValue({ content, csrfToken: "csrf-token-123" });
+      vi.mocked(useActionData).mockReturnValue(undefined);
+
+      const { container } = render(<AdminPortfolioPage />);
+
+      // Find main container and verify it is not inert initially
+      const mainContainer = container.querySelector('div[class*="_container_"]') as HTMLElement;
+      expect(mainContainer).toBeInTheDocument();
+      expect(mainContainer.hasAttribute("inert")).toBe(false);
+
+      // Find delete button for documentary category (which has projects)
+      const deleteButtons = screen.getAllByRole("button", { name: /Supprimer/i });
+      const firstCatDeleteBtn = deleteButtons[0];
+      firstCatDeleteBtn.focus();
+      expect(document.activeElement).toBe(firstCatDeleteBtn);
+
+      // Open modal
+      fireEvent.click(firstCatDeleteBtn);
+
+      // Main container MUST now be inert!
+      expect(mainContainer.hasAttribute("inert")).toBe(true);
+
+      // Modal dialog itself MUST NOT be inert!
+      const dialog = screen.getByRole("dialog");
+      expect(dialog).toBeInTheDocument();
+      expect(dialog.closest("[inert]")).toBeNull();
+
+      // Advance timers by 50ms for initial focus
+      act(() => {
+        vi.advanceTimersByTime(50);
+      });
+
+      // Preferred control in reassignment modal is the destination select!
+      const select = screen.getByLabelText(/Déplacer les/i);
+      expect(document.activeElement).toBe(select);
+
+      // Hidden inputs MUST NOT be focused
+      const hiddenInputs = dialog.querySelectorAll('input[type="hidden"]');
+      for (const hiddenInput of hiddenInputs) {
+        expect(document.activeElement).not.toBe(hiddenInput);
+      }
+
+      // Test Shift+Tab from select (first focusable control): loops to submit button!
+      const submitBtn = screen.getByRole("button", { name: /Déplacer les projets et supprimer/i });
+      const shiftTabEvent = new KeyboardEvent("keydown", {
+        key: "Tab",
+        shiftKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      window.dispatchEvent(shiftTabEvent);
+      expect(shiftTabEvent.defaultPrevented).toBe(true);
+      expect(document.activeElement).toBe(submitBtn);
+
+      // Test Tab from submit button (last focusable control): loops back to select!
+      const tabEvent = new KeyboardEvent("keydown", {
+        key: "Tab",
+        shiftKey: false,
+        bubbles: true,
+        cancelable: true,
+      });
+      window.dispatchEvent(tabEvent);
+      expect(tabEvent.defaultPrevented).toBe(true);
+      expect(document.activeElement).toBe(select);
+
+      // Test event originating outside dialog: brings focus into dialog
+      if (document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
+      }
+      const outsideTabEvent = new KeyboardEvent("keydown", {
+        key: "Tab",
+        shiftKey: false,
+        bubbles: true,
+        cancelable: true,
+      });
+      window.dispatchEvent(outsideTabEvent);
+      expect(outsideTabEvent.defaultPrevented).toBe(true);
+      expect(document.activeElement).toBe(select);
+
+      // Escape key closes modal
+      fireEvent.keyDown(window, { key: "Escape" });
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+      // Main container is no longer inert!
+      expect(mainContainer.hasAttribute("inert")).toBe(false);
+
+      // Focus restored to the trigger button!
+      expect(document.activeElement).toBe(firstCatDeleteBtn);
+
+      vi.useRealTimers();
+    });
+
+    it("cancels pending focus timer if modal is closed before 50ms", () => {
+      vi.useFakeTimers();
+      const { content } = getRawPortfolioContent(testPortfolioContentPath);
+
+      vi.mocked(useLoaderData).mockReturnValue({ content, csrfToken: "csrf-token-123" });
+      vi.mocked(useActionData).mockReturnValue(undefined);
+
+      render(<AdminPortfolioPage />);
+
+      const deleteButtons = screen.getAllByRole("button", { name: /Supprimer/i });
+      const firstCatDeleteBtn = deleteButtons[0];
+      firstCatDeleteBtn.focus();
+
+      // Open modal
+      fireEvent.click(firstCatDeleteBtn);
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+      // Advance only 20ms (< 50ms)
+      act(() => {
+        vi.advanceTimersByTime(20);
+      });
+
+      // Press Escape to close modal
+      fireEvent.keyDown(window, { key: "Escape" });
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+      // Advance timers by remaining 100ms
+      act(() => {
+        vi.advanceTimersByTime(100);
+      });
+
+      // Focus remains on the restored trigger and is NOT stolen by any stale callback
+      expect(document.activeElement).toBe(firstCatDeleteBtn);
+
+      vi.useRealTimers();
+    });
+
+    it("preserves modal and selection on 409/422 error, closes on success", async () => {
+      const { content } = getRawPortfolioContent(testPortfolioContentPath);
+
       vi.mocked(useLoaderData).mockReturnValue({ content, csrfToken: "csrf-token-123" });
       vi.mocked(useActionData).mockReturnValue(undefined);
 
       const { rerender } = render(<AdminPortfolioPage />);
 
-      // Find the first delete button for category
       const deleteButtons = screen.getAllByRole("button", { name: /Supprimer/i });
-      const firstCatDeleteBtn = deleteButtons[0];
-
-      // Click Supprimer -> modal opens
-      fireEvent.click(firstCatDeleteBtn);
+      fireEvent.click(deleteButtons[0]);
 
       const dialog = screen.getByRole("dialog");
       expect(dialog).toBeInTheDocument();
-      expect(dialog).toHaveAttribute("aria-modal", "true");
-      expect(dialog).toHaveAttribute("aria-labelledby", "category-delete-title");
 
-      // Press Escape -> modal closes
-      fireEvent.keyDown(window, { key: "Escape" });
-      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-
-      // Open again
-      fireEvent.click(firstCatDeleteBtn);
-      expect(screen.getByRole("dialog")).toBeInTheDocument();
+      // Select another category
+      const select = screen.getByLabelText(/Déplacer les/i) as HTMLSelectElement;
+      fireEvent.change(select, { target: { value: content.categories[1].id } });
+      expect(select.value).toBe(content.categories[1].id);
 
       // Re-render with actionData error (e.g. 409 conflict)
       vi.mocked(useActionData).mockReturnValue({
@@ -608,6 +890,8 @@ describe("Dynamic Portfolio Categories — Targeted Fixes Verification", () => {
       const openDialog = screen.getByRole("dialog");
       expect(openDialog).toBeInTheDocument();
       expect(within(openDialog).getByRole("alert")).toHaveTextContent("Conflit de révision 409");
+      // Selection MUST be preserved!
+      expect((screen.getByLabelText(/Déplacer les/i) as HTMLSelectElement).value).toBe(content.categories[1].id);
 
       // Re-render with actionData success for this category
       const deletingCat = content.categories[0];
@@ -619,6 +903,42 @@ describe("Dynamic Portfolio Categories — Targeted Fixes Verification", () => {
 
       // Modal MUST close!
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+
+    it("restores focus to + Ajouter une rubrique when deleted category trigger is unmounted upon revalidation", () => {
+      const { content } = getRawPortfolioContent(testPortfolioContentPath);
+
+      vi.mocked(useLoaderData).mockReturnValue({ content, csrfToken: "csrf-token-123" });
+      vi.mocked(useActionData).mockReturnValue(undefined);
+
+      const { rerender } = render(<AdminPortfolioPage />);
+
+      const deleteButtons = screen.getAllByRole("button", { name: /Supprimer/i });
+      const deletingCat = content.categories[0];
+      fireEvent.click(deleteButtons[0]);
+
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+      // Revalidation: content now has category 0 removed
+      const updatedContent: PortfolioContent = {
+        ...content,
+        categories: content.categories.filter((c) => c.id !== deletingCat.id),
+      };
+
+      vi.mocked(useLoaderData).mockReturnValue({ content: updatedContent, csrfToken: "csrf-token-123" });
+      vi.mocked(useActionData).mockReturnValue({
+        success: "Rubrique supprimée définitivement.",
+        deletedCategoryId: deletingCat.id,
+      });
+
+      rerender(<AdminPortfolioPage />);
+
+      // Modal closes
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+      // Focus is restored to the persistent add category button
+      const addCategoryBtn = screen.getByRole("button", { name: /\+ Ajouter une rubrique/i });
+      expect(document.activeElement).toBe(addCategoryBtn);
     });
   });
 

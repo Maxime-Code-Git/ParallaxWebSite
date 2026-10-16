@@ -1091,12 +1091,157 @@ export function migratePortfolioContentV1ToV2(raw: unknown): PortfolioContent {
     throw new Error("sections doit être un objet valide");
   }
 
-  if (!Array.isArray(obj.projects)) {
-    throw new Error("projects doit être un tableau");
+  function validateV1LocalizedString(val: unknown, path: string): void {
+    if (!isObject(val)) {
+      throw new Error(`${path} doit être un objet localisé { fr, en }`);
+    }
+    const o = val as Record<string, unknown>;
+    if (typeof o.fr !== "string" || o.fr.length > 2000) {
+      throw new Error(`${path}.fr doit être une chaîne valide`);
+    }
+    if (typeof o.en !== "string" || o.en.length > 2000) {
+      throw new Error(`${path}.en doit être une chaîne valide`);
+    }
   }
 
-  if (obj.media !== undefined && (!isObject(obj.media) || Array.isArray(obj.media))) {
-    throw new Error("media doit être un objet valide");
+  function validateV1Section(secKey: string, secRaw: unknown): void {
+    if (!isObject(secRaw)) {
+      throw new Error(`sections.${secKey} doit être un objet`);
+    }
+    const sec = secRaw as Record<string, unknown>;
+
+    // Mandatory V1 fields: title, intro, seo
+    if (sec.title === undefined) {
+      throw new Error(`sections.${secKey}.title est requis`);
+    }
+    validateV1LocalizedString(sec.title, `sections.${secKey}.title`);
+
+    if (sec.intro === undefined) {
+      throw new Error(`sections.${secKey}.intro est requis`);
+    }
+    validateV1LocalizedString(sec.intro, `sections.${secKey}.intro`);
+
+    if (sec.seo === undefined || !isObject(sec.seo)) {
+      throw new Error(`sections.${secKey}.seo doit être un objet { title, description }`);
+    }
+    const seo = sec.seo as Record<string, unknown>;
+    if (seo.title === undefined) {
+      throw new Error(`sections.${secKey}.seo.title est requis`);
+    }
+    validateV1LocalizedString(seo.title, `sections.${secKey}.seo.title`);
+    if (seo.description === undefined) {
+      throw new Error(`sections.${secKey}.seo.description est requis`);
+    }
+    validateV1LocalizedString(seo.description, `sections.${secKey}.seo.description`);
+
+    // Optional fields in V1: if present, validate strictly (never silently substitute)
+    if (sec.coverImageId !== undefined && sec.coverImageId !== null) {
+      if (typeof sec.coverImageId !== "string" || !UUID_REGEX.test(sec.coverImageId)) {
+        throw new Error(`sections.${secKey}.coverImageId doit être un UUID valide ou null`);
+      }
+    }
+
+    if (sec.coverAlt !== undefined && sec.coverAlt !== null) {
+      validateV1LocalizedString(sec.coverAlt, `sections.${secKey}.coverAlt`);
+    }
+
+    if (sec.entryImageId !== undefined && sec.entryImageId !== null) {
+      if (typeof sec.entryImageId !== "string" || !UUID_REGEX.test(sec.entryImageId)) {
+        throw new Error(`sections.${secKey}.entryImageId doit être un UUID valide ou null`);
+      }
+    }
+
+    if (sec.entryAlt !== undefined && sec.entryAlt !== null) {
+      validateV1LocalizedString(sec.entryAlt, `sections.${secKey}.entryAlt`);
+    }
+
+    if (sec.entrySummary !== undefined && sec.entrySummary !== null) {
+      validateV1LocalizedString(sec.entrySummary, `sections.${secKey}.entrySummary`);
+    }
+
+    if (sec.entrySide !== undefined && sec.entrySide !== null) {
+      if (sec.entrySide !== "left" && sec.entrySide !== "right" && sec.entrySide !== "auto") {
+        throw new Error(`sections.${secKey}.entrySide doit valoir 'left', 'right' ou 'auto'`);
+      }
+    }
+
+    if (sec.bannerImageId !== undefined && sec.bannerImageId !== null) {
+      if (typeof sec.bannerImageId !== "string" || !UUID_REGEX.test(sec.bannerImageId)) {
+        throw new Error(`sections.${secKey}.bannerImageId doit être un UUID valide ou null`);
+      }
+    }
+
+    if (sec.bannerAlt !== undefined && sec.bannerAlt !== null) {
+      validateV1LocalizedString(sec.bannerAlt, `sections.${secKey}.bannerAlt`);
+    }
+
+    if (sec.showreelTitle !== undefined && sec.showreelTitle !== null) {
+      validateV1LocalizedString(sec.showreelTitle, `sections.${secKey}.showreelTitle`);
+    }
+
+    if (sec.showreelVideo !== undefined && sec.showreelVideo !== null) {
+      if (!isObject(sec.showreelVideo)) {
+        throw new Error(`sections.${secKey}.showreelVideo doit être un objet vidéo ou null`);
+      }
+    }
+
+    if (sec.showreelCoverImageId !== undefined && sec.showreelCoverImageId !== null) {
+      if (typeof sec.showreelCoverImageId !== "string" || !UUID_REGEX.test(sec.showreelCoverImageId)) {
+        throw new Error(`sections.${secKey}.showreelCoverImageId doit être un UUID valide ou null`);
+      }
+    }
+
+    if (sec.morePhotosButton !== undefined && sec.morePhotosButton !== null) {
+      validateV1LocalizedString(sec.morePhotosButton, `sections.${secKey}.morePhotosButton`);
+    }
+
+    if (sec.lessPhotosButton !== undefined && sec.lessPhotosButton !== null) {
+      validateV1LocalizedString(sec.lessPhotosButton, `sections.${secKey}.lessPhotosButton`);
+    }
+
+    // backButton in V1 must be a valid LocalizedString if present; cannot be null or non-object
+    if (sec.backButton !== undefined) {
+      validateV1LocalizedString(sec.backButton, `sections.${secKey}.backButton`);
+    }
+
+    if (sec.status !== undefined && sec.status !== null) {
+      if (sec.status !== "draft" && sec.status !== "published") {
+        throw new Error(`sections.${secKey}.status doit valoir 'draft' ou 'published'`);
+      }
+    }
+
+    if (sec.order !== undefined && sec.order !== null) {
+      if (typeof sec.order !== "number" || sec.order < 0) {
+        throw new Error(`sections.${secKey}.order doit être un entier positif`);
+      }
+    }
+
+    if (sec.slugFr !== undefined && sec.slugFr !== null) {
+      if (typeof sec.slugFr !== "string" || !SLUG_REGEX.test(sec.slugFr)) {
+        throw new Error(`sections.${secKey}.slugFr a un format invalide`);
+      }
+    }
+
+    if (sec.slugEn !== undefined && sec.slugEn !== null) {
+      if (typeof sec.slugEn !== "string" || !SLUG_REGEX.test(sec.slugEn)) {
+        throw new Error(`sections.${secKey}.slugEn a un format invalide`);
+      }
+    }
+
+    if (sec.slugAliases !== undefined && sec.slugAliases !== null) {
+      if (!isObject(sec.slugAliases)) {
+        throw new Error(`sections.${secKey}.slugAliases doit être un objet { fr, en }`);
+      }
+      const aliases = sec.slugAliases as Record<string, unknown>;
+      if (!Array.isArray(aliases.fr) || !Array.isArray(aliases.en)) {
+        throw new Error(`sections.${secKey}.slugAliases doit contenir des tableaux fr et en`);
+      }
+    }
+  }
+
+  const oldSectionsRaw = obj.sections as Record<string, unknown>;
+  for (const [secKey, secVal] of Object.entries(oldSectionsRaw)) {
+    validateV1Section(secKey, secVal);
   }
 
   // Schema V1 migration
@@ -1110,19 +1255,14 @@ export function migratePortfolioContentV1ToV2(raw: unknown): PortfolioContent {
       id: "documentary",
       slugFr: doc.slugFr || "documentaire",
       slugEn: doc.slugEn || "documentary",
+      slugAliases: doc.slugAliases || { fr: [], en: [] },
       order: typeof doc.order === "number" ? doc.order : 0,
       status: doc.status || "published",
-      title: doc.title || { fr: "Documentaire", en: "Documentary" },
-      intro: doc.intro || {
-        fr: "Des films qui racontent le réel — portraits de métiers, de lieux et de savoir-faire, du repérage au montage.",
-        en: "Films that tell real stories — portraits of trades, places and craft, from scouting to the edit.",
-      },
+      title: doc.title as LocalizedString,
+      intro: doc.intro as LocalizedString,
       entrySummary: doc.entrySummary || doc.intro,
       entrySide: doc.entrySide || "left",
-      seo: doc.seo || {
-        title: { fr: "Documentaire — Parallax | Films documentaires", en: "Documentary — Parallax | Documentary films" },
-        description: { fr: "Portraits de métiers, de lieux et de savoir-faire, du repérage au montage.", en: "Portraits of trades, places and craft, from scouting to the edit." },
-      },
+      seo: doc.seo as PortfolioCategoryItem["seo"],
       coverImageId: doc.coverImageId ?? null,
       coverAlt: doc.coverAlt || { fr: "Bannière documentaire", en: "Documentary banner" },
       entryImageId: doc.entryImageId ?? null,
@@ -1145,19 +1285,14 @@ export function migratePortfolioContentV1ToV2(raw: unknown): PortfolioContent {
       id: "advertising",
       slugFr: ad.slugFr || "publicite",
       slugEn: ad.slugEn || "advertising",
+      slugAliases: ad.slugAliases || { fr: [], en: [] },
       order: typeof ad.order === "number" ? ad.order : categories.length,
       status: ad.status || "published",
-      title: ad.title || { fr: "Publicité", en: "Advertising" },
-      intro: ad.intro || {
-        fr: "Des films de marque et de produit — studio, extérieur, rythme et lumière au service du message.",
-        en: "Brand and product films — studio, outdoor, rhythm and light serving the message.",
-      },
+      title: ad.title as LocalizedString,
+      intro: ad.intro as LocalizedString,
       entrySummary: ad.entrySummary || ad.intro,
       entrySide: ad.entrySide || "right",
-      seo: ad.seo || {
-        title: { fr: "Publicité — Parallax | Films de marque et produit", en: "Advertising — Parallax | Brand and product films" },
-        description: { fr: "Films de marque et de produit — studio, extérieur, rythme et lumière au service du message.", en: "Brand and product films — studio, outdoor, rhythm and light serving the message." },
-      },
+      seo: ad.seo as PortfolioCategoryItem["seo"],
       coverImageId: ad.coverImageId ?? null,
       coverAlt: ad.coverAlt || { fr: "Bannière publicité", en: "Advertising banner" },
       entryImageId: ad.entryImageId ?? null,
@@ -1181,13 +1316,14 @@ export function migratePortfolioContentV1ToV2(raw: unknown): PortfolioContent {
         id: sec.id || key,
         slugFr: sec.slugFr || slugify(sec.title?.fr || key),
         slugEn: sec.slugEn || slugify(sec.title?.en || key),
+        slugAliases: sec.slugAliases || { fr: [], en: [] },
         order: typeof sec.order === "number" ? sec.order : categories.length,
         status: sec.status || "published",
-        title: sec.title || { fr: key, en: key },
-        intro: sec.intro || { fr: "", en: "" },
+        title: sec.title as LocalizedString,
+        intro: sec.intro as LocalizedString,
         entrySummary: sec.entrySummary,
         entrySide: sec.entrySide || "auto",
-        seo: sec.seo || { title: sec.title || { fr: key, en: key }, description: sec.intro || { fr: "", en: "" } },
+        seo: sec.seo as PortfolioCategoryItem["seo"],
         coverImageId: sec.coverImageId ?? null,
         coverAlt: sec.coverAlt,
         entryImageId: sec.entryImageId ?? null,
