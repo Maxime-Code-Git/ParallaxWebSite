@@ -216,8 +216,18 @@ export async function action({ request, params }: ActionFunctionArgs) {
   proj.video = videoObj;
   proj.draftVideoCoverImageId = videoCoverImageId;
   const presentationMode = (String(formData.get("presentationMode") || "photo") as "photo" | "video");
-  const rawAspectRatio = String(formData.get("aspectRatio") || "3:2");
-  const aspectRatio = (["3:2", "4:5", "16:9", "1:1"].includes(rawAspectRatio) ? rawAspectRatio : "3:2") as "3:2" | "4:5" | "16:9" | "1:1";
+  const ALLOWED_ASPECT_RATIOS = ["3:2", "4:5", "16:9", "1:1"] as const;
+  type AllowedAspectRatio = (typeof ALLOWED_ASPECT_RATIOS)[number];
+
+  const submittedAspectRatio = formData.get("aspectRatio");
+  let aspectRatio: AllowedAspectRatio;
+  if (submittedAspectRatio && ALLOWED_ASPECT_RATIOS.includes(submittedAspectRatio as AllowedAspectRatio)) {
+    aspectRatio = submittedAspectRatio as AllowedAspectRatio;
+  } else {
+    aspectRatio = (proj.aspectRatio && ALLOWED_ASPECT_RATIOS.includes(proj.aspectRatio as AllowedAspectRatio))
+      ? (proj.aspectRatio as AllowedAspectRatio)
+      : "3:2";
+  }
 
   // Pre-validate publication constraints before mutating
   if (status === "published") {
@@ -1063,7 +1073,7 @@ export default function AdminPortfolioEditPage() {
                 </div>
               </div>
 
-              {presentationMode === "photo" && (
+              {presentationMode === "photo" ? (
                 <div className={styles.formGroup}>
                   <label className={styles.label} htmlFor="aspectRatio">
                     Format d'image (mode Photo)
@@ -1081,6 +1091,8 @@ export default function AdminPortfolioEditPage() {
                     <option value="16:9">Panoramique 16:9</option>
                   </select>
                 </div>
+              ) : (
+                <input type="hidden" name="aspectRatio" value={aspectRatio} />
               )}
 
               <div className={styles.formGroup}>

@@ -49,6 +49,7 @@ import {
 } from "../app/lib/portfolio-content.server";
 import { action as adminPortfolioUploadAction } from "../app/routes/api/admin-portfolio-upload";
 import { action as adminPortfolioSectionAction } from "../app/routes/admin/portfolio-section";
+import { action as adminPortfolioEditAction } from "../app/routes/admin/portfolio-edit";
 import { loader as portfolioVariantLoader } from "../app/routes/media/portfolio-variant";
 import { ScrollToTop } from "../app/components/public/ScrollToTop";
 import PortfolioPage from "../app/routes/public/portfolio";
@@ -525,6 +526,119 @@ describe("UX, Admin, and Portfolio Presentation Refinements", () => {
       // No in-category tabs present
       expect(screen.queryByText("Documentaire", { selector: ".filterTab" })).not.toBeInTheDocument();
     });
+
+    it("renders project detail sheet for video, photo with secondary video, and legacy video without duplicating or early iframes", () => {
+      // Config A: Legacy video project (video.url present, presentationMode undefined)
+      const legacyVideoProject = {
+        ...mockPortfolioContent.projects[1],
+        presentationMode: undefined,
+      };
+      expect(resolveProjectPresentationMode(legacyVideoProject)).toBe("video");
+
+      const loaderDataLegacy = {
+        lang: "fr" as const,
+        common: mockCommonContent,
+        content: mockPortfolioContent,
+        showcaseProjects: [],
+        panelState: {
+          isOpen: true,
+          activeCategory: "documentary" as const,
+          activeProject: legacyVideoProject,
+          direction: "right" as const,
+        },
+      };
+
+      vi.mocked(useLoaderData).mockReturnValue(loaderDataLegacy);
+      vi.mocked(useLocation).mockReturnValue({
+        pathname: "/fr/projets/documentaire/projet-video-cinema",
+        search: "?dir=right",
+        hash: "",
+        state: null,
+        key: "panel-project-legacy",
+      });
+
+      const { container: containerLegacy, unmount: unmountLegacy } = render(<PortfolioPage />);
+
+      // Exactly 1 main video play button in hero
+      const playButtonsLegacy = containerLegacy.querySelectorAll('[class*="playBtn"]');
+      expect(playButtonsLegacy.length).toBe(1);
+      // No secondary video section
+      expect(containerLegacy.querySelector('[class*="detailVideoSection"]')).toBeNull();
+      // No third-party iframe before consent
+      expect(containerLegacy.querySelectorAll("iframe").length).toBe(0);
+
+      unmountLegacy();
+
+      // Config B: Explicit video project (presentationMode: "video")
+      const explicitVideoProject = {
+        ...mockPortfolioContent.projects[1],
+        presentationMode: "video" as const,
+      };
+
+      const loaderDataExplicit = {
+        lang: "fr" as const,
+        common: mockCommonContent,
+        content: mockPortfolioContent,
+        showcaseProjects: [],
+        panelState: {
+          isOpen: true,
+          activeCategory: "documentary" as const,
+          activeProject: explicitVideoProject,
+          direction: "right" as const,
+        },
+      };
+
+      vi.mocked(useLoaderData).mockReturnValue(loaderDataExplicit);
+      const { container: containerExplicit, unmount: unmountExplicit } = render(<PortfolioPage />);
+
+      const playButtonsExplicit = containerExplicit.querySelectorAll('[class*="playBtn"]');
+      expect(playButtonsExplicit.length).toBe(1);
+      expect(containerExplicit.querySelector('[class*="detailVideoSection"]')).toBeNull();
+      expect(containerExplicit.querySelectorAll("iframe").length).toBe(0);
+
+      unmountExplicit();
+
+      // Config C: Photo project with secondary video (presentationMode: "photo", coverImageId present, video.url present)
+      const photoWithVideoProject = {
+        ...mockPortfolioContent.projects[0],
+        presentationMode: "photo" as const,
+        video: {
+          url: "https://www.youtube.com/watch?v=photo-video-123",
+          coverImageId: UUID_PROJ_VIDEO_POSTER,
+        },
+      };
+
+      const loaderDataPhotoVideo = {
+        lang: "fr" as const,
+        common: mockCommonContent,
+        content: mockPortfolioContent,
+        showcaseProjects: [],
+        panelState: {
+          isOpen: true,
+          activeCategory: "documentary" as const,
+          activeProject: photoWithVideoProject,
+          direction: "right" as const,
+        },
+      };
+
+      vi.mocked(useLoaderData).mockReturnValue(loaderDataPhotoVideo);
+      const { container: containerPhotoVideo, unmount: unmountPhotoVideo } = render(<PortfolioPage />);
+
+      // Hero shows photo cover image
+      const heroCover = containerPhotoVideo.querySelector('[class*="detailCoverImg"]');
+      expect(heroCover).not.toBeNull();
+
+      // Secondary video section IS present for photo project
+      const secondaryVideoSection = containerPhotoVideo.querySelector('[class*="detailVideoSection"]');
+      expect(secondaryVideoSection).not.toBeNull();
+      const secondaryPlayBtn = secondaryVideoSection?.querySelector('[class*="playBtn"]');
+      expect(secondaryPlayBtn).not.toBeNull();
+
+      // No third-party iframe before consent
+      expect(containerPhotoVideo.querySelectorAll("iframe").length).toBe(0);
+
+      unmountPhotoVideo();
+    });
   });
 
   describe("Regression Suite: End-to-End Handlers, Segregation & Safety", () => {
@@ -897,6 +1011,156 @@ describe("UX, Admin, and Portfolio Presentation Refinements", () => {
       // Confirms panel was scrolled to top and window was NOT touched
       expect(panelEl.scrollTo).toHaveBeenCalledWith({ top: 0, behavior: "smooth" });
       expect(windowScrollToMock).not.toHaveBeenCalled();
+    });
+
+    it("8. Aspect ratio is preserved when transitioning Photo -> Video -> Photo and when switching modes", async () => {
+      const { sessionCookie, csrfToken } = await createAuthenticatedAdminRequest();
+      const { content: initialContent } = getRawPortfolioContent();
+      const testProj = initialContent.projects[0];
+      const projId = testProj.id;
+
+      // 1. Save project in Photo mode with aspectRatio 4:5
+      const usp1 = new URLSearchParams();
+      usp1.set("csrfToken", csrfToken);
+      usp1.set("revision", initialContent.revision);
+      usp1.set("titleFr", testProj.title.fr);
+      usp1.set("titleEn", testProj.title.en);
+      usp1.set("slugFr", testProj.slugFr);
+      usp1.set("slugEn", testProj.slugEn);
+      usp1.set("category", testProj.category);
+      usp1.set("summaryFr", testProj.summary.fr);
+      usp1.set("summaryEn", testProj.summary.en);
+      usp1.set("descriptionFr", testProj.description.map((b) => b.text.fr).join("\n\n"));
+      usp1.set("descriptionEn", testProj.description.map((b) => b.text.en).join("\n\n"));
+      usp1.set("seoTitleFr", testProj.seo.title.fr);
+      usp1.set("seoTitleEn", testProj.seo.title.en);
+      usp1.set("seoDescFr", testProj.seo.description.fr);
+      usp1.set("seoDescEn", testProj.seo.description.en);
+      usp1.set("coverAltFr", testProj.coverAlt.fr);
+      usp1.set("coverAltEn", testProj.coverAlt.en);
+      usp1.set("showcase", testProj.showcase ? "on" : "");
+      usp1.set("side", testProj.side);
+      usp1.set("presentationMode", "photo");
+      usp1.set("aspectRatio", "4:5");
+      usp1.set("status", "draft");
+      usp1.set("coverImageId", testProj.coverImageId || "");
+      usp1.set("videoCoverImageId", testProj.draftVideoCoverImageId || "");
+      usp1.set("videoUrl", "https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+      usp1.set("galleryImageIds", JSON.stringify(testProj.galleryImageIds || []));
+
+      const req1 = new Request(`http://localhost:3000/admin/portfolio/edit/${projId}`, {
+        method: "POST",
+        headers: {
+          Cookie: sessionCookie,
+          Origin: "http://localhost:3000",
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: usp1.toString(),
+      });
+      const res1 = await adminPortfolioEditAction(makeActionArgs(req1, { id: projId }));
+      const d1 = (await res1.json()) as { success: string; newRevision: string };
+      expect(d1.success).toBeDefined();
+
+      const { content: afterSave1 } = getRawPortfolioContent();
+      const projAfter1 = afterSave1.projects.find((p) => p.id === projId)!;
+      expect(projAfter1.presentationMode).toBe("photo");
+      expect(projAfter1.aspectRatio).toBe("4:5");
+
+      // 2. Switch to Video mode (form submits with hidden aspectRatio or omitting aspectRatio)
+      const usp2 = new URLSearchParams();
+      usp2.set("csrfToken", csrfToken);
+      usp2.set("revision", d1.newRevision);
+      usp2.set("titleFr", testProj.title.fr);
+      usp2.set("titleEn", testProj.title.en);
+      usp2.set("slugFr", testProj.slugFr);
+      usp2.set("slugEn", testProj.slugEn);
+      usp2.set("category", testProj.category);
+      usp2.set("summaryFr", testProj.summary.fr);
+      usp2.set("summaryEn", testProj.summary.en);
+      usp2.set("descriptionFr", testProj.description.map((b) => b.text.fr).join("\n\n"));
+      usp2.set("descriptionEn", testProj.description.map((b) => b.text.en).join("\n\n"));
+      usp2.set("seoTitleFr", testProj.seo.title.fr);
+      usp2.set("seoTitleEn", testProj.seo.title.en);
+      usp2.set("seoDescFr", testProj.seo.description.fr);
+      usp2.set("seoDescEn", testProj.seo.description.en);
+      usp2.set("coverAltFr", testProj.coverAlt.fr);
+      usp2.set("coverAltEn", testProj.coverAlt.en);
+      usp2.set("showcase", testProj.showcase ? "on" : "");
+      usp2.set("side", testProj.side);
+      usp2.set("presentationMode", "video");
+      // Hidden input preserves "4:5"
+      usp2.set("aspectRatio", "4:5");
+      usp2.set("status", "draft");
+      usp2.set("coverImageId", testProj.coverImageId || "");
+      usp2.set("videoCoverImageId", testProj.draftVideoCoverImageId || "");
+      usp2.set("videoUrl", "https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+      usp2.set("galleryImageIds", JSON.stringify(testProj.galleryImageIds || []));
+
+      const req2 = new Request(`http://localhost:3000/admin/portfolio/edit/${projId}`, {
+        method: "POST",
+        headers: {
+          Cookie: sessionCookie,
+          Origin: "http://localhost:3000",
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: usp2.toString(),
+      });
+      const res2 = await adminPortfolioEditAction(makeActionArgs(req2, { id: projId }));
+      const d2 = (await res2.json()) as { success: string; newRevision: string };
+      expect(d2.success).toBeDefined();
+
+      const { content: afterSave2 } = getRawPortfolioContent();
+      const projAfter2 = afterSave2.projects.find((p) => p.id === projId)!;
+      expect(projAfter2.presentationMode).toBe("video");
+      expect(projAfter2.aspectRatio).toBe("4:5");
+
+      // 3. Switch back to Photo mode (submitting invalid/empty ratio still retains 4:5 on server)
+      const usp3 = new URLSearchParams();
+      usp3.set("csrfToken", csrfToken);
+      usp3.set("revision", d2.newRevision);
+      usp3.set("titleFr", testProj.title.fr);
+      usp3.set("titleEn", testProj.title.en);
+      usp3.set("slugFr", testProj.slugFr);
+      usp3.set("slugEn", testProj.slugEn);
+      usp3.set("category", testProj.category);
+      usp3.set("summaryFr", testProj.summary.fr);
+      usp3.set("summaryEn", testProj.summary.en);
+      usp3.set("descriptionFr", testProj.description.map((b) => b.text.fr).join("\n\n"));
+      usp3.set("descriptionEn", testProj.description.map((b) => b.text.en).join("\n\n"));
+      usp3.set("seoTitleFr", testProj.seo.title.fr);
+      usp3.set("seoTitleEn", testProj.seo.title.en);
+      usp3.set("seoDescFr", testProj.seo.description.fr);
+      usp3.set("seoDescEn", testProj.seo.description.en);
+      usp3.set("coverAltFr", testProj.coverAlt.fr);
+      usp3.set("coverAltEn", testProj.coverAlt.en);
+      usp3.set("showcase", testProj.showcase ? "on" : "");
+      usp3.set("side", testProj.side);
+      usp3.set("presentationMode", "photo");
+      usp3.set("aspectRatio", "invalid-ratio");
+      usp3.set("status", "draft");
+      usp3.set("coverImageId", testProj.coverImageId || "");
+      usp3.set("videoCoverImageId", testProj.draftVideoCoverImageId || "");
+      usp3.set("videoUrl", "https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+      usp3.set("galleryImageIds", JSON.stringify(testProj.galleryImageIds || []));
+
+      const req3 = new Request(`http://localhost:3000/admin/portfolio/edit/${projId}`, {
+        method: "POST",
+        headers: {
+          Cookie: sessionCookie,
+          Origin: "http://localhost:3000",
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: usp3.toString(),
+      });
+      const res3 = await adminPortfolioEditAction(makeActionArgs(req3, { id: projId }));
+      const d3 = (await res3.json()) as { success: string; newRevision: string };
+      expect(d3.success).toBeDefined();
+
+      const { content: afterSave3 } = getRawPortfolioContent();
+      const projAfter3 = afterSave3.projects.find((p) => p.id === projId)!;
+      expect(projAfter3.presentationMode).toBe("photo");
+      // 4:5 remains saved!
+      expect(projAfter3.aspectRatio).toBe("4:5");
     });
   });
 });

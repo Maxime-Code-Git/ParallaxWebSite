@@ -357,6 +357,9 @@ export default function PortfolioPage() {
   const effectiveProject = panelState.isOpen
     ? panelState.activeProject
     : cachedContentRef.current.activeProject;
+  const effectiveProjectPresentationMode = effectiveProject
+    ? resolveProjectPresentationMode(effectiveProject)
+    : "photo";
 
   const activeSec = effectiveCategory ? content.sections[effectiveCategory] : null;
 
@@ -685,7 +688,7 @@ export default function PortfolioPage() {
               <p className={styles.detailSummary}>{effectiveProject.summary[lang]}</p>
 
               {/* Hero Media according to Presentation Mode */}
-              {resolveProjectPresentationMode(effectiveProject) === "video" && effectiveProject.video?.url ? (
+              {effectiveProjectPresentationMode === "video" && effectiveProject.video?.url ? (
                 <div className={styles.detailCoverWrap}>
                   <div className={styles.showreelCard}>
                     {effectiveProject.video.coverImageId ? (
@@ -746,7 +749,7 @@ export default function PortfolioPage() {
               </div>
 
               {/* Video Player Section (for photo projects that include a secondary video) */}
-              {effectiveProject.presentationMode !== "video" && effectiveProject.video?.url && (
+              {effectiveProjectPresentationMode === "photo" && effectiveProject.video?.url && (
                 <div className={styles.detailVideoSection}>
                   <div className={styles.showreelCard}>
                     {effectiveProject.video.coverImageId ? (
