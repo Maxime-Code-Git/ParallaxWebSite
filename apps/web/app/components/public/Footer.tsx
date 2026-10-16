@@ -13,21 +13,31 @@ export function Footer({ common, lang, theme = "dark" }: FooterProps) {
   const containerClass = isSempra ? styles.footerSempra : styles.footerDark;
   const linkClass = isSempra ? styles.linkSempra : styles.linkDark;
 
+  const legalNoticeHref = lang === "fr" ? "/fr/mentions-legales" : "/en/legal-notice";
+  const privacyHref = lang === "fr" ? "/fr/confidentialite" : "/en/privacy-policy";
+  const termsHref = lang === "fr" ? "/fr/cgv" : "/en/terms";
+  const cookiesHref = `/${lang}/cookies`;
+  const prefsHref = `/${lang}/cookies#preferences`;
+  const prefsLabel = lang === "fr" ? "Gérer mes préférences" : "Manage preferences";
+
   return (
     <footer className={containerClass}>
       <span className={styles.copyright}>{common.footer.copyright[lang]}</span>
       <nav className={styles.nav}>
-        <Link to={`/${lang}/mentions-legales`} className={linkClass}>
+        <Link to={legalNoticeHref} className={linkClass}>
           {common.footer.legalNotice[lang]}
         </Link>
-        <Link to={`/${lang}/confidentialite`} className={linkClass}>
+        <Link to={privacyHref} className={linkClass}>
           {common.footer.privacy[lang]}
         </Link>
-        <Link to={`/${lang}/cgv`} className={linkClass}>
+        <Link to={termsHref} className={linkClass}>
           {common.footer.terms[lang]}
         </Link>
-        <Link to={`/${lang}/cookies`} className={linkClass}>
+        <Link to={cookiesHref} className={linkClass}>
           {common.footer.cookies[lang]}
+        </Link>
+        <Link to={prefsHref} className={linkClass}>
+          {prefsLabel}
         </Link>
       </nav>
     </footer>

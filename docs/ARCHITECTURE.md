@@ -353,7 +353,67 @@ Depuis la racine du monorepo :
 
 ---
 
-## 13. Guide d'exploitation, sauvegardes et restauration (Déploiement Mac mini)
+## 13. Architecture Lot 7 — Entreprise, Pages Légales et Préférences de Confidentialité
+
+### 1. Schéma éditorial V3 et migration séquentielle
+- **Évolution de schéma sans régression** : `SiteContent` passe à `schemaVersion: 3`. La fonction `validateSiteContent` assure la mise à niveau séquentielle `V1 -> V2 -> V3` à la volée lors de la lecture du fichier `site-content.json` et persiste automatiquement la structure V3 sur disque.
+- **Nouveaux blocs de premier niveau** :
+  - `company: CompanyContent` : paramètres d'entreprise (dénomination commerciale, dénomination sociale, forme juridique, adresse légale, numéro d'entreprise / BCE, numéro de TVA, e-mail, téléphone, réseaux sociaux, directeur de publication, hébergeur et indicateur `isPublished`).
+  - `legalPages: Record<LegalPageKey, LegalPageRecord>` : conteneur des 4 documents légaux (`mentions`, `privacy`, `terms`, `cookies`). Chaque document dispose d'une partition étanche `draft: LegalDocument` et `published: LegalDocument | null`.
+- **Synchronisation bidirectionnelle canonique des coordonnées** : Toute mise à jour ou suppression de coordonnées (e-mail, téléphone, Instagram, YouTube) depuis l'administration `/admin/company`, `/admin/contact` ou `/admin/home` synchronise atomiquement l'ensemble des sections publiques associées (`common.brandName`, `home.contact`, `contactPage.card`). Une valeur vidée supprime la coordonnée partout où elle est référencée sans laisser d'orphelin.
+
+### 2. Cycle de vie documentaire et étanchéité public / privé
+- **Séparation stricte Draft vs Published** : La modification d'un brouillon dans `/admin/legal/:pageKey` n'impacte jamais le document public en ligne. L'éditeur préserve la saisie brute (espaces, retours à la ligne, paragraphes FR/EN) et utilise `useFetcher` pour un transport fiable.
+- **Contrôles stricts de publication (`publishLegalPage`)** :
+  - Rejet absolu des placeholders non résolus (ex. `[à compléter]`, `[date]`, `[nom]`, etc.) dans les titres, paragraphes, listes et inventaire.
+  - Métadonnées SEO et titres publics obligatoires en FR et EN.
+  - Date d'entrée en vigueur avec année à 4 chiffres validée.
+  - Présence d'un inventaire technique documenté et éditable pour la politique de cookies.
+  - Vérification préalable de l'identité d'entreprise (dénomination sociale, adresse, BCE, hébergeur) avant d'autoriser la publication des mentions légales.
+  - Incrément monotone du numéro de version lors de la publication : dépublier puis republier poursuit la numérotation (`v1` -> `v2` -> dépublié -> `v3`).
+- **Prévisualisation privée authentifiée (`/admin/legal/:pageKey/preview`)** :
+  - Réservée aux administrateurs authentifiés.
+  - En-têtes stricts `Cache-Control: no-store, no-cache, must-revalidate` et `X-Robots-Tag: noindex, nofollow`.
+- **Prévention des fuites de données privées non confirmées** :
+  - `getPublicCompanyContent()` applique une allowlist stricte. Si `company.isPublished !== true`, seuls `tradeName`, `email`, `phone`, `instagramUrl`, `youtubeUrl` sont exposés. `publicationDirector`, adresse, numéro BCE restent strictement masqués.
+  - Si une page légale n'a pas de version publiée, le loader public renvoie `document: null`, affiche un état neutre (« Document en cours de mise à jour ») et injecte `X-Robots-Tag: noindex, nofollow` ainsi que `Cache-Control: private, no-store`.
+
+### 3. Gestion des préférences de confidentialité
+- **Principe d'accord préalable** : Aucun lecteur vidéo tiers (iframe YouTube ou Vimeo) n'est injecté dans le DOM, et aucune requête réseau tierce n'est initiée avant un accord explicite de l'utilisateur.
+- **Cookie HttpOnly signé HMAC-SHA256 (`__parallax_privacy_prefs`)** :
+  - Durée de vie (TTL) : 180 jours (~6 mois), `SameSite=Lax`, `Path=/`, `HttpOnly`, `Secure` (production).
+  - Signé avec `RATE_LIMIT_SECRET` (HMAC-SHA256). Tout cookie falsifié, expiré ou de mauvaise version est rejeté tant par le serveur que par le client.
+  - Le client JavaScript ne lit pas `document.cookie` directement : l'état est projeté depuis le serveur via `/api/privacy/preferences` ou les loaders.
+- **Accord ponctuel cantonné au média actif** :
+  - L'accord pour une vidéo sans mémorisation est stocké en mémoire JavaScript lié strictement à l'URL média (`inMemoryOneTimeByMedia`).
+  - L'accord est révoqué dès la fermeture de la modale, le changement de média ou la navigation.
+- **Révocation immédiate** :
+  - Révocation accessible sans JavaScript via le formulaire natif ou en JavaScript avec mise à jour immédiate.
+  - Émission de l'événement `parallax:privacy-updated` : tout composant vidéo actif (`VideoModal`) démonte instantanément l'iframe du DOM et réaffiche le panneau d'information.
+- **Endpoint API sécurisé (`/api/privacy/preferences`)** :
+  - Méthodes autorisées : GET (projection validée) et POST (mise à jour ou `revoke_all`).
+  - Validation stricte des types booléens (rejet des chaînes `"false"` / `"true"`).
+  - Lecture bornée du flux à 8 Kio avec interruption active du flux en cas de dépassement.
+  - Destination de retour strictement restreinte aux routes cookies FR/EN autorisées (rejet des URL relatives au protocole `//` et des redirections externes).
+  - Support hybride : JSON pour requêtes asynchrones, et `application/x-www-form-urlencoded` avec redirection 303 sûre pour formulaires natifs.
+
+### 4. Routes canoniques et redirections 301
+- **8 URLs canoniques bilingues** :
+  - `/fr/mentions-legales` et `/en/legal-notice`
+  - `/fr/confidentialite` et `/en/privacy-policy`
+  - `/fr/cgv` et `/en/terms`
+  - `/fr/cookies` et `/en/cookies`
+- **Redirections 301 permanentes (compatibles `.data`)** :
+  - `/en/mentions-legales` -> `/en/legal-notice`
+  - `/en/confidentialite` -> `/en/privacy-policy`
+  - `/en/cgv` -> `/en/terms`
+  - `/fr/politique-de-confidentialite` -> `/fr/confidentialite`
+- **En-têtes HTTP** : URL canonique absolue construite depuis `PUBLIC_SITE_URL`, balises `rel="alternate"` hreflang pour `fr` et `en`, et en-têtes `Cache-Control: private, no-store` et `Vary: Cookie` sur l'ensemble des routes légales et leurs requêtes `.data`.
+
+
+---
+
+## 14. Guide d'exploitation, sauvegardes et restauration (Déploiement Mac mini)
 
 ### Sauvegarde à chaud cohérente
 Pour sauvegarder l'application Parallax sur le Mac mini de production sans interrompre le service :

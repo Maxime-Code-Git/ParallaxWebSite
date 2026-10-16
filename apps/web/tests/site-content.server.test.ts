@@ -40,7 +40,7 @@ describe("site-content.server", () => {
   it("initializes default file when file does not exist", () => {
     expect(fs.existsSync(testContentFile)).toBe(false);
     const content = getSiteContent();
-    expect(content.schemaVersion).toBe(2);
+    expect(content.schemaVersion).toBe(3);
     expect(content.common.brandName).toBe("Parallax");
     expect(fs.existsSync(testContentFile)).toBe(true);
   });

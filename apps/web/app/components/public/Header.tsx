@@ -6,7 +6,7 @@ import styles from "./header.module.css";
 interface HeaderProps {
   common: CommonContent;
   lang: "fr" | "en";
-  currentRoute: "home" | "studio" | "portfolio" | "contact" | "client-area" | "gallery";
+  currentRoute: "home" | "studio" | "portfolio" | "contact" | "client-area" | "gallery" | "legal";
   alternateUrls?: { fr: string; en: string };
 }
 
@@ -20,7 +20,7 @@ export function Header({ common, lang, currentRoute, alternateUrls }: HeaderProp
   const portfolioHref = lang === "fr" ? "/fr/projets" : "/en/projects";
   const clientAreaHref = lang === "fr" ? "/fr/espace-client" : "/en/client-area";
 
-  // Preserve page when switching language (supports custom alternateUrls for project/section slugs or galleries)
+  // Preserve page when switching language (supports custom alternateUrls for project/section slugs, galleries, or legal pages)
   const frSwitchHref =
     alternateUrls?.fr ||
     (currentRoute === "studio"
