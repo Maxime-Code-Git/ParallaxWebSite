@@ -528,7 +528,7 @@ describe("Dynamic Portfolio Categories — Targeted Fixes Verification", () => {
               title: { fr: "Docu SEO", en: "Docu SEO" },
               description: { fr: "Docu SEO Desc", en: "Docu SEO Desc" },
             },
-            coverImageId: "11111111-1111-4111-8111-111111111111",
+            coverImageId: "11111111-1111-4111-8111-111111111111" as string | null,
             coverAlt: { fr: "Cover alt", en: "Cover alt" },
             showreelTitle: { fr: "Showreel Doc", en: "Showreel Doc" },
             morePhotosButton: { fr: "Plus de photos", en: "More photos" },
@@ -659,6 +659,76 @@ describe("Dynamic Portfolio Categories — Targeted Fixes Verification", () => {
       expect(migrated.categories[0].slugAliases?.fr).toEqual([]);
       expect(migrated.categories[0].status).toBe("published");
       expect(migrated.categories[0].entrySummary?.fr).toBe(fixture.sections.documentary.intro.fr);
+    });
+
+    describe("media registry validation and non-regression", () => {
+      it("migrates valid V1 source with media registry successfully and preserves content", () => {
+        const fixture = makeBaseV1Fixture();
+        fs.writeFileSync(testPortfolioContentPath, JSON.stringify(fixture, null, 2), "utf-8");
+
+        const { content: migrated } = getRawPortfolioContent(testPortfolioContentPath);
+        expect(migrated.schemaVersion).toBe(2);
+        expect(migrated.categories[0].coverImageId).toBe("11111111-1111-4111-8111-111111111111");
+        expect(migrated.media["11111111-1111-4111-8111-111111111111"]).toBeDefined();
+      });
+
+      it.each([
+        { label: "false", value: false },
+        { label: "0", value: 0 },
+        { label: "null", value: null },
+        { label: "string", value: "corrupted-registry" },
+        { label: "array", value: [] },
+      ])(
+        "rejects corrupted media=$label without rewriting file, altering revision, rotating backups, or deleting media files",
+        ({ value }) => {
+          // Base fixture with no image references so that only the media registry itself is tested
+          const fixture = makeBaseV1Fixture();
+          fixture.sections.documentary.coverImageId = null;
+          fixture.sections.advertising.coverImageId = null;
+          (fixture as Record<string, unknown>).media = value;
+
+          // Put a dummy media file in testPortfolioMediaPath to verify media is never deleted
+          const dummyMediaPath = path.join(testPortfolioMediaPath, "dummy-asset.webp");
+          fs.writeFileSync(dummyMediaPath, "dummy-image-bytes");
+
+          const rawJson = JSON.stringify(fixture, null, 2);
+          fs.writeFileSync(testPortfolioContentPath, rawJson, "utf-8");
+          const initialBytes = fs.readFileSync(testPortfolioContentPath);
+          const initialBackups = getBackups(testPortfolioContentPath);
+
+          // Real reader must throw ValidationError
+          expect(() => getRawPortfolioContent(testPortfolioContentPath)).toThrow(ValidationError);
+
+          // File on disk must remain 100% unchanged octet for octet
+          const afterBytes = fs.readFileSync(testPortfolioContentPath);
+          expect(afterBytes).toEqual(initialBytes);
+
+          // Backups unchanged
+          const afterBackups = getBackups(testPortfolioContentPath);
+          expect(afterBackups.length).toBe(initialBackups.length);
+
+          // Revision unchanged
+          const parsedAfter = JSON.parse(fs.readFileSync(testPortfolioContentPath, "utf-8"));
+          expect(parsedAfter.revision).toBe(fixture.revision);
+
+          // Media file untouched
+          expect(fs.existsSync(dummyMediaPath)).toBe(true);
+          expect(fs.readFileSync(dummyMediaPath, "utf-8")).toBe("dummy-image-bytes");
+        }
+      );
+
+      it("migrates cleanly when media field is legitimately absent from V1", () => {
+        const fixture = makeBaseV1Fixture();
+        fixture.sections.documentary.coverImageId = null;
+        fixture.sections.advertising.coverImageId = null;
+        delete (fixture as Record<string, unknown>).media;
+
+        fs.writeFileSync(testPortfolioContentPath, JSON.stringify(fixture, null, 2), "utf-8");
+        const { content: migrated } = getRawPortfolioContent(testPortfolioContentPath);
+
+        expect(migrated.schemaVersion).toBe(2);
+        expect(migrated.media).toEqual({});
+      });
     });
 
     it("rejects malformed V1 source (e.g. non-array projects) without rewriting the file or rotating backups", () => {

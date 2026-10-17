@@ -1091,6 +1091,14 @@ export function migratePortfolioContentV1ToV2(raw: unknown): PortfolioContent {
     throw new Error("sections doit être un objet valide");
   }
 
+  if (!Array.isArray(obj.projects)) {
+    throw new Error("projects doit être un tableau");
+  }
+
+  if (obj.media !== undefined && (!isObject(obj.media) || Array.isArray(obj.media))) {
+    throw new Error("media doit être un objet valide");
+  }
+
   function validateV1LocalizedString(val: unknown, path: string): void {
     if (!isObject(val)) {
       throw new Error(`${path} doit être un objet localisé { fr, en }`);
@@ -1346,7 +1354,7 @@ export function migratePortfolioContentV1ToV2(raw: unknown): PortfolioContent {
   }
 
   const projects = obj.projects as PortfolioProject[];
-  const media = (obj.media && typeof obj.media === "object" ? obj.media : {}) as Record<string, PortfolioMediaItem>;
+  const media = (obj.media !== undefined ? obj.media : {}) as Record<string, PortfolioMediaItem>;
   const overview = obj.overview as unknown as PortfolioOverview;
 
   return {
