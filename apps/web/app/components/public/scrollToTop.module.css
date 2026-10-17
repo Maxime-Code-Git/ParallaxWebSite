@@ -1,7 +1,7 @@
 .btn {
   position: fixed;
-  right: 32px;
-  bottom: 32px;
+  right: calc(32px + env(safe-area-inset-right, 0px));
+  bottom: calc(32px + env(safe-area-inset-bottom, 0px));
   width: 52px;
   height: 52px;
   border-radius: 50%;
@@ -38,8 +38,8 @@
 
 @media (max-width: 900px) {
   .btn {
-    right: 20px;
-    bottom: 20px;
+    right: calc(20px + env(safe-area-inset-right, 0px));
+    bottom: calc(20px + env(safe-area-inset-bottom, 0px));
     width: 48px;
     height: 48px;
   }

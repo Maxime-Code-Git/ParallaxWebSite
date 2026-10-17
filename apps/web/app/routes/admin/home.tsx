@@ -41,7 +41,7 @@ export function headers(args: HeadersArgs): Headers {
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const session = await requireValidAdminSession(request);
-  const { content, isCorrupted } = getRawSiteContent();
+  const { content, isCorrupted, corruptionError } = getRawSiteContent();
 
   const csrfToken = session.get("csrfToken") || "";
 
@@ -51,6 +51,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       home: content.home,
       revision: content.revision,
       isCorrupted,
+      corruptionError: isCorrupted ? (corruptionError || "Erreur de format ou de validation") : undefined,
       media: content.media || {},
     },
     { headers: createAdminHeaders() }
@@ -136,7 +137,7 @@ type ActionData = {
 };
 
 export default function AdminHomePage() {
-  const { csrfToken, home: initialHome, revision: initialRevision, isCorrupted, media: initialMedia } =
+  const { csrfToken, home: initialHome, revision: initialRevision, isCorrupted, corruptionError, media: initialMedia } =
     useLoaderData<typeof loader>();
   const actionData = useActionData<ActionData>();
   const navigation = useNavigation();
@@ -264,7 +265,9 @@ export default function AdminHomePage() {
 
       <main className={styles.mainContent}>
         <div className={styles.topBar}>
-          <div className={styles.revisionTag}>Révision serveur : {currentRevision}</div>
+          <div className={`${styles.revisionTag} ${isCorrupted ? styles.revisionTagCorrupted : ""}`}>
+            {isCorrupted ? "Révision serveur : Indisponible (fichier non valide)" : `Révision serveur : ${currentRevision}`}
+          </div>
           <div className={styles.langTabs} role="tablist">
             <button
               type="button"
@@ -289,7 +292,17 @@ export default function AdminHomePage() {
 
         {isCorrupted && (
           <div className={styles.alertError} role="alert">
-            Attention : le fichier de contenu éditorial était illisible ou corrompu. Les valeurs par défaut ont été rechargées.
+            <p>
+              <strong>Attention — Contenu de secours actif en mémoire :</strong> Le fichier de configuration présente une anomalie de validation et les modifications sont bloquées pour protéger vos données.
+            </p>
+            {corruptionError && (
+              <p className={styles.alertSubText}>
+                Détail de la validation : <code className={styles.alertCode}>{corruptionError}</code>
+              </p>
+            )}
+            <p className={styles.alertSubText}>
+              Aucune restauration automatique n&apos;a été effectuée sur le disque afin de préserver votre fichier existant.
+            </p>
           </div>
         )}
 
