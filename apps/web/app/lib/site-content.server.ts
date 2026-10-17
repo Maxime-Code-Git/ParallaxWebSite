@@ -211,7 +211,11 @@ export function validateCommonContent(val: unknown): CommonContent {
   };
 }
 
-export function validateHomeContent(val: unknown): HomeContent {
+export interface ValidateHomeOptions {
+  isLegacy?: boolean;
+}
+
+export function validateHomeContent(val: unknown, options?: ValidateHomeOptions): HomeContent {
   const obj = assertObject(val, "home");
   assertExactKeys(obj, ["seo", "hero", "showreel", "duo", "savoirFaire", "contact", "sempra"], "home");
 
@@ -267,22 +271,42 @@ export function validateHomeContent(val: unknown): HomeContent {
     throw new ValidationError("home.contact.email doit être une chaîne.");
   }
   const emailTrim = contact.email.trim();
-  if (emailTrim && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailTrim)) {
-    throw new ValidationError("home.contact.email doit être une adresse e-mail valide.");
+  if (options?.isLegacy) {
+    if (emailTrim && emailTrim !== "#" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailTrim)) {
+      throw new ValidationError("home.contact.email doit être une adresse e-mail valide ou un placeholder historique ('#').");
+    }
+  } else {
+    if (emailTrim && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailTrim)) {
+      throw new ValidationError("home.contact.email doit être une adresse e-mail valide.");
+    }
   }
+
   if (typeof contact.instagramUrl !== "string") {
     throw new ValidationError("home.contact.instagramUrl doit être une chaîne.");
   }
   const igTrim = contact.instagramUrl.trim();
-  if (igTrim && !/^https?:\/\//i.test(igTrim)) {
-    throw new ValidationError("home.contact.instagramUrl doit être une URL HTTP(S) valide.");
+  if (options?.isLegacy) {
+    if (igTrim && igTrim !== "#" && !/^https?:\/\//i.test(igTrim)) {
+      throw new ValidationError("home.contact.instagramUrl doit être une URL HTTP(S) valide ou un placeholder historique ('#').");
+    }
+  } else {
+    if (igTrim && !/^https?:\/\//i.test(igTrim)) {
+      throw new ValidationError("home.contact.instagramUrl doit être une URL HTTP(S) valide.");
+    }
   }
+
   if (typeof contact.youtubeUrl !== "string") {
     throw new ValidationError("home.contact.youtubeUrl doit être une chaîne.");
   }
   const ytTrim = contact.youtubeUrl.trim();
-  if (ytTrim && !/^https?:\/\//i.test(ytTrim)) {
-    throw new ValidationError("home.contact.youtubeUrl doit être une URL HTTP(S) valide.");
+  if (options?.isLegacy) {
+    if (ytTrim && ytTrim !== "#" && !/^https?:\/\//i.test(ytTrim)) {
+      throw new ValidationError("home.contact.youtubeUrl doit être une URL HTTP(S) valide ou un placeholder historique ('#').");
+    }
+  } else {
+    if (ytTrim && !/^https?:\/\//i.test(ytTrim)) {
+      throw new ValidationError("home.contact.youtubeUrl doit être une URL HTTP(S) valide.");
+    }
   }
 
   const sempra = assertObject(obj.sempra, "home.sempra");
@@ -426,7 +450,14 @@ export function validateProjectTypeOption(val: unknown, context: string): Projec
   };
 }
 
-export function validateContactPageContent(val: unknown): ContactPageContent {
+export interface ValidateContactPageOptions {
+  isLegacy?: boolean;
+}
+
+export function validateContactPageContent(
+  val: unknown,
+  options?: ValidateContactPageOptions
+): ContactPageContent {
   const obj = assertObject(val, "contactPage");
   assertExactKeys(obj, ["seo", "hero", "form", "card", "messages"], "contactPage");
 
@@ -493,9 +524,17 @@ export function validateContactPageContent(val: unknown): ContactPageContent {
   }
   const phoneTrim = card.phone.trim();
   if (phoneTrim) {
-    const digits = phoneTrim.replace(/\D/g, "");
-    if (phoneTrim.length > 50 || !/^[+]?[\d\s()./-]{6,50}$/.test(phoneTrim) || digits.length < 6) {
-      throw new ValidationError("contactPage.card.phone doit être un numéro de téléphone valide.");
+    if (options?.isLegacy) {
+      if (phoneTrim.length > 50 || !/^[+]?[\d\s()./-]{1,50}$/.test(phoneTrim)) {
+        throw new ValidationError(
+          "contactPage.card.phone doit être un numéro de téléphone ou une valeur historique reconnue."
+        );
+      }
+    } else {
+      const digits = phoneTrim.replace(/\D/g, "");
+      if (phoneTrim.length > 50 || !/^[+]?[\d\s()./-]{6,50}$/.test(phoneTrim) || digits.length < 6) {
+        throw new ValidationError("contactPage.card.phone doit être un numéro de téléphone valide.");
+      }
     }
   }
 
@@ -906,17 +945,20 @@ export function migrateSiteContentV1ToV2(v1: SiteContentV1): SiteContentV2 {
 export function migrateSiteContentV2ToV3(v2: SiteContentV2): SiteContent {
   const company = structuredClone(DEFAULT_COMPANY_CONTENT);
   const emailTrim = (v2.home?.contact?.email ?? "").trim();
-  company.email = emailTrim && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailTrim) ? emailTrim : "";
+  company.email = emailTrim && emailTrim !== "#" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailTrim) ? emailTrim : "";
 
   const phoneTrim = (v2.contactPage?.card?.phone ?? "").trim();
   const digits = phoneTrim.replace(/\D/g, "");
-  company.phone = phoneTrim && phoneTrim.length <= 50 && /^[+]?[\d\s()./-]{6,50}$/.test(phoneTrim) && digits.length >= 6 ? phoneTrim : "";
+  company.phone =
+    phoneTrim && phoneTrim.length <= 50 && /^[+]?[\d\s()./-]{6,50}$/.test(phoneTrim) && digits.length >= 6
+      ? phoneTrim
+      : "";
 
   const igTrim = (v2.home?.contact?.instagramUrl ?? "").trim();
-  company.instagramUrl = igTrim && /^https?:\/\//i.test(igTrim) ? igTrim : "";
+  company.instagramUrl = igTrim && igTrim !== "#" && /^https?:\/\//i.test(igTrim) ? igTrim : "";
 
   const ytTrim = (v2.home?.contact?.youtubeUrl ?? "").trim();
-  company.youtubeUrl = ytTrim && /^https?:\/\//i.test(ytTrim) ? ytTrim : "";
+  company.youtubeUrl = ytTrim && ytTrim !== "#" && /^https?:\/\//i.test(ytTrim) ? ytTrim : "";
 
   company.tradeName = v2.common?.brandName || "Parallax";
   company.isPublished = false;
@@ -924,15 +966,15 @@ export function migrateSiteContentV2ToV3(v2: SiteContentV2): SiteContent {
   const migratedHome = structuredClone(v2.home);
   if (migratedHome?.contact) {
     const hEmail = (migratedHome.contact.email || "").trim();
-    if (hEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(hEmail)) {
+    if (hEmail === "#" || (hEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(hEmail))) {
       migratedHome.contact.email = "";
     }
     const hIg = (migratedHome.contact.instagramUrl || "").trim();
-    if (hIg && !/^https?:\/\//i.test(hIg)) {
+    if (hIg === "#" || (hIg && !/^https?:\/\//i.test(hIg))) {
       migratedHome.contact.instagramUrl = "";
     }
     const hYt = (migratedHome.contact.youtubeUrl || "").trim();
-    if (hYt && !/^https?:\/\//i.test(hYt)) {
+    if (hYt === "#" || (hYt && !/^https?:\/\//i.test(hYt))) {
       migratedHome.contact.youtubeUrl = "";
     }
   }
@@ -994,7 +1036,7 @@ export function validateSiteContent(val: unknown): SiteContent {
       revision: obj.revision.toLowerCase(),
       updatedAt: obj.updatedAt,
       common: validateCommonContent(obj.common),
-      home: validateHomeContent(obj.home),
+      home: validateHomeContent(obj.home, { isLegacy: true }),
       studio: validateStudioContent(obj.studio),
       media,
     };
@@ -1014,9 +1056,9 @@ export function validateSiteContent(val: unknown): SiteContent {
       revision: obj.revision.toLowerCase(),
       updatedAt: obj.updatedAt,
       common: validateCommonContent(obj.common),
-      home: validateHomeContent(obj.home),
+      home: validateHomeContent(obj.home, { isLegacy: true }),
       studio: validateStudioContent(obj.studio),
-      contactPage: validateContactPageContent(obj.contactPage),
+      contactPage: validateContactPageContent(obj.contactPage, { isLegacy: true }),
       media,
     };
     const v3Content = migrateSiteContentV2ToV3(v2Content);
@@ -1060,8 +1102,9 @@ export function getRawSiteContent(): { content: SiteContent; isCorrupted: boolea
     const filePath = ensureSiteContentFileInitialized();
     const content = fs.readFileSync(filePath, "utf-8");
     const parsed = JSON.parse(content);
+    const rawVersion = parsed.schemaVersion === undefined ? 1 : parsed.schemaVersion;
     const validated = validateSiteContent(parsed);
-    if (parsed.schemaVersion === 1 || parsed.schemaVersion === 2) {
+    if (rawVersion === 1 || rawVersion === 2) {
       try {
         atomicWriteJson(filePath, validated);
       } catch (writeErr) {
