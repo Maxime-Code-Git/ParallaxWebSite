@@ -40,6 +40,7 @@ import {
   type PortfolioMediaItem,
   portfolioContentSchema,
   resolveProjectPresentationMode,
+  migratePortfolioContentV1ToV2,
 } from "../app/lib/portfolio-content.shared";
 import {
   getRawPortfolioContent,
@@ -124,7 +125,7 @@ const mockCommonContent = {
   },
 } as unknown as CommonContent;
 
-const mockPortfolioContent: PortfolioContent = {
+const mockPortfolioContent: PortfolioContent = migratePortfolioContentV1ToV2({
   schemaVersion: 1,
   revision: "rev-portfolio-test-123456",
   updatedAt: new Date().toISOString(),
@@ -255,7 +256,7 @@ const mockPortfolioContent: PortfolioContent = {
     [UUID_PROJ_VIDEO_COVER]: createMockMediaItem(UUID_PROJ_VIDEO_COVER, "project", UUID_PROJ_VIDEO_ID, "cover", 1920, 1080),
     [UUID_PROJ_VIDEO_POSTER]: createMockMediaItem(UUID_PROJ_VIDEO_POSTER, "project", UUID_PROJ_VIDEO_ID, "video_cover", 1920, 1080),
   },
-};
+} as unknown as PortfolioContent);
 
 const makeActionArgs = (req: Request, params: Record<string, string> = {}): ActionFunctionArgs =>
   ({

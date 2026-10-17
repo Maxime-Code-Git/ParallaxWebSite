@@ -61,9 +61,13 @@ export function meta({ data }: { data?: LoaderData }) {
       panelState.activeProject.seo.description[lang] ||
       panelState.activeProject.summary[lang];
   } else if (panelState.activeCategory) {
-    const sec = content.sections[panelState.activeCategory];
-    pageTitle = sec.seo.title[lang] || `${sec.title[lang]} — Parallax`;
-    pageDesc = sec.seo.description[lang] || sec.intro[lang];
+    const sec =
+      content.categories?.find((c) => c.id === panelState.activeCategory) ||
+      content.sections?.[panelState.activeCategory];
+    if (sec) {
+      pageTitle = sec.seo.title[lang] || `${sec.title[lang]} — Parallax`;
+      pageDesc = sec.seo.description[lang] || sec.intro[lang];
+    }
   }
 
   const base = siteUrl.replace(/\/$/, "");
@@ -87,38 +91,62 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const pathname = url.pathname;
   const lang: "fr" | "en" = pathname.startsWith("/en") ? "en" : "fr";
 
-  const { content, publicProjects } = getPublicPortfolioContent();
+  const { content, publicProjects, publicCategories } = getPublicPortfolioContent();
   const common = getSiteContent().common;
 
   // Use route params: client navigations keep the .data suffix in request.url.
   let activeCategory: PortfolioCategory | null = null;
+  let activeCategoryItem: (typeof publicCategories)[number] | null = null;
   let activeProject: PortfolioProject | null = null;
 
   if (params.rubrique || params.category) {
-    let cat: PortfolioCategory | null = null;
-    if (lang === "fr") {
-      const raw = (params.rubrique || "").toLowerCase();
-      if (raw === "documentaire") cat = "documentary";
-      else if (raw === "publicite") cat = "advertising";
-      else throw new Response("Rubrique introuvable", { status: 404 });
-    } else {
-      const raw = (params.category || "").toLowerCase();
-      if (raw === "documentary") cat = "documentary";
-      else if (raw === "advertising") cat = "advertising";
-      else throw new Response("Section not found", { status: 404 });
+    const raw = (params.rubrique || params.category || "").toLowerCase();
+
+    // 1. Match active published category by slug
+    const found = publicCategories.find((c) =>
+      lang === "fr" ? c.slugFr.toLowerCase() === raw : c.slugEn.toLowerCase() === raw
+    );
+
+    // 2. If not found, check alias redirect
+    if (!found) {
+      const aliasMatch = publicCategories.find((c) => {
+        const aliases = lang === "fr" ? c.slugAliases?.fr : c.slugAliases?.en;
+        return Array.isArray(aliases) && aliases.some((a) => a.toLowerCase() === raw);
+      });
+
+      if (aliasMatch) {
+        const canonicalSlug = lang === "fr" ? aliasMatch.slugFr : aliasMatch.slugEn;
+        const projectSlug = lang === "fr" ? params.slugFr : params.slugEn;
+        const dirQuery = url.searchParams.get("dir") ? `?dir=${url.searchParams.get("dir")}` : "";
+        const targetUrl = projectSlug
+          ? (lang === "fr"
+              ? `/fr/projets/${canonicalSlug}/${projectSlug}${dirQuery}`
+              : `/en/projects/${canonicalSlug}/${projectSlug}${dirQuery}`)
+          : (lang === "fr"
+              ? `/fr/projets/${canonicalSlug}${dirQuery}`
+              : `/en/projects/${canonicalSlug}${dirQuery}`);
+        return new Response(null, {
+          status: 301,
+          headers: { Location: targetUrl },
+        });
+      }
+
+      throw new Response(lang === "fr" ? "Rubrique introuvable" : "Category not found", { status: 404 });
     }
+
+    activeCategory = found.id;
+    activeCategoryItem = found;
 
     const slug = lang === "fr" ? params.slugFr : params.slugEn;
     if (slug) {
-      const found = publicProjects.find(
-        (p) => (lang === "fr" ? p.slugFr === slug : p.slugEn === slug) && p.category === cat
+      const foundProject = publicProjects.find(
+        (p) => (lang === "fr" ? p.slugFr === slug : p.slugEn === slug) && p.category === found.id
       );
-      if (!found) {
-        throw new Response("Projet introuvable", { status: 404 });
+      if (!foundProject) {
+        throw new Response(lang === "fr" ? "Projet introuvable" : "Project not found", { status: 404 });
       }
-      activeProject = found;
+      activeProject = foundProject;
     }
-    activeCategory = cat;
   }
 
   // Direction: read query parameter 'dir' or infer from category default
@@ -126,8 +154,15 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const queryDir = url.searchParams.get("dir");
   if (queryDir === "left" || queryDir === "right") {
     direction = queryDir;
-  } else if (activeCategory === "advertising") {
-    direction = "left"; // Row 2 advertising opens from left by default
+  } else if (activeCategoryItem) {
+    const catIndex = publicCategories.findIndex((c) => c.id === activeCategoryItem.id);
+    const effectiveSide =
+      activeCategoryItem.entrySide === "left" || activeCategoryItem.entrySide === "right"
+        ? activeCategoryItem.entrySide
+        : catIndex % 2 === 0
+        ? "left"
+        : "right";
+    direction = effectiveSide === "left" ? "right" : "left";
   }
 
   const isOpen = activeCategory !== null;
@@ -135,7 +170,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // Build showcase projects (featured or top 3)
   const showcaseProjects = publicProjects.filter((p) => p.showcase);
 
-  const alternateUrls = getPortfolioAlternateUrls(activeProject, activeCategory, direction);
+  const alternateUrls = getPortfolioAlternateUrls(activeProject, activeCategoryItem || activeCategory, direction, publicCategories);
 
   return Response.json(
     {
@@ -361,23 +396,23 @@ export default function PortfolioPage() {
     ? resolveProjectPresentationMode(effectiveProject)
     : "photo";
 
-  const activeSec = effectiveCategory ? content.sections[effectiveCategory] : null;
+  const activeSec = effectiveCategory
+    ? (content.categories?.find((c) => c.id === effectiveCategory) || content.sections?.[effectiveCategory])
+    : null;
 
-  // Category Entries for Portfolio Overview (Documentaire & Publicité)
-  // Each category has its own diagonal-clipped visual, entry summary, and triggers panel opening
-  const categoriesList: PortfolioCategory[] = ["documentary", "advertising"];
-  const rowsToRender = categoriesList.map((cat) => {
-    const sec = content.sections[cat];
-    const defaultSide = cat === "documentary" ? "left" : "right";
-    const effectiveSide = sec.entrySide || defaultSide;
+  // Category Entries for Portfolio Overview: all published categories in their administered order
+  const categoriesList = content.categories || [];
+  const rowsToRender = categoriesList.map((sec, idx) => {
+    const defaultSide = idx % 2 === 0 ? "left" : "right";
+    const effectiveSide = sec.entrySide && sec.entrySide !== "auto" ? sec.entrySide : defaultSide;
     const openDirection = effectiveSide === "left" ? ("right" as const) : ("left" as const);
     const imageId = sec.entryImageId || sec.coverImageId;
     const isEntrySlot = Boolean(sec.entryImageId);
-    const alt = sec.entryAlt?.[lang] || sec.coverAlt[lang] || sec.title[lang];
+    const alt = sec.entryAlt?.[lang] || sec.coverAlt?.[lang] || sec.title[lang];
     const summary = sec.entrySummary?.[lang] || sec.intro[lang];
 
     return {
-      category: cat,
+      category: sec.id,
       categoryTitle: sec.title[lang],
       summary,
       imageId,
@@ -385,7 +420,7 @@ export default function PortfolioPage() {
       alt,
       side: effectiveSide,
       openDirection,
-      sectionUrl: `${getPortfolioSectionUrl(cat, lang)}?dir=${openDirection}`,
+      sectionUrl: `${getPortfolioSectionUrl(sec, lang, categoriesList)}?dir=${openDirection}`,
     };
   });
 
@@ -605,7 +640,7 @@ export default function PortfolioPage() {
           <div className={styles.panelNavButtons}>
             {effectiveProject ? (
               <Link
-                to={`${getPortfolioSectionUrl(effectiveProject.category, lang)}${dirParam}`}
+                to={`${getPortfolioSectionUrl(effectiveProject.category, lang, content.categories)}${dirParam}`}
                 preventScrollReset
                 className={styles.backBtn}
               >
@@ -625,9 +660,13 @@ export default function PortfolioPage() {
                   </svg>
                 </span>
                 <span>
-                  {lang === "fr"
-                    ? `Retour à ${content.sections[effectiveProject.category].title[lang]}`
-                    : `Back to ${content.sections[effectiveProject.category].title[lang]}`}
+                  {(() => {
+                    const cat =
+                      content.categories?.find((c) => c.id === effectiveProject.category) ||
+                      content.sections?.[effectiveProject.category];
+                    const catTitle = cat?.title[lang] || "";
+                    return lang === "fr" ? `Retour à ${catTitle}` : `Back to ${catTitle}`;
+                  })()}
                 </span>
               </Link>
             ) : (
@@ -682,7 +721,8 @@ export default function PortfolioPage() {
             /* VIEW 1: Project Detail View */
             <div className={styles.detailContainer}>
               <div className={styles.detailCategory}>
-                {content.sections[effectiveProject.category].title[lang]}
+                {(content.categories?.find((c) => c.id === effectiveProject.category) ||
+                  content.sections?.[effectiveProject.category])?.title[lang] || ""}
               </div>
               <h1 className={styles.detailTitle}>{effectiveProject.title[lang]}</h1>
               <p className={styles.detailSummary}>{effectiveProject.summary[lang]}</p>
@@ -814,19 +854,19 @@ export default function PortfolioPage() {
               {/* Category Header Hero */}
               <div
                 className={`${styles.sectionHero} ${
-                  activeSec.category === "documentary" && !activeSec.bannerImageId && !activeSec.coverImageId
-                    ? styles.sectionHeroDocu
-                    : styles.sectionHeroPub
+                  !activeSec.bannerImageId && !activeSec.coverImageId
+                    ? ((activeSec.order ?? 0) % 2 === 0 ? styles.sectionHeroDocu : styles.sectionHeroPub)
+                    : ""
                 }`}
               >
                 {(activeSec.bannerImageId || activeSec.coverImageId) && (
                   <ResponsivePortfolioImage
                     imageId={activeSec.bannerImageId || activeSec.coverImageId!}
                     ownerType="section"
-                    ownerId={activeSec.category}
+                    ownerId={activeSec.id}
                     mediaSlot={activeSec.bannerImageId ? "category_banner" : "cover"}
                     mediaMetadata={content.media[activeSec.bannerImageId || activeSec.coverImageId!]}
-                    alt={activeSec.bannerAlt?.[lang] || activeSec.coverAlt[lang] || activeSec.title[lang]}
+                    alt={activeSec.bannerAlt?.[lang] || activeSec.coverAlt?.[lang] || activeSec.title[lang]}
                     className={styles.showcaseImg}
                   />
                 )}
@@ -887,7 +927,7 @@ export default function PortfolioPage() {
 
                           <div className={styles.videoProjectMeta}>
                             <Link
-                              to={`${getPortfolioProjectUrl(p, lang)}${dirParam}`}
+                              to={`${getPortfolioProjectUrl(p, lang, content.categories)}${dirParam}`}
                               preventScrollReset
                               className={styles.videoProjectTitleLink}
                             >
@@ -926,7 +966,7 @@ export default function PortfolioPage() {
                       >
                         <div className={photoBoxClass}>
                           <Link
-                            to={`${getPortfolioProjectUrl(p, lang)}${dirParam}`}
+                            to={`${getPortfolioProjectUrl(p, lang, content.categories)}${dirParam}`}
                             preventScrollReset
                             className={styles.projectImageLink}
                             aria-label={`Voir le projet ${p.title[lang]}`}
@@ -948,7 +988,7 @@ export default function PortfolioPage() {
 
                         <div className={isLeft ? styles.projectTextEven : styles.projectTextOdd}>
                           <Link
-                            to={`${getPortfolioProjectUrl(p, lang)}${dirParam}`}
+                            to={`${getPortfolioProjectUrl(p, lang, content.categories)}${dirParam}`}
                             preventScrollReset
                             className={styles.projectTitleLink}
                           >
@@ -1041,7 +1081,7 @@ export default function PortfolioPage() {
                         <ResponsivePortfolioImage
                           imageId={activeSec.showreelCoverImageId}
                           ownerType="section"
-                          ownerId={activeSec.category}
+                          ownerId={activeSec.id}
                           mediaSlot="showreel_cover"
                           mediaMetadata={content.media[activeSec.showreelCoverImageId]}
                           alt={activeSec.showreelTitle[lang]}

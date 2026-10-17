@@ -65,15 +65,19 @@ describe("Portfolio Content & Editorial Model (Lot 3)", () => {
       const defaultContent = createDefaultPortfolioContent();
       const parseResult = portfolioContentSchema.safeParse(defaultContent);
       expect(parseResult.success).toBe(true);
-      expect(defaultContent.schemaVersion).toBe(1);
-      expect(defaultContent.sections.documentary.category).toBe("documentary");
-      expect(defaultContent.sections.advertising.category).toBe("advertising");
+      expect(defaultContent.schemaVersion).toBe(2);
+      expect(defaultContent.categories.length).toBe(2);
+      expect(defaultContent.sections.documentary.id).toBe("documentary");
+      expect(defaultContent.sections.advertising.id).toBe("advertising");
     });
 
     it("rejects invalid categories or corrupted schema versions", () => {
       const content = createDefaultPortfolioContent() as unknown as Record<string, unknown>;
-      const corrupted = { ...content, schemaVersion: 2 };
-      expect(portfolioContentSchema.safeParse(corrupted).success).toBe(false);
+      const corruptedVersion = { ...content, schemaVersion: 999 };
+      expect(portfolioContentSchema.safeParse(corruptedVersion).success).toBe(false);
+
+      const corruptedCategories = { ...content, categories: "invalid" };
+      expect(portfolioContentSchema.safeParse(corruptedCategories).success).toBe(false);
     });
 
     it("rejects unrecognized root keys in portfolioContentSchema", () => {
