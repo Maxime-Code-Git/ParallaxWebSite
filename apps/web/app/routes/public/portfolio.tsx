@@ -516,9 +516,13 @@ export default function PortfolioPage() {
                           onClick={(e) => {
                             triggerRef.current = e.currentTarget;
                           }}
+                          aria-label={`${lang === "fr" ? "Voir les projets" : "View projects"} - ${row.categoryTitle}`}
                         >
-                          <span className={styles.btnLabel}>
+                          <span className={styles.btnLabelDesktop}>
                             {content.overview.seeMoreButton[lang]}
+                          </span>
+                          <span className={styles.btnLabelMobile}>
+                            {lang === "fr" ? "Voir les projets" : "View projects"}
                           </span>
                           <span className={styles.circleIcon}>
                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
@@ -549,6 +553,7 @@ export default function PortfolioPage() {
                           onClick={(e) => {
                             triggerRef.current = e.currentTarget;
                           }}
+                          aria-label={`${lang === "fr" ? "Voir les projets" : "View projects"} - ${row.categoryTitle}`}
                         >
                           <span className={styles.circleIcon}>
                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
@@ -561,8 +566,11 @@ export default function PortfolioPage() {
                               />
                             </svg>
                           </span>
-                          <span className={styles.btnLabel}>
+                          <span className={styles.btnLabelDesktop}>
                             {content.overview.seeMoreButton[lang]}
+                          </span>
+                          <span className={styles.btnLabelMobile}>
+                            {lang === "fr" ? "Voir les projets" : "View projects"}
                           </span>
                         </Link>
                       </div>
@@ -613,7 +621,6 @@ export default function PortfolioPage() {
 
       <div inert={phase !== "closed" ? true : undefined}>
         <Footer common={common} lang={lang} />
-        <ScrollToTop />
       </div>
       </div>
 
@@ -635,7 +642,6 @@ export default function PortfolioPage() {
         hidden={phase === "closed"}
       >
         <div className={styles.panelContent}>
-          <ScrollToTop targetRef={panelRef} />
           {/* Top navigation buttons */}
           <div className={styles.panelNavButtons}>
             {effectiveProject ? (
@@ -739,6 +745,7 @@ export default function PortfolioPage() {
                         mediaSlot="video_cover"
                         mediaMetadata={content.media[effectiveProject.video.coverImageId]}
                         alt={effectiveProject.title[lang]}
+                        className={styles.showreelImg}
                         loading="eager"
                       />
                     ) : effectiveProject.coverImageId ? (
@@ -749,19 +756,22 @@ export default function PortfolioPage() {
                         mediaSlot="cover"
                         mediaMetadata={content.media[effectiveProject.coverImageId]}
                         alt={effectiveProject.title[lang]}
+                        className={styles.showreelImg}
                         loading="eager"
                       />
                     ) : null}
-                    <button
-                      type="button"
-                      className={styles.playBtn}
-                      onClick={() => setActiveVideoUrl(effectiveProject.video!.url)}
-                      aria-label="Lire la vidéo"
-                    >
-                      <svg width="26" height="28" viewBox="0 0 26 28" fill="none">
-                        <path d="M4 3 L23 14 L4 25 Z" fill="#F5F6F7" />
-                      </svg>
-                    </button>
+                    <div className={styles.showreelOverlay}>
+                      <button
+                        type="button"
+                        className={styles.playBtn}
+                        onClick={() => setActiveVideoUrl(effectiveProject.video!.url)}
+                        aria-label="Lire la vidéo"
+                      >
+                        <svg width="26" height="28" viewBox="0 0 26 28" fill="none">
+                          <path d="M4 3 L23 14 L4 25 Z" fill="#F5F6F7" />
+                        </svg>
+                      </button>
+                    </div>
                   </div>
                 </div>
               ) : effectiveProject.coverImageId ? (
@@ -800,6 +810,7 @@ export default function PortfolioPage() {
                         mediaSlot="video_cover"
                         mediaMetadata={content.media[effectiveProject.video.coverImageId]}
                         alt={effectiveProject.title[lang]}
+                        className={styles.showreelImg}
                       />
                     ) : effectiveProject.coverImageId ? (
                       <ResponsivePortfolioImage
@@ -809,18 +820,21 @@ export default function PortfolioPage() {
                         mediaSlot="cover"
                         mediaMetadata={content.media[effectiveProject.coverImageId]}
                         alt={effectiveProject.title[lang]}
+                        className={styles.showreelImg}
                       />
                     ) : null}
-                    <button
-                      type="button"
-                      className={styles.playBtn}
-                      onClick={() => setActiveVideoUrl(effectiveProject.video!.url)}
-                      aria-label="Lire la vidéo"
-                    >
-                      <svg width="26" height="28" viewBox="0 0 26 28" fill="none">
-                        <path d="M4 3 L23 14 L4 25 Z" fill="#F5F6F7" />
-                      </svg>
-                    </button>
+                    <div className={styles.showreelOverlay}>
+                      <button
+                        type="button"
+                        className={styles.playBtn}
+                        onClick={() => setActiveVideoUrl(effectiveProject.video!.url)}
+                        aria-label="Lire la vidéo"
+                      >
+                        <svg width="26" height="28" viewBox="0 0 26 28" fill="none">
+                          <path d="M4 3 L23 14 L4 25 Z" fill="#F5F6F7" />
+                        </svg>
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
@@ -1085,20 +1099,23 @@ export default function PortfolioPage() {
                           mediaSlot="showreel_cover"
                           mediaMetadata={content.media[activeSec.showreelCoverImageId]}
                           alt={activeSec.showreelTitle[lang]}
+                          className={styles.showreelImg}
                         />
                       )}
-                      <button
-                        type="button"
-                        className={styles.playBtn}
-                        onClick={() =>
-                          setActiveVideoUrl(activeSec.showreelVideo!.url)
-                        }
-                        aria-label="Lire le showreel"
-                      >
-                        <svg width="26" height="28" viewBox="0 0 26 28" fill="none">
-                          <path d="M4 3 L23 14 L4 25 Z" fill="#F5F6F7" />
-                        </svg>
-                      </button>
+                      <div className={styles.showreelOverlay}>
+                        <button
+                          type="button"
+                          className={styles.playBtn}
+                          onClick={() =>
+                            setActiveVideoUrl(activeSec.showreelVideo!.url)
+                          }
+                          aria-label="Lire le showreel"
+                        >
+                          <svg width="26" height="28" viewBox="0 0 26 28" fill="none">
+                            <path d="M4 3 L23 14 L4 25 Z" fill="#F5F6F7" />
+                          </svg>
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1107,6 +1124,14 @@ export default function PortfolioPage() {
           ) : null}
         </div>
       </div>
+
+      {/* Single, non-transformed ScrollToTop controller */}
+      <ScrollToTop
+        key={phase === "open" ? `panel-${location.pathname}` : "overview"}
+        targetRef={phase === "open" ? panelRef : undefined}
+        hidden={phase === "opening" || phase === "closing" || Boolean(activeVideoUrl)}
+        className={styles.portfolioScrollToTop}
+      />
 
       {/* Video Modal with explicit consent */}
       {activeVideoUrl && (

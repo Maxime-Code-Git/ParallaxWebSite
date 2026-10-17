@@ -49,12 +49,13 @@ export interface AdminContactLoaderData {
   };
   revision: string;
   isCorrupted: boolean;
+  corruptionError?: string;
   smtpDiagnostic: SmtpDiagnostic;
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const session = await requireValidAdminSession(request);
-  const { content, isCorrupted } = getRawSiteContent();
+  const { content, isCorrupted, corruptionError } = getRawSiteContent();
   const csrfToken = session.get("csrfToken") || "";
   const smtpDiagnostic = getSmtpDiagnostic();
 
@@ -69,6 +70,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       },
       revision: content.revision,
       isCorrupted,
+      corruptionError: isCorrupted ? (corruptionError || "Erreur de format ou de validation") : undefined,
       smtpDiagnostic,
     },
     { headers: createAdminHeaders() }
@@ -167,6 +169,7 @@ export default function AdminContactPage() {
     coordinates: initialCoords,
     revision: initialRevision,
     isCorrupted,
+    corruptionError,
     smtpDiagnostic,
   } = useLoaderData<AdminContactLoaderData>();
 
@@ -250,8 +253,8 @@ export default function AdminContactPage() {
       <main className={formStyles.mainContent}>
         <div className={formStyles.topBar}>
           <div>
-            <span className={formStyles.revisionTag}>
-              Révision: {currentRevision.slice(0, 8)}…
+            <span className={`${formStyles.revisionTag} ${isCorrupted ? formStyles.revisionTagCorrupted : ""}`}>
+              {isCorrupted ? "Révision : Indisponible (fichier non valide)" : `Révision: ${currentRevision.slice(0, 8)}…`}
             </span>
           </div>
         </div>
@@ -308,8 +311,18 @@ export default function AdminContactPage() {
 
         {/* Alerts */}
         {isCorrupted && (
-          <div className={formStyles.alertError}>
-            Attention : Le fichier de contenu présentait des anomalies et a été restauré avec les valeurs par défaut.
+          <div className={formStyles.alertError} role="alert">
+            <p>
+              <strong>Attention — Contenu de secours actif en mémoire :</strong> Le fichier de configuration présente une anomalie de validation et les modifications sont bloquées pour protéger vos données.
+            </p>
+            {corruptionError && (
+              <p className={formStyles.alertSubText}>
+                Détail de la validation : <code className={formStyles.alertCode}>{corruptionError}</code>
+              </p>
+            )}
+            <p className={formStyles.alertSubText}>
+              Aucune restauration automatique n&apos;a été effectuée sur le disque afin de préserver votre fichier existant.
+            </p>
           </div>
         )}
 

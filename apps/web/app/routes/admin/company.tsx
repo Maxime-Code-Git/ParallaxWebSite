@@ -37,11 +37,12 @@ export interface AdminCompanyLoaderData {
   company: CompanyContent;
   revision: string;
   isCorrupted: boolean;
+  corruptionError?: string;
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const session = await requireValidAdminSession(request);
-  const { content, isCorrupted } = getRawSiteContent();
+  const { content, isCorrupted, corruptionError } = getRawSiteContent();
   const csrfToken = session.get("csrfToken") || "";
 
   return data<AdminCompanyLoaderData>(
@@ -50,6 +51,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       company: content.company,
       revision: content.revision,
       isCorrupted,
+      corruptionError: isCorrupted ? (corruptionError || "Erreur de format ou de validation") : undefined,
     },
     { headers: createAdminHeaders() }
   );
@@ -209,8 +211,26 @@ export default function AdminCompanyPage() {
 
       <main className={formStyles.mainContent}>
         <div className={formStyles.topBar}>
-          <span className={formStyles.revisionTag}>Révision : {currentRevision}</span>
+          <span className={`${formStyles.revisionTag} ${loaderData.isCorrupted ? formStyles.revisionTagCorrupted : ""}`}>
+            {loaderData.isCorrupted ? "Révision : Indisponible (fichier non valide)" : `Révision : ${currentRevision}`}
+          </span>
         </div>
+
+        {loaderData.isCorrupted && (
+          <div className={formStyles.alertError} role="alert">
+            <p>
+              <strong>Attention — Contenu de secours actif en mémoire :</strong> Le fichier de configuration présente une anomalie de validation et les modifications sont bloquées pour protéger vos données.
+            </p>
+            {loaderData.corruptionError && (
+              <p className={formStyles.alertSubText}>
+                Détail de la validation : <code className={formStyles.alertCode}>{loaderData.corruptionError}</code>
+              </p>
+            )}
+            <p className={formStyles.alertSubText}>
+              Aucune restauration automatique n&apos;a été effectuée sur le disque afin de préserver votre fichier existant.
+            </p>
+          </div>
+        )}
 
         {feedback && (
           <div
@@ -507,7 +527,7 @@ export default function AdminCompanyPage() {
           <div className={formStyles.submitActionsRow}>
             <button
               type="submit"
-              disabled={isSubmitting}
+              disabled={loaderData.isCorrupted || isSubmitting}
               className={formStyles.submitButton}
             >
               {isSubmitting ? "Enregistrement..." : "Enregistrer les paramètres"}
