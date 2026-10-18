@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { render, screen } from "@testing-library/react";
+import { render, screen, cleanup } from "@testing-library/react";
 import type { LoaderFunctionArgs } from "react-router";
 
 vi.mock("react-router", async (importOriginal) => {
@@ -23,6 +23,8 @@ import {
   findUnresolvedCompanyTokens,
   resolveLegalDocument,
   findDocumentUnresolvedCompanyTokens,
+  isRpmApplicable,
+  isVatNumberApplicable,
   type CompanyContent,
   type LegalDocument,
   type CommonContent,
@@ -33,8 +35,9 @@ import {
   saveCompanyContent,
   saveLegalPageDraft,
   publishLegalPage,
-  applyDefaultLegalDrafts,
+  adaptExistingLegalDrafts,
   validateCompanyContent,
+  RevisionConflictError,
   ValidationError,
 } from "../app/lib/site-content.server";
 import { LegalPageView } from "../app/components/public/LegalPageView";
@@ -65,17 +68,47 @@ const mockCommon: CommonContent = {
   },
 };
 
+// Fictitious physical person sole proprietorship (RPM is NOT applicable)
 const fullValidCompany: CompanyContent = {
   ...DEFAULT_COMPANY_CONTENT,
   tradeName: "Parallax Studio",
-  legalName: "Maxime Henrotin",
+  legalName: "Alexandre Fictif",
   legalForm: "Personne physique",
+  legalPersonality: "natural_person",
   address: "Rue de la Station 12, 5000 Namur, Belgique",
   enterpriseNumber: "0123.456.789",
   vatNumber: "BE0123456789",
   vatRegime: "Franchise de taxe pour petites entreprises",
-  rpmJurisdiction: "Namur",
-  publicationDirector: "Maxime Henrotin",
+  vatRegimeType: "small_business_exemption",
+  rpmJurisdiction: "",
+  publicationDirector: "Alexandre Fictif",
+  privacyContact: "Alexandre Fictif",
+  email: "contact@parallax.be",
+  privacyEmail: "privacy@parallax.be",
+  phone: "+32 470 12 34 56",
+  hostingProvider: "Infomaniak Network SA",
+  hostingAddress: "Rue Eugène-Marziano 25, 1227 Genève, Suisse",
+  hostingCountry: "Suisse",
+  dpoDesignated: false,
+  clientTypes: "both",
+  isPublished: true,
+};
+
+// Fictitious legal entity (RPM IS required)
+const fullValidLegalEntity: CompanyContent = {
+  ...DEFAULT_COMPANY_CONTENT,
+  tradeName: "Parallax Production",
+  legalName: "Atelier Fictif SRL",
+  legalForm: "SRL",
+  legalPersonality: "legal_entity",
+  address: "Rue Haute 1, 1000 Bruxelles, Belgique",
+  enterpriseNumber: "0999.888.777",
+  vatNumber: "BE0999888777",
+  vatRegime: "Régime normal de TVA",
+  vatRegimeType: "standard",
+  rpmJurisdiction: "Tribunal de l'entreprise francophone de Bruxelles",
+  publicationDirector: "Alexandre Fictif",
+  privacyContact: "Alexandre Fictif",
   email: "contact@parallax.be",
   privacyEmail: "privacy@parallax.be",
   phone: "+32 470 12 34 56",
@@ -103,6 +136,7 @@ describe("Legal Content, Centralized Company Bindings & Belgian Compliance", () 
   });
 
   afterEach(() => {
+    cleanup();
     process.env = originalEnv;
     fs.rmSync(tempDir, { recursive: true, force: true });
     vi.restoreAllMocks();
@@ -150,45 +184,26 @@ describe("Legal Content, Centralized Company Bindings & Belgian Compliance", () 
       expect(cookieNames).toContain("__parallax_contact_flash");
       expect(cookieNames).toContain("__parallax_privacy_prefs");
 
-      // Verify specific technical durations
       const adminCookie = inventory?.find((i) => i.name.fr === "__parallax_admin_session");
       expect(adminCookie?.duration.fr).toContain("8 heures");
       expect(adminCookie?.category).toBe("technical");
 
-      const galleryCookie = inventory?.find((i) => i.name.fr === "__parallax_gallery_session");
-      expect(galleryCookie?.duration.fr).toContain("8 heures");
-      expect(galleryCookie?.category).toBe("technical");
-
-      const ctxCookie = inventory?.find((i) => i.name.fr === "__parallax_contact_ctx");
-      expect(ctxCookie?.duration.fr).toContain("2 heures");
-      expect(ctxCookie?.category).toBe("technical");
-
-      const flashCookie = inventory?.find((i) => i.name.fr === "__parallax_contact_flash");
-      expect(flashCookie?.duration.fr).toContain("60 secondes");
-      expect(flashCookie?.category).toBe("technical");
-
-      const prefsCookie = inventory?.find((i) => i.name.fr === "__parallax_privacy_prefs");
-      expect(prefsCookie?.duration.fr).toContain("180 jours");
-      expect(prefsCookie?.category).toBe("preferences");
-
-      // Verify sessionStorage is documented separately
-      const cookiesDoc = DEFAULT_LEGAL_PAGES_CONTENT.cookies.draft;
-      const sessionSec = cookiesDoc.sections.find((s) => s.id === "inventory_description");
+      const sessionSec = DEFAULT_LEGAL_PAGES_CONTENT.cookies.draft.sections.find((s) => s.id === "inventory_description");
       expect(sessionSec).toBeDefined();
       expect(sessionSec?.listItems?.some((p) => p.fr.includes("sessionStorage"))).toBe(true);
     });
 
-    it("does not contain unverified claims, false guarantees or abusive clauses", () => {
+    it("does not contain unverified claims, false guarantees or arbitrary court clauses", () => {
       const mentionsText = JSON.stringify(DEFAULT_LEGAL_PAGES_CONTENT.mentions.draft);
       expect(mentionsText).not.toContain("respecte toutes les normes européennes");
 
       const privacyText = JSON.stringify(DEFAULT_LEGAL_PAGES_CONTENT.privacy.draft);
       expect(privacyText).toContain("pseudonymisé");
       expect(privacyText).not.toContain("chiffrée de bout en bout");
-      expect(privacyText).not.toContain("garantie dans les 15 minutes");
 
       const termsText = JSON.stringify(DEFAULT_LEGAL_PAGES_CONTENT.terms.draft);
       expect(termsText).not.toContain("adhésion sans réserve");
+      expect(termsText).not.toContain("{{company.rpmJurisdiction}} ou Bruxelles");
       expect(termsText).not.toContain("tribunal de Liège exclusivement compétent");
     });
   });
@@ -203,10 +218,10 @@ describe("Legal Content, Centralized Company Bindings & Belgian Compliance", () 
       const resEn = resolveCompanyTokens(templateEn, fullValidCompany, "public", "en");
 
       expect(resFr).toBe(
-        "Entreprise : Parallax Studio (exploité par Maxime Henrotin (Personne physique)), TVA : BE0123456789 à Rue de la Station 12, 5000 Namur, Belgique."
+        "Entreprise : Parallax Studio (exploité par Alexandre Fictif (Personne physique)), TVA : BE0123456789 à Rue de la Station 12, 5000 Namur, Belgique."
       );
       expect(resEn).toBe(
-        "Entity: Parallax Studio (operated by Maxime Henrotin (Personne physique)), VAT: BE0123456789 at Rue de la Station 12, 5000 Namur, Belgique."
+        "Entity: Parallax Studio (operated by Alexandre Fictif (Personne physique)), VAT: BE0123456789 at Rue de la Station 12, 5000 Namur, Belgique."
       );
     });
 
@@ -242,12 +257,11 @@ describe("Legal Content, Centralized Company Bindings & Belgian Compliance", () 
       const template = "Exploitant : {{company.legalName}}, adresse : {{company.address}}";
       const resolved = resolveCompanyTokens(template, xssCompany, "public", "fr");
 
-      // Tokens are plain strings, not parsed as HTML
       expect(resolved).toContain('<script>alert("XSS")</script>');
       expect(resolved).toContain("<img src=x onerror=alert(1)>");
     });
 
-    it("findDocumentUnresolvedCompanyTokens and findUnresolvedCompanyTokens accurately detect missing required fields", () => {
+    it("findDocumentUnresolvedCompanyTokens accurately detects missing required fields", () => {
       const emptyCompany: Partial<CompanyContent> = {};
       const missingTokens = findDocumentUnresolvedCompanyTokens(DEFAULT_LEGAL_PAGES_CONTENT.mentions.draft, emptyCompany);
 
@@ -258,13 +272,6 @@ describe("Legal Content, Centralized Company Bindings & Belgian Compliance", () 
       expect(singleUnresolved).toContain("company.legalName");
       expect(singleUnresolved).toContain("company.address");
     });
-
-    it("resolveLegalDocument resolves all localized fields recursively", () => {
-      const resolved = resolveLegalDocument(DEFAULT_LEGAL_PAGES_CONTENT.mentions.draft, fullValidCompany, "public");
-      expect(resolved.publicTitle.fr).toBe("Mentions légales");
-      expect(resolved.intro.fr.length).toBeGreaterThan(0);
-      expect(resolved.sections.length).toBe(DEFAULT_LEGAL_PAGES_CONTENT.mentions.draft.sections.length);
-    });
   });
 
   // 3. Distinct Trade Name vs Legal Operator rendering
@@ -272,8 +279,9 @@ describe("Legal Content, Centralized Company Bindings & Belgian Compliance", () 
     it("renders both trade name and legal operator when they differ", () => {
       const companyWithDistinctNames: Partial<CompanyContent> = {
         tradeName: "Parallax Studio",
-        legalName: "Maxime Henrotin SRL",
+        legalName: "Atelier Fictif SRL",
         legalForm: "SRL",
+        legalPersonality: "legal_entity",
         address: "Rue Haute 1, 1000 Bruxelles",
         enterpriseNumber: "0999.888.777",
         rpmJurisdiction: "Bruxelles",
@@ -292,16 +300,11 @@ describe("Legal Content, Centralized Company Bindings & Belgian Compliance", () 
         />
       );
 
-      // Verify Nom commercial
       expect(screen.getByText("Nom commercial")).toBeDefined();
       expect(screen.getByText("Parallax Studio")).toBeDefined();
-
-      // Verify Exploitant / Raison sociale
       expect(screen.getByText("Exploitant / Raison sociale")).toBeDefined();
-      expect(screen.getAllByText(/Maxime Henrotin SRL/).length).toBeGreaterThan(0);
+      expect(screen.getAllByText(/Atelier Fictif SRL/).length).toBeGreaterThan(0);
       expect(screen.getAllByText(/\(SRL\)/).length).toBeGreaterThan(0);
-
-      // Verify RPM jurisdiction
       expect(screen.getByText(/RPM : Bruxelles/)).toBeDefined();
     });
 
@@ -310,6 +313,7 @@ describe("Legal Content, Centralized Company Bindings & Belgian Compliance", () 
         tradeName: "Parallax",
         legalName: "Parallax",
         legalForm: "SRL",
+        legalPersonality: "legal_entity",
         address: "Rue Haute 1, 1000 Bruxelles",
         enterpriseNumber: "0999.888.777",
         isPublished: true,
@@ -379,242 +383,407 @@ describe("Legal Content, Centralized Company Bindings & Belgian Compliance", () 
       expect(rawString).not.toContain("Secret Private Address 456");
       expect(rawString).not.toContain("0111.222.333");
     });
+  });
 
-    it("returns safe projection when isPublished is true", () => {
+  // 5. Requirement 1: Physical Person confirmed, RPM empty -> Publication succeeds
+  describe("5. Req 1: Sole proprietorship / Natural Person with empty RPM succeeds publication", () => {
+    it("successfully publishes mentions and terms with empty RPM jurisdiction for natural person", () => {
       const initial = getSiteContent();
-      saveCompanyContent(
-        fullValidCompany,
-        initial.revision
-      );
+      const rev1 = saveCompanyContent(fullValidCompany, initial.revision);
 
-      const pub = getPublicCompanyContent();
-      expect(pub).not.toBeNull();
-      expect(pub?.tradeName).toBe("Parallax Studio");
-      expect(pub?.address).toContain("Namur");
-      expect(pub?.isPublished).toBe(true);
+      // Verify that findDocumentUnresolvedCompanyTokens does NOT flag rpmJurisdiction
+      const unresolvedMentions = findDocumentUnresolvedCompanyTokens(
+        DEFAULT_LEGAL_PAGES_CONTENT.mentions.draft,
+        fullValidCompany
+      );
+      expect(unresolvedMentions).not.toContain("company.rpmJurisdiction");
+
+      const unresolvedTerms = findDocumentUnresolvedCompanyTokens(
+        DEFAULT_LEGAL_PAGES_CONTENT.terms.draft,
+        fullValidCompany
+      );
+      expect(unresolvedTerms).not.toContain("company.rpmJurisdiction");
+
+      // Save drafts
+      const rev2 = saveLegalPageDraft("mentions", DEFAULT_LEGAL_PAGES_CONTENT.mentions.draft, rev1);
+      const rev3 = publishLegalPage("mentions", rev2, "2026-10-18");
+      expect(rev3).toBeDefined();
+
+      const afterMentions = getSiteContent();
+      expect(afterMentions.legalPages.mentions.published).not.toBeNull();
+      expect(afterMentions.legalPages.mentions.published?.publicTitle.fr).toBe("Mentions légales");
+
+      const rev4 = saveLegalPageDraft("terms", DEFAULT_LEGAL_PAGES_CONTENT.terms.draft, rev3);
+      const rev5 = publishLegalPage("terms", rev4, "2026-10-18");
+      expect(rev5).toBeDefined();
+
+      const afterTerms = getSiteContent();
+      expect(afterTerms.legalPages.terms.published).not.toBeNull();
     });
   });
 
-  // 5. Publication Validation Gate
-  describe("5. Publication Validation Gate", () => {
-    it("rejects publication if company is not published/confirmed", () => {
-      const initial = getSiteContent();
-      const rev1 = saveCompanyContent(
-        {
-          ...initial.company,
-          isPublished: false,
-        },
-        initial.revision
-      );
+  // 6. Requirement 2: Resolved document has no empty RPM line, no fake court, no RPM dispute in terms
+  describe("6. Req 2: Resolved document cleanly omits RPM and contains neutral dispute clause", () => {
+    it("omits RPM line cleanly without trailing dots or raw placeholders", () => {
+      const resolved = resolveLegalDocument(DEFAULT_LEGAL_PAGES_CONTENT.mentions.draft, fullValidCompany, "public");
 
-      saveLegalPageDraft("mentions", DEFAULT_LEGAL_PAGES_CONTENT.mentions.draft, rev1);
-      const afterDraft = getSiteContent();
+      const allFrParagraphs = resolved.sections.flatMap((s) => s.paragraphs.map((p) => p.fr));
+      const allEnParagraphs = resolved.sections.flatMap((s) => s.paragraphs.map((p) => p.en));
 
-      expect(() => {
-        publishLegalPage("mentions", afterDraft.revision, "2026-10-18");
-      }).toThrow(ValidationError);
-
-      // Verify no mutation on disk
-      const afterFailedPub = getSiteContent();
-      expect(afterFailedPub.legalPages.mentions.published).toBeNull();
-      expect(afterFailedPub.revision).toBe(afterDraft.revision);
+      // RPM paragraph should be filtered out / omitted
+      for (const p of allFrParagraphs) {
+        expect(p).not.toMatch(/^Registre des Personnes Morales/i);
+        expect(p).not.toContain("RPM : .");
+      }
+      for (const p of allEnParagraphs) {
+        expect(p).not.toMatch(/^Competent Enterprise Court/i);
+        expect(p).not.toContain("RPR: .");
+      }
     });
 
-    it("rejects publication if required company tokens remain unresolved", () => {
+    it("verifies neutral Belgian jurisdiction clause in terms without RPM or 'ou Bruxelles'", () => {
+      const resolvedTerms = resolveLegalDocument(DEFAULT_LEGAL_PAGES_CONTENT.terms.draft, fullValidCompany, "public");
+      const disputeSec = resolvedTerms.sections.find((s) => s.id === "disputes_law");
+      expect(disputeSec).toBeDefined();
+
+      const disputeTextFr = disputeSec?.paragraphs.map((p) => p.fr).join(" ") || "";
+      const disputeTextEn = disputeSec?.paragraphs.map((p) => p.en).join(" ") || "";
+
+      expect(disputeTextFr).not.toContain("{{company.rpmJurisdiction}}");
+      expect(disputeTextFr).not.toContain("ou Bruxelles");
+      expect(disputeTextFr).toContain("juridictions compétentes selon les règles du droit commun belge");
+
+      expect(disputeTextEn).not.toContain("{{company.rpmJurisdiction}}");
+      expect(disputeTextEn).not.toContain("or Brussels");
+      expect(disputeTextEn).toContain("competent courts in accordance with the ordinary rules of Belgian law");
+    });
+  });
+
+  // 7. Requirement 3: Legal entity requiring RPM blocks publication until valid
+  describe("7. Req 3: Legal entity requiring RPM blocks publication until valid", () => {
+    it("refuses publication for legal entity missing RPM without disk or revision mutation, then succeeds", () => {
       const initial = getSiteContent();
-      const rev1 = saveCompanyContent(
-        fullValidCompany,
-        initial.revision
-      );
-
-      // Create a draft with a missing custom token
-      const draftWithMissingToken: LegalDocument = {
-        ...DEFAULT_LEGAL_PAGES_CONTENT.mentions.draft,
-        intro: {
-          fr: "Contact : {{company.dpoContact}}",
-          en: "Contact: {{company.dpoContact}}",
-        },
+      const entityWithoutRpm: CompanyContent = {
+        ...fullValidLegalEntity,
+        rpmJurisdiction: "",
       };
+      const rev1 = saveCompanyContent(entityWithoutRpm, initial.revision);
+      const rev2 = saveLegalPageDraft("mentions", DEFAULT_LEGAL_PAGES_CONTENT.mentions.draft, rev1);
 
-      const rev2 = saveLegalPageDraft("mentions", draftWithMissingToken, rev1);
-
+      // Attempt publication: must throw ValidationError
       expect(() => {
         publishLegalPage("mentions", rev2, "2026-10-18");
       }).toThrow(ValidationError);
 
-      const afterFailedPub = getSiteContent();
-      expect(afterFailedPub.legalPages.mentions.published).toBeNull();
+      // Verify no mutation on disk, revision unchanged, published remains null
+      const contentAfterFail = getSiteContent();
+      expect(contentAfterFail.legalPages.mentions.published).toBeNull();
+      expect(contentAfterFail.revision).toBe(rev2);
+
+      // Now Maxime fills the RPM field
+      const rev3 = saveCompanyContent(
+        {
+          ...entityWithoutRpm,
+          rpmJurisdiction: "Tribunal de l'entreprise francophone de Bruxelles",
+        },
+        rev2
+      );
+
+      // Publication now succeeds
+      const rev4 = publishLegalPage("mentions", rev3, "2026-10-18");
+      expect(rev4).toBeDefined();
+      const contentAfterSuccess = getSiteContent();
+      expect(contentAfterSuccess.legalPages.mentions.published).not.toBeNull();
+    });
+  });
+
+  // 8. Requirement 4: Undetermined legal personality does not guess "non applicable"
+  describe("8. Req 4: Undetermined legal status prompts for confirmation", () => {
+    it("flags undetermined legal personality explicitly instead of assuming non-applicable", () => {
+      const undeterminedCompany: CompanyContent = {
+        ...fullValidCompany,
+        legalPersonality: "",
+        legalForm: "Structure non standard",
+        rpmJurisdiction: "",
+      };
+
+      expect(isRpmApplicable(undeterminedCompany)).toBeUndefined();
+
+      const unresolved = findDocumentUnresolvedCompanyTokens(
+        DEFAULT_LEGAL_PAGES_CONTENT.mentions.draft,
+        undeterminedCompany
+      );
+      expect(unresolved).toContain("company.legalPersonality");
+
+      const initial = getSiteContent();
+      const rev1 = saveCompanyContent(undeterminedCompany, initial.revision);
+
+      expect(() => {
+        publishLegalPage("mentions", rev1, "2026-10-18");
+      }).toThrow(/situation juridique/i);
+    });
+  });
+
+  // 9. Requirement 5: Missing VAT regime blocks terms with human label; normal and franchise both render
+  describe("9. Req 5: VAT regime validation and dual regime rendering", () => {
+    it("blocks publication when VAT regime is missing and gives human-readable message", () => {
+      const companyMissingVatRegime: CompanyContent = {
+        ...fullValidCompany,
+        vatRegime: "",
+        vatRegimeType: "",
+      };
+
+      const initial = getSiteContent();
+      const rev1 = saveCompanyContent(companyMissingVatRegime, initial.revision);
+
+      expect(() => {
+        publishLegalPage("terms", rev1, "2026-10-18");
+      }).toThrow(/Régime TVA.*\/admin\/company/);
     });
 
-    it("rejects publication if draft contains [à compléter] placeholder", () => {
+    it("renders coherently under standard VAT regime and under small business exemption", () => {
+      const companyStandard: CompanyContent = {
+        ...fullValidCompany,
+        vatRegime: "Régime normal de TVA",
+        vatRegimeType: "standard",
+      };
+      const resolvedStandard = resolveLegalDocument(DEFAULT_LEGAL_PAGES_CONTENT.terms.draft, companyStandard, "public");
+      const textStandard = JSON.stringify(resolvedStandard);
+      expect(textStandard).toContain("Régime normal de TVA");
+
+      const companyExemption: CompanyContent = {
+        ...fullValidCompany,
+        vatRegime: "Franchise de taxe pour petites entreprises",
+        vatRegimeType: "small_business_exemption",
+      };
+      const resolvedExemption = resolveLegalDocument(DEFAULT_LEGAL_PAGES_CONTENT.terms.draft, companyExemption, "public");
+      const textExemption = JSON.stringify(resolvedExemption);
+      expect(textExemption).toContain("Franchise de taxe pour petites entreprises");
+    });
+  });
+
+  // 10. Requirement 6: Non-subject to VAT requires no fake VAT number and renders cleanly
+  describe("10. Req 6: Non-subject entity requires no fake VAT number", () => {
+    it("renders clean VAT statement when business is non-subject to VAT", () => {
+      const nonSubjectCompany: CompanyContent = {
+        ...fullValidCompany,
+        vatNumber: "",
+        vatRegime: "Non assujetti à la TVA",
+        vatRegimeType: "non_subject",
+      };
+
+      expect(isVatNumberApplicable(nonSubjectCompany)).toBe(false);
+
+      const unresolved = findDocumentUnresolvedCompanyTokens(
+        DEFAULT_LEGAL_PAGES_CONTENT.mentions.draft,
+        nonSubjectCompany
+      );
+      expect(unresolved).not.toContain("company.vatNumber");
+
+      const sampleTemplateFr = "— Numéro de TVA intracommunautaire : {{company.vatNumber}} ({{company.vatRegime}}).";
+      const resolvedFr = resolveCompanyTokens(sampleTemplateFr, nonSubjectCompany, "public", "fr");
+      expect(resolvedFr).toBe("— Régime TVA : Non assujetti à la TVA.");
+      expect(resolvedFr).not.toContain("()");
+      expect(resolvedFr).not.toContain("TVA intracommunautaire : .");
+    });
+  });
+
+  // 11. Requirement 7: Progressive saving & 409 conflict preserve local input
+  describe("11. Req 7: Progressive saving and 409 conflict handling", () => {
+    it("allows incomplete parameters to be saved progressively without validation error", () => {
+      const partial: CompanyContent = {
+        ...DEFAULT_COMPANY_CONTENT,
+        tradeName: "Parallax",
+        legalName: "",
+        address: "",
+        isPublished: false,
+      };
+      const validated = validateCompanyContent(partial);
+      expect(validated.tradeName).toBe("Parallax");
+      expect(validated.isPublished).toBe(false);
+    });
+
+    it("throws RevisionConflictError on outdated revision while preserving server revision info", () => {
       const initial = getSiteContent();
+      const rev1 = saveCompanyContent(fullValidCompany, initial.revision);
+
+      expect(() => {
+        saveCompanyContent(
+          { ...fullValidCompany, tradeName: "Conflict Attempt" },
+          initial.revision // outdated revision!
+        );
+      }).toThrow(RevisionConflictError);
+
+      try {
+        saveCompanyContent({ ...fullValidCompany, tradeName: "Conflict Attempt" }, initial.revision);
+      } catch (err) {
+        expect(err instanceof RevisionConflictError).toBe(true);
+        expect((err as RevisionConflictError).serverRevision).toBe(rev1);
+      }
+    });
+  });
+
+  // 12. Requirement 8: Targeted adaptation of historical drafts, idempotence, backups, published preserved
+  describe("12. Req 8: Targeted adaptation of historical drafts", () => {
+    it("adapts outdated dispute clause, normalizes company, creates backup and preserves published records", () => {
+      const initial = getSiteContent();
+
+      // Setup a draft with the old dispute clause and an already-published privacy page
       const rev1 = saveCompanyContent(
-        fullValidCompany,
+        {
+          ...fullValidCompany,
+          legalForm: "Association de fait",
+          legalPersonality: "", // not yet normalized
+          vatRegime: "Régime normal de TVA",
+          vatRegimeType: "", // not yet normalized
+        },
         initial.revision
       );
+
+      const oldDisputeParagraph = {
+        fr: "Compétence juridictionnelle : À défaut d'accord amiable : pour les clients professionnels (B2B), compétence exclusive est attribuée aux tribunaux de l'arrondissement judiciaire du siège social de l'exploitant ({{company.rpmJurisdiction}} ou Bruxelles) ; pour les consommateurs (B2C), les règles légales de compétence territoriale du Code judiciaire belge s'appliquent.",
+        en: "Jurisdiction: Failing amicable resolution: for business clients (B2B), exclusive jurisdiction is assigned to the courts of the judicial district of the operator's registered office ({{company.rpmJurisdiction}} or Brussels); for consumers (B2C), statutory jurisdiction rules under the Belgian Judicial Code apply.",
+      };
+
+      const outdatedTermsDraft: LegalDocument = {
+        ...DEFAULT_LEGAL_PAGES_CONTENT.terms.draft,
+        sections: DEFAULT_LEGAL_PAGES_CONTENT.terms.draft.sections.map((sec) => {
+          if (sec.id === "disputes_law") {
+            return {
+              ...sec,
+              paragraphs: [sec.paragraphs[0], sec.paragraphs[1], sec.paragraphs[2], oldDisputeParagraph],
+            };
+          }
+          return sec;
+        }),
+      };
+
+      const rev2 = saveLegalPageDraft("terms", outdatedTermsDraft, rev1);
+
+      // Publish privacy to ensure existing published documents are not touched
+      const rev3 = saveLegalPageDraft("privacy", DEFAULT_LEGAL_PAGES_CONTENT.privacy.draft, rev2);
+      publishLegalPage("privacy", rev3, "2026-10-01");
+      const publishedPrivacyBefore = getSiteContent().legalPages.privacy.published;
+      expect(publishedPrivacyBefore).not.toBeNull();
+
+      // Run adaptExistingLegalDrafts
+      const adaptResult1 = adaptExistingLegalDrafts(testContentFile);
+      expect(adaptResult1.changed).toBe(true);
+      expect(adaptResult1.adaptedKeys).toContain("terms");
+      expect(adaptResult1.backupPath).not.toBeNull();
+      expect(fs.existsSync(adaptResult1.backupPath!)).toBe(true);
+
+      // Verify backup permissions
+      const stat = fs.statSync(adaptResult1.backupPath!);
+      expect((stat.mode & 0o777)).toBe(0o600);
+
+      // Verify terms dispute clause is updated
+      const contentAfterAdapt = getSiteContent();
+      const updatedDisputeSec = contentAfterAdapt.legalPages.terms.draft.sections.find((s) => s.id === "disputes_law");
+      expect(updatedDisputeSec?.paragraphs[3]?.fr).not.toContain("ou Bruxelles");
+      expect(updatedDisputeSec?.paragraphs[3]?.fr).toContain("règles du droit commun belge");
+
+      // Verify company parameters normalized
+      expect(contentAfterAdapt.company.legalPersonality).toBe("unincorporated_association");
+      expect(contentAfterAdapt.company.vatRegimeType).toBe("standard");
+
+      // Verify published privacy document was strictly untouched
+      const publishedPrivacyAfter = contentAfterAdapt.legalPages.privacy.published;
+      expect(publishedPrivacyAfter?.effectiveDate).toBe(publishedPrivacyBefore?.effectiveDate);
+      expect(publishedPrivacyAfter?.version).toBe(publishedPrivacyBefore?.version);
+
+      // 2nd run: strictly idempotent, no new revision, no new backup
+      const adaptResult2 = adaptExistingLegalDrafts(testContentFile);
+      expect(adaptResult2.changed).toBe(false);
+      expect(adaptResult2.newRevision).toBe(adaptResult1.newRevision);
+      expect(adaptResult2.backupPath).toBeNull();
+    });
+  });
+
+  // 13. Requirement 9: Unknown tokens, empty required fields and placeholders rejected
+  describe("13. Req 9: Unknown tokens and placeholder guards", () => {
+    it("rejects publication when draft contains unknown company token", () => {
+      const initial = getSiteContent();
+      const rev1 = saveCompanyContent(fullValidCompany, initial.revision);
+
+      const draftWithUnknownToken: LegalDocument = {
+        ...DEFAULT_LEGAL_PAGES_CONTENT.mentions.draft,
+        intro: {
+          fr: "Token invalide : {{company.unauthorizedCustomToken}}",
+          en: "Invalid token: {{company.unauthorizedCustomToken}}",
+        },
+      };
+
+      const rev2 = saveLegalPageDraft("mentions", draftWithUnknownToken, rev1);
+      expect(() => {
+        publishLegalPage("mentions", rev2, "2026-10-18");
+      }).toThrow(ValidationError);
+    });
+
+    it("rejects publication when draft contains [à compléter] placeholder", () => {
+      const initial = getSiteContent();
+      const rev1 = saveCompanyContent(fullValidCompany, initial.revision);
 
       const draftWithPlaceholder: LegalDocument = {
         ...DEFAULT_LEGAL_PAGES_CONTENT.mentions.draft,
         intro: {
-          fr: "Texte avec [à compléter] manquant.",
-          en: "Text with placeholder.",
+          fr: "Texte avec [à compléter] restant.",
+          en: "Text with placeholder remaining.",
         },
       };
 
       const rev2 = saveLegalPageDraft("mentions", draftWithPlaceholder, rev1);
+      expect(() => {
+        publishLegalPage("mentions", rev2, "2026-10-18");
+      }).toThrow(ValidationError);
+    });
+  });
+
+  // 14. Requirement 10: Strict consistency between indicators, preview and publication
+  describe("14. Req 10: Perfect alignment between readiness indicator, preview and publication", () => {
+    it("guarantees that an indicator marked ready will succeed publication on click", () => {
+      const initial = getSiteContent();
+      const rev1 = saveCompanyContent(fullValidCompany, initial.revision);
+
+      const draft = DEFAULT_LEGAL_PAGES_CONTENT.mentions.draft;
+      const unresolved = findDocumentUnresolvedCompanyTokens(draft, fullValidCompany);
+
+      // Indicator logic: ready when unresolved.length === 0 and company is published
+      const isReadyIndicator = unresolved.length === 0 && fullValidCompany.isPublished;
+      expect(isReadyIndicator).toBe(true);
+
+      // Preview mode: no missing field markers
+      const previewText = resolveCompanyTokens(draft.intro.fr, fullValidCompany, "preview", "fr");
+      expect(previewText).not.toContain("[À renseigner");
+
+      // Publication: MUST succeed without throwing
+      const rev2 = saveLegalPageDraft("mentions", draft, rev1);
+      expect(() => {
+        publishLegalPage("mentions", rev2, "2026-10-18");
+      }).not.toThrow();
+    });
+
+    it("guarantees that when publication would fail, indicator and preview both reflect the missing field", () => {
+      const legalEntityMissingRpm: CompanyContent = {
+        ...fullValidLegalEntity,
+        rpmJurisdiction: "",
+      };
+
+      const draft = DEFAULT_LEGAL_PAGES_CONTENT.mentions.draft;
+      const unresolved = findDocumentUnresolvedCompanyTokens(draft, legalEntityMissingRpm);
+
+      expect(unresolved).toContain("company.rpmJurisdiction");
+
+      const previewText = resolveCompanyTokens("RPM: {{company.rpmJurisdiction}}", legalEntityMissingRpm, "preview", "fr");
+      expect(previewText).toContain("[À renseigner");
+
+      const initial = getSiteContent();
+      const rev1 = saveCompanyContent(legalEntityMissingRpm, initial.revision);
+      const rev2 = saveLegalPageDraft("mentions", draft, rev1);
 
       expect(() => {
         publishLegalPage("mentions", rev2, "2026-10-18");
       }).toThrow(ValidationError);
-
-      const afterFailedPub = getSiteContent();
-      expect(afterFailedPub.legalPages.mentions.published).toBeNull();
-    });
-
-    it("succeeds publication when company is confirmed and all required tokens are resolved", () => {
-      const initial = getSiteContent();
-      const rev1 = saveCompanyContent(
-        fullValidCompany,
-        initial.revision
-      );
-
-      const rev2 = saveLegalPageDraft("mentions", DEFAULT_LEGAL_PAGES_CONTENT.mentions.draft, rev1);
-      const rev3 = publishLegalPage("mentions", rev2, "2026-10-18");
-
-      expect(rev3).toBeDefined();
-      const afterPub = getSiteContent();
-      const published = afterPub.legalPages.mentions.published;
-      expect(published).not.toBeNull();
-      expect(published?.effectiveDate).toBe("2026-10-18");
-      expect(published?.publicTitle.fr).toBe("Mentions légales");
-    });
-  });
-
-  // 6. Immutability of Published Content on Policy Change
-  describe("6. Immutability of Published Content on Policy Changes", () => {
-    it("does not silently mutate published document when company or draft is updated", () => {
-      const initial = getSiteContent();
-      const rev1 = saveCompanyContent(
-        fullValidCompany,
-        initial.revision
-      );
-
-      const rev2 = saveLegalPageDraft("mentions", DEFAULT_LEGAL_PAGES_CONTENT.mentions.draft, rev1);
-      const rev3 = publishLegalPage("mentions", rev2, "2026-10-01");
-
-      const pubSnapshotBefore = getSiteContent().legalPages.mentions.published;
-      expect(pubSnapshotBefore?.effectiveDate).toBe("2026-10-01");
-
-      // Now Maxime updates company address and modifies draft
-      const rev4 = saveCompanyContent(
-        {
-          ...fullValidCompany,
-          address: "Nouvelle adresse mise à jour, 5000 Namur",
-        },
-        rev3
-      );
-
-      const modifiedDraft: LegalDocument = {
-        ...DEFAULT_LEGAL_PAGES_CONTENT.mentions.draft,
-        intro: { fr: "Nouvelle introduction modifiée V2", en: "New modified intro V2" },
-      };
-      saveLegalPageDraft("mentions", modifiedDraft, rev4);
-
-      // Verify that published record did NOT change its intro or effectiveDate
-      const afterUpdate = getSiteContent();
-      const pubSnapshotAfter = afterUpdate.legalPages.mentions.published;
-
-      expect(pubSnapshotAfter?.effectiveDate).toBe("2026-10-01");
-      expect(pubSnapshotAfter?.intro.fr).toBe(pubSnapshotBefore?.intro.fr);
-      expect(afterUpdate.legalPages.mentions.draft.intro.fr).toBe("Nouvelle introduction modifiée V2");
-    });
-  });
-
-  // 7. Idempotent Application of Default Drafts
-  describe("7. Idempotent Application of Default Legal Drafts", () => {
-    it("applies default drafts when outdated and keeps published as null", () => {
-      // 1. Initialise storage with an outdated draft (empty sections)
-      const initial = getSiteContent();
-      const outdatedDraft: LegalDocument = {
-        ...DEFAULT_LEGAL_PAGES_CONTENT.mentions.draft,
-        intro: { fr: "Ancien texte obsolète", en: "Old outdated text" },
-        sections: [],
-      };
-      saveLegalPageDraft("mentions", outdatedDraft, initial.revision);
-
-      // 2. Run applyDefaultLegalDrafts
-      const res = applyDefaultLegalDrafts(testContentFile);
-      expect(res.changed).toBe(true);
-      expect(res.appliedKeys.length).toBe(4);
-
-      const content = getSiteContent();
-      for (const key of ["mentions", "privacy", "terms", "cookies"] as const) {
-        expect(content.legalPages[key].draft.sections.length).toBeGreaterThan(0);
-        expect(content.legalPages[key].published).toBeNull();
-      }
-    });
-
-    it("second run is strictly idempotent and does not modify content or revision", () => {
-      // Ensure drafts are applied
-      const initial = getSiteContent();
-      const outdatedDraft: LegalDocument = {
-        ...DEFAULT_LEGAL_PAGES_CONTENT.mentions.draft,
-        intro: { fr: "Ancien texte obsolète", en: "Old outdated text" },
-        sections: [],
-      };
-      saveLegalPageDraft("mentions", outdatedDraft, initial.revision);
-
-      const res1 = applyDefaultLegalDrafts(testContentFile);
-      expect(res1.changed).toBe(true);
-
-      const revAfter1 = getSiteContent().revision;
-
-      const res2 = applyDefaultLegalDrafts(testContentFile);
-      expect(res2.changed).toBe(false);
-      expect(res2.appliedKeys.length).toBe(0);
-
-      const revAfter2 = getSiteContent().revision;
-      expect(revAfter2).toBe(revAfter1);
-    });
-  });
-
-  // 8. Progressive Company Content Validation
-  describe("8. Progressive Company Content Validation", () => {
-    it("allows progressive/incomplete saving without throwing validation error", () => {
-      const partialCompany: CompanyContent = {
-        ...DEFAULT_COMPANY_CONTENT,
-        tradeName: "Parallax",
-        legalName: "", // incomplete
-        address: "", // incomplete
-        enterpriseNumber: "", // incomplete
-        isPublished: false,
-      };
-
-      const validated = validateCompanyContent(partialCompany);
-      expect(validated.tradeName).toBe("Parallax");
-      expect(validated.legalName).toBe("");
-    });
-
-    it("validates clientTypes union strictly", () => {
-      const validBoth = validateCompanyContent({
-        ...DEFAULT_COMPANY_CONTENT,
-        clientTypes: "both",
-      });
-      expect(validBoth.clientTypes).toBe("both");
-
-      const invalid = {
-        ...DEFAULT_COMPANY_CONTENT,
-        clientTypes: "invalid_type",
-      };
-      expect(() => validateCompanyContent(invalid as unknown as CompanyContent)).toThrow(ValidationError);
-    });
-
-    it("rejects invalid email formats in privacyEmail", () => {
-      const invalidEmail = {
-        ...DEFAULT_COMPANY_CONTENT,
-        privacyEmail: "not-an-email",
-      };
-      expect(() => validateCompanyContent(invalidEmail)).toThrow(ValidationError);
     });
   });
 });

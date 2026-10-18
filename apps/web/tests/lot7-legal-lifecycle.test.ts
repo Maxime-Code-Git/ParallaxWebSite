@@ -172,6 +172,7 @@ describe("Lot 7 - Legal Pages Lifecycle (Draft / Publish / Unpublish)", () => {
         legalForm: "SRL",
         address: "Rue de Namur 10, 1000 Bruxelles",
         enterpriseNumber: "0123.456.789",
+        rpmJurisdiction: "Bruxelles",
         publicationDirector: "Maxime",
         hostingProvider: "Infomaniak SA",
         hostingAddress: "Rue Eugène-Marziano 25, 1227 Genève, Suisse",

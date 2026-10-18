@@ -85,6 +85,16 @@ export function runApplyLegalDrafts(targetPath) {
         break;
       }
     }
+    if (key === "terms") {
+      const disputesSec = existingDraft.sections?.find((s) => s.id === "disputes_law");
+      const hasOutdatedDispute = disputesSec?.paragraphs?.some(
+        (p) => p.fr.includes("{{company.rpmJurisdiction}}") || p.fr.includes("ou Bruxelles")
+      );
+      if (hasOutdatedDispute) {
+        needsUpdate = true;
+        break;
+      }
+    }
   }
 
   if (!needsUpdate) {

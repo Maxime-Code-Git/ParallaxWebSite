@@ -18,7 +18,8 @@ import {
   RevisionConflictError,
   ValidationError,
 } from "../../lib/site-content.server";
-import type { CompanyContent } from "../../lib/site-content.shared";
+import type { CompanyContent, LegalPersonalityType, VatRegimeType } from "../../lib/site-content.shared";
+import { isRpmApplicable } from "../../lib/site-content.shared";
 import formStyles from "./adminForms.module.css";
 
 export function meta() {
@@ -306,8 +307,31 @@ export default function AdminCompanyPage() {
                 className={formStyles.input}
                 value={company.legalForm}
                 onChange={(e) => handleChange("legalForm", e.target.value)}
-                placeholder="Ex. Entreprise individuelle, SRL, etc."
+                placeholder="Ex. Entreprise individuelle, Association de fait, SRL, etc."
               />
+            </div>
+
+            <div className={formStyles.field}>
+              <label htmlFor="company-legalPersonality" className={formStyles.label}>
+                Situation juridique (applicabilité du RPM)
+              </label>
+              <select
+                id="company-legalPersonality"
+                className={formStyles.select}
+                value={company.legalPersonality || ""}
+                onChange={(e) => {
+                  const val = e.target.value as LegalPersonalityType;
+                  handleChange("legalPersonality", val);
+                }}
+              >
+                <option value="">À déterminer / Non renseigné</option>
+                <option value="natural_person">Personne physique (Entreprise individuelle / Indépendant — RPM non applicable)</option>
+                <option value="unincorporated_association">Association sans personnalité juridique (Association de fait — RPM non applicable)</option>
+                <option value="legal_entity">Personne morale (SRL, SA, ASBL, SC, etc. — RPM applicable)</option>
+              </select>
+              <span className={formStyles.helper}>
+                En droit belge (art. 2:20 CSA), le Registre des Personnes Morales s&apos;applique exclusivement aux personnes morales.
+              </span>
             </div>
 
             <div className={formStyles.row2}>
@@ -341,14 +365,45 @@ export default function AdminCompanyPage() {
                   placeholder="Ex. BE 0123.456.789"
                 />
                 <span className={formStyles.helper}>
-                  Numéro d'assujettissement TVA (si applicable).
+                  Numéro d'assujettissement TVA (si assujetti).
                 </span>
               </div>
             </div>
 
             <div className={formStyles.field}>
+              <label htmlFor="company-vatRegimeType" className={formStyles.label}>
+                Régime d'assujettissement TVA
+              </label>
+              <select
+                id="company-vatRegimeType"
+                className={formStyles.select}
+                value={company.vatRegimeType || ""}
+                onChange={(e) => {
+                  const val = e.target.value as VatRegimeType;
+                  handleChange("vatRegimeType", val);
+                  if (val === "standard" && !company.vatRegime) {
+                    handleChange("vatRegime", "Régime normal de TVA");
+                  } else if (val === "small_business_exemption" && !company.vatRegime) {
+                    handleChange("vatRegime", "Franchise de taxe pour petites entreprises (art. 56bis du Code de la TVA)");
+                  } else if (val === "non_subject" && !company.vatRegime) {
+                    handleChange("vatRegime", "Non assujetti à la TVA");
+                  }
+                }}
+              >
+                <option value="">À déterminer / Non renseigné</option>
+                <option value="standard">Régime normal de TVA (soumis à la TVA)</option>
+                <option value="small_business_exemption">Régime de franchise de taxe pour petites entreprises (art. 56bis)</option>
+                <option value="non_subject">Non assujetti à la TVA (hors champ ou opérations exemptées)</option>
+                <option value="other">Autre situation particulière (à préciser ci-dessous)</option>
+              </select>
+              <span className={formStyles.helper}>
+                Sélectionnez votre situation fiscale réelle. Le numéro de TVA seul ne permet pas de déduire le régime.
+              </span>
+            </div>
+
+            <div className={formStyles.field}>
               <label htmlFor="company-vatRegime" className={formStyles.label}>
-                Régime TVA particulier (optionnel)
+                Libellé du régime TVA (mention légale et CGV)
               </label>
               <input
                 id="company-vatRegime"
@@ -356,8 +411,11 @@ export default function AdminCompanyPage() {
                 className={formStyles.input}
                 value={company.vatRegime || ""}
                 onChange={(e) => handleChange("vatRegime", e.target.value)}
-                placeholder="Ex. Régime de la franchise de taxe pour petites entreprises (art. 56bis du Code de la TVA)"
+                placeholder="Ex. Régime normal de TVA ou Franchise de taxe pour petites entreprises (art. 56bis du Code de la TVA)"
               />
+              <span className={formStyles.helper}>
+                Précise les modalités d'application de la TVA sur vos tarifs et factures (notamment dans les CGV).
+              </span>
             </div>
 
             <div className={formStyles.field}>
@@ -382,8 +440,26 @@ export default function AdminCompanyPage() {
           <div className={formStyles.card}>
             <h2 className={formStyles.cardTitle}>2. Immatriculation & Registre (RPM)</h2>
             <p className={formStyles.helper}>
-              Mention obligatoire pour les entreprises inscrites auprès de la BCE en Belgique.
+              Pour les personnes morales concernées (art. 2:20 CSA). Ce champ n&apos;attribue pas de compétence judiciaire contractuelle.
             </p>
+
+            {isRpmApplicable(company) === false ? (
+              <div className={formStyles.infoNotice}>
+                <strong>Non applicable :</strong> En personne physique ou association sans personnalité juridique, vous ne disposez pas d&apos;un Registre des Personnes Morales (RPM). Ce champ peut rester vide sans empêcher la publication des mentions légales et des conditions générales.
+              </div>
+            ) : isRpmApplicable(company) === true ? (
+              <div className={company.rpmJurisdiction ? formStyles.successNotice : formStyles.warningNotice}>
+                {company.rpmJurisdiction ? (
+                  <span>✓ <strong>Requis et renseigné :</strong> Greffe du tribunal de l&apos;entreprise où le dossier est tenu.</span>
+                ) : (
+                  <span>⚠️ <strong>Requis pour les personnes morales :</strong> Veuillez indiquer le tribunal de l&apos;entreprise compétent pour votre siège (ex. Tribunal de l&apos;entreprise francophone de Bruxelles).</span>
+                )}
+              </div>
+            ) : (
+              <div className={formStyles.warningNotice}>
+                ⚠️ <strong>Statut à confirmer :</strong> Veuillez renseigner votre situation juridique dans la section 1 ci-dessus pour déterminer si le RPM s&apos;applique à votre structure.
+              </div>
+            )}
 
             <div className={formStyles.field}>
               <label htmlFor="company-rpmJurisdiction" className={formStyles.label}>
@@ -398,7 +474,7 @@ export default function AdminCompanyPage() {
                 placeholder="Ex. Tribunal de l'entreprise francophone de Bruxelles (ou Liège, Mons, etc.)"
               />
               <span className={formStyles.helper}>
-                Indique le greffe où le dossier d'entreprise est tenu. Cette mention n'attribue pas de juridiction exclusive pour les litiges avec les consommateurs.
+                Indique le tribunal de l&apos;entreprise où le dossier de la personne morale est déposé. Ne concerne pas les personnes physiques.
               </span>
             </div>
           </div>

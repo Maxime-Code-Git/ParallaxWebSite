@@ -30,6 +30,8 @@ import {
   type CompanyContent,
   DEFAULT_COMPANY_CONTENT,
   resolveCompanyTokens,
+  isRpmApplicable,
+  isRpmOnlyParagraph,
 } from "../../lib/site-content.shared";
 import formStyles from "./adminForms.module.css";
 
@@ -665,6 +667,24 @@ export default function AdminLegalEditPage() {
               </span>
             </div>
             <div className={formStyles.companyTokenItem}>
+              <span className={formStyles.companyTokenKey}>Régime TVA</span>
+              <span className={company.vatRegime ? formStyles.companyTokenValue : formStyles.companyTokenMissing}>
+                {company.vatRegime || "Non renseigné"}
+              </span>
+            </div>
+            <div className={formStyles.companyTokenItem}>
+              <span className={formStyles.companyTokenKey}>RPM / Tribunal compétent</span>
+              {isRpmApplicable(company) === false ? (
+                <span className={formStyles.companyTokenValue}>Non applicable (personne physique / association de fait)</span>
+              ) : isRpmApplicable(company) === true ? (
+                <span className={company.rpmJurisdiction ? formStyles.companyTokenValue : formStyles.companyTokenMissing}>
+                  {company.rpmJurisdiction || "Non renseigné (requis pour personne morale)"}
+                </span>
+              ) : (
+                <span className={formStyles.companyTokenMissing}>Statut à confirmer dans Entreprise</span>
+              )}
+            </div>
+            <div className={formStyles.companyTokenItem}>
               <span className={formStyles.companyTokenKey}>Hébergeur web</span>
               <span className={company.hostingProvider ? formStyles.companyTokenValue : formStyles.companyTokenMissing}>
                 {company.hostingProvider ? `${company.hostingProvider}${company.hostingCountry ? ` (${company.hostingCountry})` : ""}` : "Non renseigné"}
@@ -774,7 +794,14 @@ export default function AdminLegalEditPage() {
                 </div>
 
                 <div className={formStyles.field}>
-                  <label className={formStyles.label}>Paragraphes ({activeLang.toUpperCase()})</label>
+                  <label className={formStyles.label}>
+                    <span>Paragraphes ({activeLang.toUpperCase()})</span>
+                    {rawText.includes("company.rpmJurisdiction") && (
+                      <span className={formStyles.conditionalBadge}>
+                        Conditionnel : RPM (omis automatiquement si personne physique)
+                      </span>
+                    )}
+                  </label>
                   <textarea
                     className={formStyles.textarea}
                     rows={5}
@@ -785,7 +812,17 @@ export default function AdminLegalEditPage() {
                   {showResolvedPreview && (
                     <div className={formStyles.resolvedPreviewBox}>
                       <span className={formStyles.labelHint}>Aperçu résolu :</span>
-                      <div>{resolveCompanyTokens(rawText, company, "preview", activeLang)}</div>
+                      <div>
+                        {(() => {
+                          const resolved = resolveCompanyTokens(rawText, company, "preview", activeLang);
+                          if (!resolved.trim() && isRpmApplicable(company) === false && isRpmOnlyParagraph(rawText)) {
+                            return (
+                              <em>(Ce paragraphe RPM est automatiquement omis car le Registre des Personnes Morales ne s&apos;applique pas aux personnes physiques / associations sans personnalité juridique)</em>
+                            );
+                          }
+                          return resolved;
+                        })()}
+                      </div>
                     </div>
                   )}
                 </div>

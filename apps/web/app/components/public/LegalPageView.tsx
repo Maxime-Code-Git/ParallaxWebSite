@@ -9,6 +9,7 @@ import {
   type LegalDocument,
   type LegalPageKey,
   resolveCompanyTokens,
+  isRpmApplicable,
 } from "../../lib/site-content.shared";
 import {
   setClientValidatedPreferences,
@@ -328,7 +329,7 @@ export function LegalPageView({
                         </div>
                         <div className={styles.identityValue}>
                           {company.enterpriseNumber}
-                          {company.rpmJurisdiction && (
+                          {isRpmApplicable(company) !== false && company.rpmJurisdiction && (
                             <span className={styles.metaSubtext}>
                               {" — "}
                               {lang === "fr"
@@ -340,7 +341,7 @@ export function LegalPageView({
                       </>
                     )}
 
-                    {company.vatNumber && (
+                    {company.vatNumber ? (
                       <>
                         <div className={styles.identityLabel}>
                           {lang === "fr" ? "N° de TVA" : "VAT number"}
@@ -352,7 +353,16 @@ export function LegalPageView({
                           )}
                         </div>
                       </>
-                    )}
+                    ) : company.vatRegime ? (
+                      <>
+                        <div className={styles.identityLabel}>
+                          {lang === "fr" ? "Régime TVA" : "VAT regime"}
+                        </div>
+                        <div className={styles.identityValue}>
+                          {company.vatRegime}
+                        </div>
+                      </>
+                    ) : null}
 
                     {company.publicationDirector && (
                       <>
@@ -419,18 +429,26 @@ export function LegalPageView({
                     <h2 className={styles.sectionTitle}>
                       {resolveCompanyTokens(section.title[lang], company, mode, lang)}
                     </h2>
-                    {section.paragraphs.map((p, pIdx) => (
-                      <p key={pIdx} className={styles.paragraph}>
-                        {resolveCompanyTokens(p[lang], company, mode, lang)}
-                      </p>
-                    ))}
+                    {section.paragraphs.map((p, pIdx) => {
+                      const text = resolveCompanyTokens(p[lang], company, mode, lang);
+                      if (!text.trim()) return null;
+                      return (
+                        <p key={pIdx} className={styles.paragraph}>
+                          {text}
+                        </p>
+                      );
+                    })}
                     {section.listItems && section.listItems.length > 0 && (
                       <ul className={styles.list}>
-                        {section.listItems.map((li, lIdx) => (
-                          <li key={lIdx} className={styles.listItem}>
-                            {resolveCompanyTokens(li[lang], company, mode, lang)}
-                          </li>
-                        ))}
+                        {section.listItems.map((li, lIdx) => {
+                          const text = resolveCompanyTokens(li[lang], company, mode, lang);
+                          if (!text.trim()) return null;
+                          return (
+                            <li key={lIdx} className={styles.listItem}>
+                              {text}
+                            </li>
+                          );
+                        })}
                       </ul>
                     )}
                   </article>

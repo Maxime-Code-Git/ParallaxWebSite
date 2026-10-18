@@ -482,10 +482,12 @@
     "tradeName": "Parallax",
     "legalName": "",
     "legalForm": "",
+    "legalPersonality": "",
     "address": "",
     "enterpriseNumber": "",
     "vatNumber": "",
     "vatRegime": "",
+    "vatRegimeType": "",
     "publicationDirector": "",
     "privacyContact": "",
     "hostingProvider": "",
@@ -1122,8 +1124,8 @@
                 "en": "Consumer mediation (B2C): For unresolved disputes involving a consumer, the client may submit a complaint free of charge to the Belgian Consumer Mediation Service: Boulevard du Roi Albert II 8 Bte 1, 1000 Brussels — Phone: +32 (0)2 702 52 20 — Email: contact@mediationconsommateur.be — Website: www.mediationconsommateur.be."
               },
               {
-                "fr": "Compétence juridictionnelle : À défaut d'accord amiable : pour les clients professionnels (B2B), compétence exclusive est attribuée aux tribunaux de l'arrondissement judiciaire du siège social de l'exploitant ({{company.rpmJurisdiction}} ou Bruxelles) ; pour les consommateurs (B2C), les règles légales de compétence territoriale du Code judiciaire belge s'appliquent.",
-                "en": "Jurisdiction: Failing amicable resolution: for business clients (B2B), exclusive jurisdiction is assigned to the courts of the judicial district of the operator's registered office ({{company.rpmJurisdiction}} or Brussels); for consumers (B2C), statutory jurisdiction rules under the Belgian Judicial Code apply."
+                "fr": "Compétence juridictionnelle : À défaut de résolution amiable, tout litige relatif à la formation, l'exécution ou l'interprétation des présentes conditions générales sera soumis aux juridictions compétentes selon les règles du droit commun belge, sous réserve des dispositions légales impératives protectrices des consommateurs.",
+                "en": "Jurisdiction: Failing amicable settlement, any dispute concerning the formation, performance, or interpretation of these terms and conditions shall be brought before the competent courts in accordance with the ordinary rules of Belgian law, subject to mandatory statutory consumer protection provisions."
               }
             ]
           }

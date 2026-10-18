@@ -10,6 +10,7 @@ import {
   LEGAL_PAGE_KEYS,
   LEGAL_PAGE_URLS,
   COMPANY_TOKEN_LABELS,
+  COMPANY_TOKEN_DETAILS,
   findDocumentUnresolvedCompanyTokens,
   type LegalPageKey,
   type LegalPagesContent,
@@ -104,7 +105,9 @@ export default function AdminLegalListPage() {
             const publicUrls = LEGAL_PAGE_URLS[key];
 
             const unresolvedTokens = findDocumentUnresolvedCompanyTokens(pageRecord.draft, company);
-            const missingLabels = unresolvedTokens.map((t) => COMPANY_TOKEN_LABELS[t]?.fr || t);
+            const missingLabels = unresolvedTokens.map(
+              (t) => COMPANY_TOKEN_DETAILS[t]?.labelFr || COMPANY_TOKEN_LABELS[t]?.fr || t
+            );
             const companyUnpublished = !company.isPublished;
 
             return (

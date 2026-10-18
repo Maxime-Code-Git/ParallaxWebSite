@@ -402,14 +402,29 @@ export const DEFAULT_CONTACT_PAGE_CONTENT: ContactPageContent = {
   },
 };
 
+export type LegalPersonalityType =
+  | "natural_person"
+  | "legal_entity"
+  | "unincorporated_association"
+  | "";
+
+export type VatRegimeType =
+  | "standard"
+  | "small_business_exemption"
+  | "non_subject"
+  | "other"
+  | "";
+
 export interface CompanyContent {
   tradeName: string;
   legalName: string;
   legalForm: string;
+  legalPersonality?: LegalPersonalityType;
   address: string;
   enterpriseNumber: string;
   vatNumber: string;
   vatRegime?: string;
+  vatRegimeType?: VatRegimeType;
   rpmJurisdiction?: string;
   publicationDirector: string;
   privacyContact: string;
@@ -492,6 +507,7 @@ export const COMPANY_TOKEN_LABELS: Record<string, { fr: string; en: string }> = 
   "company.tradeName": { fr: "Nom commercial", en: "Trade name" },
   "company.legalName": { fr: "Dénomination légale / Raison sociale", en: "Legal entity name" },
   "company.legalForm": { fr: "Forme juridique", en: "Legal form" },
+  "company.legalPersonality": { fr: "Situation juridique (applicabilité RPM)", en: "Legal personality" },
   "company.address": { fr: "Adresse du siège", en: "Registered office address" },
   "company.enterpriseNumber": { fr: "N° d'entreprise (BCE)", en: "Company number (BCE)" },
   "company.vatNumber": { fr: "N° de TVA", en: "VAT number" },
@@ -515,6 +531,224 @@ export const COMPANY_TOKEN_LABELS: Record<string, { fr: string; en: string }> = 
   "company.legalOperatorText": { fr: "Identité de l'exploitant", en: "Operating entity identity" },
 };
 
+export const COMPANY_TOKEN_DETAILS: Record<
+  string,
+  { labelFr: string; labelEn: string; sectionFr: string; sectionEn: string }
+> = {
+  "company.tradeName": {
+    labelFr: "Nom commercial",
+    labelEn: "Trade name",
+    sectionFr: "Identité & Statut juridique",
+    sectionEn: "Identity & Legal Status",
+  },
+  "company.legalName": {
+    labelFr: "Dénomination légale / Nom de l'exploitant",
+    labelEn: "Legal entity name",
+    sectionFr: "Identité & Statut juridique",
+    sectionEn: "Identity & Legal Status",
+  },
+  "company.legalForm": {
+    labelFr: "Forme juridique",
+    labelEn: "Legal form",
+    sectionFr: "Identité & Statut juridique",
+    sectionEn: "Identity & Legal Status",
+  },
+  "company.legalPersonality": {
+    labelFr: "Situation juridique (applicabilité RPM)",
+    labelEn: "Legal personality",
+    sectionFr: "Identité & Statut juridique",
+    sectionEn: "Identity & Legal Status",
+  },
+  "company.address": {
+    labelFr: "Adresse du siège / Domicile professionnel",
+    labelEn: "Registered office address",
+    sectionFr: "Établissement & Siège social",
+    sectionEn: "Registered Office",
+  },
+  "company.enterpriseNumber": {
+    labelFr: "N° d'entreprise (BCE)",
+    labelEn: "Company number (BCE)",
+    sectionFr: "Identité & Statut juridique",
+    sectionEn: "Identity & Legal Status",
+  },
+  "company.vatNumber": {
+    labelFr: "N° de TVA",
+    labelEn: "VAT number",
+    sectionFr: "Identité & Statut juridique",
+    sectionEn: "Identity & Legal Status",
+  },
+  "company.vatRegime": {
+    labelFr: "Régime TVA",
+    labelEn: "VAT regime",
+    sectionFr: "Identité & Statut juridique",
+    sectionEn: "Identity & Legal Status",
+  },
+  "company.rpmJurisdiction": {
+    labelFr: "RPM / Tribunal de l'entreprise compétent",
+    labelEn: "Competent registry (RPM)",
+    sectionFr: "Immatriculation & Registre (RPM)",
+    sectionEn: "Registration & RPM",
+  },
+  "company.publicationDirector": {
+    labelFr: "Responsable de la publication",
+    labelEn: "Publication director",
+    sectionFr: "Établissement & Direction",
+    sectionEn: "Direction",
+  },
+  "company.privacyContact": {
+    labelFr: "Contact vie privée",
+    labelEn: "Privacy contact",
+    sectionFr: "Vie privée & DPO",
+    sectionEn: "Privacy & DPO",
+  },
+  "company.privacyEmail": {
+    labelFr: "E-mail vie privée",
+    labelEn: "Privacy email",
+    sectionFr: "Vie privée & DPO",
+    sectionEn: "Privacy & DPO",
+  },
+  "company.dpoContact": {
+    labelFr: "Contact DPO",
+    labelEn: "DPO contact",
+    sectionFr: "Vie privée & DPO",
+    sectionEn: "Privacy & DPO",
+  },
+  "company.hostingProvider": {
+    labelFr: "Hébergeur",
+    labelEn: "Web host",
+    sectionFr: "Hébergement & Prestataires",
+    sectionEn: "Hosting & Providers",
+  },
+  "company.hostingAddress": {
+    labelFr: "Adresse de l'hébergeur",
+    labelEn: "Host address",
+    sectionFr: "Hébergement & Prestataires",
+    sectionEn: "Hosting & Providers",
+  },
+  "company.hostingCountry": {
+    labelFr: "Pays de l'hébergement",
+    labelEn: "Hosting country",
+    sectionFr: "Hébergement & Prestataires",
+    sectionEn: "Hosting & Providers",
+  },
+  "company.email": {
+    labelFr: "E-mail public de contact",
+    labelEn: "Public email",
+    sectionFr: "Coordonnées publiques",
+    sectionEn: "Public Details",
+  },
+  "company.phone": {
+    labelFr: "Téléphone public",
+    labelEn: "Public phone",
+    sectionFr: "Coordonnées publiques",
+    sectionEn: "Public Details",
+  },
+  "company.clientTypes": {
+    labelFr: "Clientèle concernée (B2B / B2C)",
+    labelEn: "Client types",
+    sectionFr: "Conditions des prestations",
+    sectionEn: "Terms of Service",
+  },
+  "company.legalOperatorText": {
+    labelFr: "Identité de l'exploitant",
+    labelEn: "Operator identity",
+    sectionFr: "Identité & Statut juridique",
+    sectionEn: "Identity & Legal Status",
+  },
+};
+
+export function getLegalPersonalityType(
+  company?: Partial<CompanyContent> | null
+): LegalPersonalityType {
+  if (!company) return "";
+  if (company.legalPersonality) {
+    return company.legalPersonality;
+  }
+  const form = company.legalForm?.trim().toLowerCase() || "";
+  if (!form) return "";
+  if (
+    form === "personne physique" ||
+    form === "indépendant" ||
+    form === "indépendant en personne physique" ||
+    form === "travailleur indépendant" ||
+    form === "entreprise individuelle" ||
+    form === "physique"
+  ) {
+    return "natural_person";
+  }
+  if (
+    form === "association de fait" ||
+    form === "association sans personnalité juridique" ||
+    form === "indivision" ||
+    form === "société simple sans personnalité juridique"
+  ) {
+    return "unincorporated_association";
+  }
+  if (
+    form === "srl" ||
+    form === "sa" ||
+    form === "sc" ||
+    form === "snc" ||
+    form === "scomm" ||
+    form === "asbl" ||
+    form === "fondation" ||
+    form.startsWith("société")
+  ) {
+    return "legal_entity";
+  }
+  return "";
+}
+
+export function isRpmApplicable(
+  company?: Partial<CompanyContent> | null
+): boolean | undefined {
+  const personality = getLegalPersonalityType(company);
+  if (!personality) return undefined;
+  if (personality === "natural_person" || personality === "unincorporated_association") {
+    return false;
+  }
+  if (personality === "legal_entity") {
+    return true;
+  }
+  return undefined;
+}
+
+export function getVatRegimeType(company?: Partial<CompanyContent> | null): VatRegimeType {
+  if (!company) return "";
+  if (company.vatRegimeType) return company.vatRegimeType;
+  const reg = company.vatRegime?.trim().toLowerCase() || "";
+  if (!reg) return "";
+  if (reg.includes("non assujetti") || reg.includes("non-assujetti") || reg.includes("hors champ") || reg.includes("exempté")) {
+    return "non_subject";
+  }
+  if (reg.includes("franchise") || reg.includes("56bis") || reg.includes("petite entreprise")) {
+    return "small_business_exemption";
+  }
+  if (reg.includes("normal") || reg.includes("assujetti")) {
+    return "standard";
+  }
+  return "other";
+}
+
+export function isVatNumberApplicable(company?: Partial<CompanyContent> | null): boolean | undefined {
+  const regType = getVatRegimeType(company);
+  if (regType === "non_subject") return false;
+  if (regType === "standard" || regType === "small_business_exemption") return true;
+  if (company?.vatNumber?.trim()) return true;
+  if (!company?.vatRegime?.trim()) return undefined;
+  return true;
+}
+
+export function isRpmOnlyParagraph(text: string): boolean {
+  if (!text) return false;
+  const trimmed = text.trim();
+  return (
+    (trimmed.startsWith("Registre des Personnes Morales") ||
+      trimmed.startsWith("Competent Enterprise Court")) &&
+    trimmed.includes("company.rpmJurisdiction")
+  );
+}
+
 export function resolveCompanyTokens(
   text: string,
   company: Partial<CompanyContent> | null | undefined,
@@ -522,7 +756,28 @@ export function resolveCompanyTokens(
   lang: "fr" | "en" = "fr"
 ): string {
   if (!text) return "";
-  return text.replace(/\{\{([a-zA-Z0-9_.]+)\}\}/g, (_match, tokenKey) => {
+
+  // Omit RPM-only paragraphs when RPM is not applicable
+  if (isRpmOnlyParagraph(text) && isRpmApplicable(company) === false) {
+    return "";
+  }
+
+  // Handle VAT paragraph cleanly when business is non-subject to VAT and has no VAT number
+  let processedText = text;
+  if (isVatNumberApplicable(company) === false && !company?.vatNumber?.trim()) {
+    const regime = company?.vatRegime?.trim() || (lang === "fr" ? "Non assujetti" : "Non-subject to VAT");
+    processedText = processedText
+      .replace(
+        /— Numéro de TVA intracommunautaire : \{\{company\.vatNumber\}\} \(\{\{company\.vatRegime\}\}\)\./g,
+        `— Régime TVA : ${regime}.`
+      )
+      .replace(
+        /— Intra-community VAT number: \{\{company\.vatNumber\}\} \(\{\{company\.vatRegime\}\}\)\./g,
+        `— VAT regime: ${regime}.`
+      );
+  }
+
+  return processedText.replace(/\{\{([a-zA-Z0-9_.]+)\}\}/g, (_match, tokenKey) => {
     if (tokenKey === "company.legalOperatorText") {
       const trade = company?.tradeName?.trim() || "Parallax";
       const legal = company?.legalName?.trim();
@@ -534,6 +789,24 @@ export function resolveCompanyTokens(
           : `${trade} (operated by ${legal}${formSuffix})`;
       }
       return trade;
+    }
+
+    if (tokenKey === "company.rpmJurisdiction") {
+      const applicable = isRpmApplicable(company);
+      if (applicable === false) {
+        return "";
+      }
+      if (applicable === true) {
+        const rpm = company?.rpmJurisdiction?.trim();
+        if (rpm) return rpm;
+        return mode === "preview"
+          ? (lang === "fr" ? "[À renseigner dans Entreprise : RPM / Tribunal compétent]" : "[To be filled in Company: Competent registry (RPM)]")
+          : "";
+      }
+      // Undetermined legal personality
+      return mode === "preview"
+        ? (lang === "fr" ? "[À confirmer dans Entreprise : Statut juridique pour applicabilité RPM]" : "[To be confirmed in Company: Legal status for RPM applicability]")
+        : "";
     }
 
     const prop = tokenKey.replace(/^company\./, "") as keyof CompanyContent;
@@ -551,7 +824,8 @@ export function resolveCompanyTokens(
     }
 
     if (mode === "preview") {
-      const label = COMPANY_TOKEN_LABELS[tokenKey]?.[lang] || tokenKey;
+      const label = COMPANY_TOKEN_LABELS[tokenKey]?.[lang] ||
+        COMPANY_TOKEN_DETAILS[tokenKey]?.[lang === "fr" ? "labelFr" : "labelEn"] || tokenKey;
       return `[À renseigner dans Entreprise : ${label}]`;
     }
 
@@ -575,6 +849,50 @@ export function findUnresolvedCompanyTokens(
       }
       continue;
     }
+
+    if (tokenKey === "company.rpmJurisdiction") {
+      const applicable = isRpmApplicable(company);
+      if (applicable === false) {
+        // Sole proprietorship or unincorporated association: RPM is not applicable
+        continue;
+      }
+      if (applicable === true) {
+        if (!company?.rpmJurisdiction?.trim()) {
+          unresolved.push(tokenKey);
+        }
+        continue;
+      }
+      // Undetermined legal personality
+      unresolved.push("company.legalPersonality");
+      continue;
+    }
+
+    if (tokenKey === "company.vatNumber") {
+      const applicable = isVatNumberApplicable(company);
+      if (applicable === false) {
+        // Non-subject to VAT: VAT number is not required
+        continue;
+      }
+      if (applicable === true) {
+        if (!company?.vatNumber?.trim()) {
+          unresolved.push(tokenKey);
+        }
+        continue;
+      }
+      // Undetermined VAT status
+      if (!company?.vatRegime?.trim()) {
+        unresolved.push("company.vatRegime");
+      }
+      continue;
+    }
+
+    if (tokenKey === "company.vatRegime") {
+      if (!company?.vatRegime?.trim()) {
+        unresolved.push(tokenKey);
+      }
+      continue;
+    }
+
     const prop = tokenKey.replace(/^company\./, "") as keyof CompanyContent;
     let val = "";
     if (prop === "privacyEmail") {
@@ -609,8 +927,12 @@ export function resolveLegalDocument(
     sections: doc.sections.map((s) => ({
       ...s,
       title: resolveLocalized(s.title),
-      paragraphs: s.paragraphs.map(resolveLocalized),
-      listItems: s.listItems?.map(resolveLocalized),
+      paragraphs: s.paragraphs
+        .map(resolveLocalized)
+        .filter((p) => p.fr.trim().length > 0 || p.en.trim().length > 0),
+      listItems: s.listItems
+        ?.map(resolveLocalized)
+        .filter((li) => li.fr.trim().length > 0 || li.en.trim().length > 0),
     })),
     inventory: doc.inventory?.map((item) => ({
       ...item,
@@ -679,10 +1001,12 @@ export const DEFAULT_COMPANY_CONTENT: CompanyContent = {
   tradeName: "Parallax",
   legalName: "",
   legalForm: "",
+  legalPersonality: "",
   address: "",
   enterpriseNumber: "",
   vatNumber: "",
   vatRegime: "",
+  vatRegimeType: "",
   rpmJurisdiction: "",
   publicationDirector: "",
   privacyContact: "",
@@ -1320,8 +1644,8 @@ export const DEFAULT_LEGAL_PAGES_CONTENT: LegalPagesContent = {
               en: "Consumer mediation (B2C): For unresolved disputes involving a consumer, the client may submit a complaint free of charge to the Belgian Consumer Mediation Service: Boulevard du Roi Albert II 8 Bte 1, 1000 Brussels — Phone: +32 (0)2 702 52 20 — Email: contact@mediationconsommateur.be — Website: www.mediationconsommateur.be.",
             },
             {
-              fr: "Compétence juridictionnelle : À défaut d'accord amiable : pour les clients professionnels (B2B), compétence exclusive est attribuée aux tribunaux de l'arrondissement judiciaire du siège social de l'exploitant ({{company.rpmJurisdiction}} ou Bruxelles) ; pour les consommateurs (B2C), les règles légales de compétence territoriale du Code judiciaire belge s'appliquent.",
-              en: "Jurisdiction: Failing amicable resolution: for business clients (B2B), exclusive jurisdiction is assigned to the courts of the judicial district of the operator's registered office ({{company.rpmJurisdiction}} or Brussels); for consumers (B2C), statutory jurisdiction rules under the Belgian Judicial Code apply.",
+              fr: "Compétence juridictionnelle : À défaut de résolution amiable, tout litige relatif à la formation, l'exécution ou l'interprétation des présentes conditions générales sera soumis aux juridictions compétentes selon les règles du droit commun belge, sous réserve des dispositions légales impératives protectrices des consommateurs.",
+              en: "Jurisdiction: Failing amicable settlement, any dispute concerning the formation, performance, or interpretation of these terms and conditions shall be brought before the competent courts in accordance with the ordinary rules of Belgian law, subject to mandatory statutory consumer protection provisions.",
             },
           ],
         },
