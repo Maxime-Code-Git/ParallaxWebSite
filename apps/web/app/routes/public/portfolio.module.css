@@ -537,17 +537,22 @@
   max-width: 320px;
 }
 
-/* Masonry / Gallery Toggle */
+/* Masonry / Complementary Media Toggles */
 .galleryToggleWrap {
   position: relative;
   z-index: 2;
   max-width: 1200px;
   margin: 0 auto;
   padding: 10px 80px 0;
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 20px;
 }
 
-.togglePhotosBtn {
+.togglePhotosBtn,
+.toggleMediaBtn {
   background: none;
   cursor: pointer;
   display: inline-flex;
@@ -560,11 +565,19 @@
   font-size: 18px;
   color: #F5F6F7;
   transition: transform 0.18s ease, border-color 0.18s ease;
+  min-height: 44px;
 }
 
-.togglePhotosBtn:hover {
+.togglePhotosBtn:hover,
+.toggleMediaBtn:hover {
   transform: scale(1.03);
   border-color: #1E9EFF;
+}
+
+.togglePhotosBtn:focus-visible,
+.toggleMediaBtn:focus-visible {
+  outline: 2px solid #1E9EFF;
+  outline-offset: 3px;
 }
 
 .chevronIcon {
@@ -577,6 +590,50 @@
   align-items: center;
   justify-content: center;
   transition: transform 0.3s ease;
+}
+
+/* Category Videos Grid */
+.videosGrid {
+  position: relative;
+  z-index: 2;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 48px 80px 8px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 32px;
+}
+
+.videoGridItem {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.videoThumbCard {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 12px;
+  border: 0.5px solid #232B3A;
+  overflow: hidden;
+  background: #090B13;
+}
+
+.videoThumbCard picture,
+.videoThumbCard img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.videoItemTitle {
+  font-size: 17px;
+  font-weight: 500;
+  color: #F5F6F7;
+  margin: 0;
+  line-height: 1.4;
 }
 
 .masonryGrid {
@@ -804,6 +861,266 @@
 }
 
 /* -------------------------------------------------------------
+ * Explicit Project CTA Buttons ("Découvrir le projet")
+ * ------------------------------------------------------------- */
+
+.projectCtaBtn {
+  margin-top: 24px;
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  background: rgba(12, 15, 23, 0.75);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 0.5px solid #39414F;
+  border-radius: 999px;
+  padding: 6px 6px 6px 22px;
+  color: #F5F6F7;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 15px;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+  transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+  width: fit-content;
+  min-height: 44px;
+  box-sizing: border-box;
+}
+
+.projectCtaBtn:hover {
+  transform: scale(1.03);
+  border-color: #1E9EFF;
+  background: rgba(30, 158, 255, 0.1);
+}
+
+.projectCtaBtn:focus-visible {
+  outline: 2px solid #1E9EFF;
+  outline-offset: 3px;
+}
+
+.projectCtaBtn .circleIcon {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border-radius: 50%;
+  border: 0.5px solid #1E9EFF;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #F5F6F7;
+}
+
+.projectCtaBtnEven {
+  margin-right: auto;
+  margin-left: 0;
+}
+
+.projectCtaBtnOdd {
+  margin-left: auto;
+  margin-right: 0;
+}
+
+.projectCtaBtnVideo {
+  margin: 22px auto 0;
+}
+
+/* -------------------------------------------------------------
+ * Detail Photo Enlargement Triggers
+ * ------------------------------------------------------------- */
+
+.photoExpandBtn {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: zoom-in;
+  display: block;
+  text-align: left;
+}
+
+.photoExpandBtn:focus-visible {
+  outline: 2px solid #1E9EFF;
+  outline-offset: 4px;
+}
+
+.photoGridBtn {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: zoom-in;
+  display: block;
+}
+
+.photoGridBtn:focus-visible {
+  outline: 2px solid #1E9EFF;
+  outline-offset: 4px;
+}
+
+.zoomBadge {
+  position: absolute;
+  bottom: 16px;
+  right: 16px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: rgba(12, 15, 23, 0.75);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 0.5px solid #39414F;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #F5F6F7;
+  opacity: 0.85;
+  transition: transform 0.18s ease, opacity 0.18s ease, border-color 0.18s ease;
+  pointer-events: none;
+}
+
+.photoExpandBtn:hover .zoomBadge,
+.photoGridBtn:hover .zoomBadge {
+  transform: scale(1.1);
+  opacity: 1;
+  border-color: #1E9EFF;
+}
+
+/* -------------------------------------------------------------
+ * Photo Lightbox Dialog
+ * ------------------------------------------------------------- */
+
+.lightboxOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: rgba(8, 10, 16, 0.94);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  box-sizing: border-box;
+}
+
+.lightboxCloseBtn {
+  position: fixed;
+  top: 24px;
+  right: 28px;
+  z-index: 10010;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: rgba(18, 22, 34, 0.85);
+  border: 0.5px solid #39414F;
+  color: #F5F6F7;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.18s ease, border-color 0.18s ease;
+}
+
+.lightboxCloseBtn:hover {
+  transform: scale(1.08);
+  border-color: #1E9EFF;
+}
+
+.lightboxCloseBtn:focus-visible {
+  outline: 2px solid #1E9EFF;
+  outline-offset: 3px;
+}
+
+.lightboxCounter {
+  position: fixed;
+  top: 28px;
+  left: 32px;
+  z-index: 10010;
+  background: rgba(18, 22, 34, 0.85);
+  border: 0.5px solid #39414F;
+  border-radius: 999px;
+  padding: 6px 18px;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 14px;
+  color: #C7CED9;
+  letter-spacing: 0.05em;
+}
+
+.lightboxNavBtn {
+  position: fixed;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 10010;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: rgba(18, 22, 34, 0.85);
+  border: 0.5px solid #39414F;
+  color: #F5F6F7;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+}
+
+.lightboxNavBtn:hover {
+  transform: translateY(-50%) scale(1.08);
+  border-color: #1E9EFF;
+}
+
+.lightboxNavBtn:focus-visible {
+  outline: 2px solid #1E9EFF;
+  outline-offset: 3px;
+}
+
+.lightboxPrevBtn {
+  left: 24px;
+}
+
+.lightboxNextBtn {
+  right: 24px;
+}
+
+.lightboxContent {
+  position: relative;
+  max-width: 90vw;
+  max-height: 88vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.lightboxContent picture,
+.lightboxImage {
+  max-width: 90vw;
+  max-height: 85vh;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  border-radius: 8px;
+  display: block;
+}
+
+.lightboxStatus {
+  color: #C7CED9;
+  font-size: 15px;
+  padding: 20px;
+}
+
+.lightboxError {
+  color: #FF8080;
+  font-size: 15px;
+  padding: 20px;
+  background: rgba(255, 87, 87, 0.1);
+  border: 0.5px solid rgba(255, 87, 87, 0.35);
+  border-radius: 8px;
+}
+
+/* -------------------------------------------------------------
  * Responsive Layout (Desktop 1440px -> Mobile 390px)
  * ------------------------------------------------------------- */
 
@@ -1023,6 +1340,56 @@
   .masonryGrid {
     column-count: 1;
     padding: 24px 24px 8px;
+  }
+  .galleryToggleWrap {
+    padding-left: 24px;
+    padding-right: 24px;
+    gap: 14px;
+  }
+  .togglePhotosBtn,
+  .toggleMediaBtn {
+    width: 100%;
+    justify-content: space-between;
+    padding: 8px 12px 8px 24px;
+    font-size: 16px;
+  }
+  .videosGrid {
+    grid-template-columns: 1fr;
+    padding: 32px 24px 8px;
+    gap: 24px;
+  }
+  .projectCtaBtn {
+    align-self: flex-start;
+  }
+  .projectCtaBtnEven,
+  .projectCtaBtnOdd {
+    margin-left: 0;
+    margin-right: auto;
+  }
+  .lightboxOverlay {
+    padding: 16px;
+  }
+  .lightboxNavBtn {
+    width: 44px;
+    height: 44px;
+  }
+  .lightboxPrevBtn {
+    left: 12px;
+  }
+  .lightboxNextBtn {
+    right: 12px;
+  }
+  .lightboxCloseBtn {
+    top: 16px;
+    right: 16px;
+    width: 44px;
+    height: 44px;
+  }
+  .lightboxCounter {
+    top: 20px;
+    left: 16px;
+    font-size: 13px;
+    padding: 4px 14px;
   }
 }
 

@@ -208,6 +208,10 @@ export default function PortfolioPage() {
   );
   const [panelDirection, setPanelDirection] = useState<"left" | "right">(panelState.direction);
   const [showGallery, setShowGallery] = useState(false);
+  const [showVideos, setShowVideos] = useState(false);
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+  const [lightboxLoading, setLightboxLoading] = useState(false);
+  const [lightboxError, setLightboxError] = useState(false);
   const [activeVideoUrl, setActiveVideoUrl] = useState<string | null>(null);
   const [isReducedMotion, setIsReducedMotion] = useState(false);
 
@@ -242,7 +246,11 @@ export default function PortfolioPage() {
 
   const panelRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLElement | null>(null);
-  const closeBtnRef = useRef<HTMLAnchorElement | null>(null);
+  const entryFocusRef = useRef<HTMLElement | null>(null);
+  const triggerPhotoRef = useRef<HTMLElement | null>(null);
+  const prevLightboxIndexRef = useRef<number | null>(null);
+  const lightboxRef = useRef<HTMLDivElement>(null);
+  const lightboxCloseBtnRef = useRef<HTMLButtonElement | null>(null);
   const isClosingRef = useRef(false);
   const isInitialMountRef = useRef(true);
   const prevIsOpenRef = useRef(panelState.isOpen);
@@ -266,6 +274,8 @@ export default function PortfolioPage() {
       isClosingRef.current = false;
       setPanelDirection(panelState.direction);
       setShowGallery(false);
+      setShowVideos(false);
+      setLightboxIndex(null);
       // Frame 1: Mount visible off-screen without transition
       setPhase("opening");
       document.body.classList.add(styles.bodyScrollLocked);
@@ -279,7 +289,7 @@ export default function PortfolioPage() {
         raf2Id = requestAnimationFrame(() => {
           setPhase("open");
           setTimeout(() => {
-            closeBtnRef.current?.focus();
+            entryFocusRef.current?.focus();
           }, 50);
         });
       });
@@ -294,6 +304,8 @@ export default function PortfolioPage() {
     if (wasOpen && isOpenNow) {
       setPanelDirection(panelState.direction);
       setShowGallery(false);
+      setShowVideos(false);
+      setLightboxIndex(null);
       if (phase !== "open") {
         setPhase("open");
       }
@@ -320,32 +332,175 @@ export default function PortfolioPage() {
     }
   }, [panelState.isOpen, panelState.direction, location.pathname, isReducedMotion]);
 
-  // Restore focus after React has removed inert from the trigger's ancestors.
+  function handleClosePanel() {
+    if (isClosingRef.current) return;
+    isClosingRef.current = true;
+    setPhase("closing");
+
+    const delay = isReducedMotion ? 50 : 500;
+    setTimeout(() => {
+      setPhase("closed");
+      document.body.classList.remove(styles.bodyScrollLocked);
+      navigate(getPortfolioOverviewUrl(lang), { replace: false, preventScrollReset: true });
+    }, delay);
+  }
+
+  // Active or cached category/project for panel display
+  const effectiveCategory = panelState.isOpen
+    ? panelState.activeCategory
+    : cachedContentRef.current.activeCategory;
+  const effectiveProject = panelState.isOpen
+    ? panelState.activeProject
+    : cachedContentRef.current.activeProject;
+  const effectiveProjectPresentationMode = effectiveProject
+    ? resolveProjectPresentationMode(effectiveProject)
+    : "photo";
+
+  // Collect photos available for enlargement inside the active project detail
+  const detailPhotos: {
+    imageId: string;
+    slot: "cover" | "gallery";
+    alt: string;
+    ownerId: string;
+  }[] = [];
+
+  if (effectiveProject) {
+    const seenImageIds = new Set<string>();
+    if (effectiveProjectPresentationMode === "photo" && effectiveProject.coverImageId) {
+      seenImageIds.add(effectiveProject.coverImageId);
+      detailPhotos.push({
+        imageId: effectiveProject.coverImageId,
+        slot: "cover",
+        alt: effectiveProject.coverAlt?.[lang] || effectiveProject.title[lang],
+        ownerId: effectiveProject.id,
+      });
+    }
+    for (const gid of effectiveProject.galleryImageIds) {
+      if (!seenImageIds.has(gid)) {
+        seenImageIds.add(gid);
+        detailPhotos.push({
+          imageId: gid,
+          slot: "gallery",
+          alt: effectiveProject.galleryAlt?.[gid]?.[lang] || effectiveProject.title[lang],
+          ownerId: effectiveProject.id,
+        });
+      }
+    }
+  }
+
+  // Restore focus to overview tile after panel closes and React removes inert
   useEffect(() => {
     if (phase === "closed" && triggerRef.current?.isConnected) {
       triggerRef.current.focus();
     }
   }, [phase]);
 
-  // Handle ESC key (with priority to VideoModal)
+  // Restore focus to photo trigger after lightbox closes and inert is removed
+  useEffect(() => {
+    const prev = prevLightboxIndexRef.current;
+    prevLightboxIndexRef.current = lightboxIndex;
+    if (prev !== null && lightboxIndex === null && triggerPhotoRef.current?.isConnected) {
+      triggerPhotoRef.current.focus();
+    }
+  }, [lightboxIndex]);
+
+  // Reset lightbox whenever project, category, or language changes
+  useEffect(() => {
+    setLightboxIndex(null);
+  }, [panelState.activeProject?.id, panelState.activeCategory, lang]);
+
+  // Focus lightbox close button on open
+  useEffect(() => {
+    if (lightboxIndex !== null) {
+      setTimeout(() => {
+        lightboxCloseBtnRef.current?.focus();
+      }, 0);
+    }
+  }, [lightboxIndex]);
+
+  // Handle ESC and Arrow keys (with priority to VideoModal, then Lightbox, then Panel)
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape" && phase === "open" && !activeVideoUrl) {
+      if (activeVideoUrl) {
+        // Handled by VideoModal
+        return;
+      }
+
+      if (lightboxIndex !== null) {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          e.stopPropagation();
+          setLightboxIndex(null);
+          return;
+        }
+        if (e.key === "ArrowLeft" && detailPhotos.length > 1) {
+          e.preventDefault();
+          setLightboxIndex((prev) =>
+            prev !== null ? (prev - 1 + detailPhotos.length) % detailPhotos.length : 0
+          );
+          setLightboxLoading(true);
+          setLightboxError(false);
+          return;
+        }
+        if (e.key === "ArrowRight" && detailPhotos.length > 1) {
+          e.preventDefault();
+          setLightboxIndex((prev) =>
+            prev !== null ? (prev + 1) % detailPhotos.length : 0
+          );
+          setLightboxLoading(true);
+          setLightboxError(false);
+          return;
+        }
+        return;
+      }
+
+      if (e.key === "Escape" && phase === "open") {
         handleClosePanel();
       }
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [phase, activeVideoUrl, lang, isReducedMotion]);
+  }, [phase, activeVideoUrl, lightboxIndex, detailPhotos.length, lang, isReducedMotion]);
 
-  // Focus trap within panelRef when open
+  // Focus trap within lightboxRef
+  useEffect(() => {
+    if (lightboxIndex === null || !lightboxRef.current) return;
+    const dialogEl = lightboxRef.current;
+
+    function handleLightboxTab(e: KeyboardEvent) {
+      if (e.key !== "Tab") return;
+      const focusable = dialogEl.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [href]:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      );
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+
+      if (e.shiftKey) {
+        if (document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else {
+        if (document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    }
+
+    window.addEventListener("keydown", handleLightboxTab);
+    return () => window.removeEventListener("keydown", handleLightboxTab);
+  }, [lightboxIndex]);
+
+  // Focus trap within panelRef when open (inactive if video modal or lightbox is open)
   useEffect(() => {
     if (phase !== "open" || !panelRef.current) return;
     const panelEl = panelRef.current;
 
     function handleTab(e: KeyboardEvent) {
       if (e.key !== "Tab") return;
-      if (activeVideoUrl) return;
+      if (activeVideoUrl || lightboxIndex !== null) return;
 
       const focusable = panelEl.querySelectorAll<HTMLElement>(
         'a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'
@@ -370,31 +525,8 @@ export default function PortfolioPage() {
 
     window.addEventListener("keydown", handleTab);
     return () => window.removeEventListener("keydown", handleTab);
-  }, [phase, activeVideoUrl]);
+  }, [phase, activeVideoUrl, lightboxIndex]);
 
-  function handleClosePanel() {
-    if (isClosingRef.current) return;
-    isClosingRef.current = true;
-    setPhase("closing");
-
-    const delay = isReducedMotion ? 50 : 500;
-    setTimeout(() => {
-      setPhase("closed");
-      document.body.classList.remove(styles.bodyScrollLocked);
-      navigate(getPortfolioOverviewUrl(lang), { replace: false, preventScrollReset: true });
-    }, delay);
-  }
-
-  // Active or cached category/project for panel display
-  const effectiveCategory = panelState.isOpen
-    ? panelState.activeCategory
-    : cachedContentRef.current.activeCategory;
-  const effectiveProject = panelState.isOpen
-    ? panelState.activeProject
-    : cachedContentRef.current.activeProject;
-  const effectiveProjectPresentationMode = effectiveProject
-    ? resolveProjectPresentationMode(effectiveProject)
-    : "photo";
 
   const activeSec = effectiveCategory
     ? (content.categories?.find((c) => c.id === effectiveCategory) || content.sections?.[effectiveCategory])
@@ -444,6 +576,43 @@ export default function PortfolioPage() {
       }
     }
   }
+
+  // Collect all eligible videos in this category from published non-archived projects
+  const categoryVideos: {
+    provider: "youtube" | "vimeo";
+    videoId: string;
+    url: string;
+    posterImageId: string | null;
+    posterOwnerId: string;
+    posterMediaSlot: "video_cover" | "cover";
+    title: string;
+    projectSlug: string;
+  }[] = [];
+
+  if (categoryProjects.length > 0) {
+    const seenVideoKeys = new Set<string>();
+    for (const p of categoryProjects) {
+      if (p.video?.url && p.video.provider && p.video.videoId) {
+        const key = `${p.video.provider}:${p.video.videoId}`;
+        if (!seenVideoKeys.has(key)) {
+          seenVideoKeys.add(key);
+          const posterImageId = p.video.coverImageId || p.draftVideoCoverImageId || p.coverImageId;
+          const posterMediaSlot: "video_cover" | "cover" = p.video.coverImageId ? "video_cover" : "cover";
+          categoryVideos.push({
+            provider: p.video.provider,
+            videoId: p.video.videoId,
+            url: p.video.url,
+            posterImageId,
+            posterOwnerId: p.id,
+            posterMediaSlot,
+            title: p.title[lang],
+            projectSlug: lang === "fr" ? p.slugFr : p.slugEn,
+          });
+        }
+      }
+    }
+  }
+
 
   const dirParam = `?dir=${panelDirection}`;
 
@@ -641,42 +810,71 @@ export default function PortfolioPage() {
         data-state={phase}
         hidden={phase === "closed"}
       >
-        <div className={styles.panelContent}>
+        <div className={styles.panelContent} inert={lightboxIndex !== null ? true : undefined}>
           {/* Top navigation buttons */}
           <div className={styles.panelNavButtons}>
             {effectiveProject ? (
-              <Link
-                to={`${getPortfolioSectionUrl(effectiveProject.category, lang, content.categories)}${dirParam}`}
-                preventScrollReset
-                className={styles.backBtn}
-              >
-                <span className={`${styles.circleIcon} ${styles.circleIconLarge}`}>
-                  <svg
-                    width="15"
-                    height="15"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="#F5F6F7"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="M19 12 H5" />
-                    <path d="M11 6 L5 12 L11 18" />
+              <>
+                <Link
+                  ref={(node) => {
+                    entryFocusRef.current = node;
+                  }}
+                  to={`${getPortfolioSectionUrl(effectiveProject.category, lang, content.categories)}${dirParam}`}
+                  preventScrollReset
+                  className={styles.backBtn}
+                >
+                  <span className={`${styles.circleIcon} ${styles.circleIconLarge}`}>
+                    <svg
+                      width="15"
+                      height="15"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="#F5F6F7"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M19 12 H5" />
+                      <path d="M11 6 L5 12 L11 18" />
+                    </svg>
+                  </span>
+                  <span>
+                    {(() => {
+                      const cat =
+                        content.categories?.find((c) => c.id === effectiveProject.category) ||
+                        content.sections?.[effectiveProject.category];
+                      const catTitle = cat?.title[lang] || "";
+                      return lang === "fr" ? `Retour à ${catTitle}` : `Back to ${catTitle}`;
+                    })()}
+                  </span>
+                </Link>
+
+                {/* Deterministic Close Button in project view */}
+                <a
+                  href={getPortfolioOverviewUrl(lang)}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    handleClosePanel();
+                  }}
+                  className={styles.closeBtn}
+                  aria-label="Fermer le panneau"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                    <path
+                      d="M18 6 L6 18 M6 6 L18 18"
+                      stroke="#F5F6F7"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
                   </svg>
-                </span>
-                <span>
-                  {(() => {
-                    const cat =
-                      content.categories?.find((c) => c.id === effectiveProject.category) ||
-                      content.sections?.[effectiveProject.category];
-                    const catTitle = cat?.title[lang] || "";
-                    return lang === "fr" ? `Retour à ${catTitle}` : `Back to ${catTitle}`;
-                  })()}
-                </span>
-              </Link>
+                </a>
+              </>
             ) : (
               <button
+                ref={(node) => {
+                  entryFocusRef.current = node;
+                }}
                 type="button"
                 onClick={handleClosePanel}
                 className={styles.backBtn}
@@ -696,31 +894,9 @@ export default function PortfolioPage() {
                     <path d="M11 6 L5 12 L11 18" />
                   </svg>
                 </span>
-                <span>{activeSec?.backButton[lang] || "Retour aux projets"}</span>
+                <span>{activeSec?.backButton[lang] || (lang === "fr" ? "Retour aux projets" : "Back to projects")}</span>
               </button>
             )}
-
-            {/* Deterministic Close Button */}
-            <a
-              ref={closeBtnRef}
-              href={getPortfolioOverviewUrl(lang)}
-              onClick={(e) => {
-                e.preventDefault();
-                handleClosePanel();
-              }}
-              className={styles.closeBtn}
-              aria-label="Fermer le panneau"
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-                <path
-                  d="M18 6 L6 18 M6 6 L18 18"
-                  stroke="#F5F6F7"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </a>
           </div>
 
           {effectiveProject ? (
@@ -776,16 +952,43 @@ export default function PortfolioPage() {
                 </div>
               ) : effectiveProject.coverImageId ? (
                 <div className={styles.detailCoverWrap}>
-                  <ResponsivePortfolioImage
-                    imageId={effectiveProject.coverImageId}
-                    ownerType="project"
-                    ownerId={effectiveProject.id}
-                    mediaSlot="cover"
-                    mediaMetadata={content.media[effectiveProject.coverImageId]}
-                    alt={effectiveProject.coverAlt[lang] || effectiveProject.title[lang]}
-                    className={styles.detailCoverImg}
-                    loading="eager"
-                  />
+                  <button
+                    type="button"
+                    className={styles.photoExpandBtn}
+                    onClick={(e) => {
+                      triggerPhotoRef.current = e.currentTarget;
+                      const coverIndex = detailPhotos.findIndex(
+                        (p) => p.imageId === effectiveProject.coverImageId
+                      );
+                      setLightboxLoading(true);
+                      setLightboxError(false);
+                      setLightboxIndex(coverIndex >= 0 ? coverIndex : 0);
+                    }}
+                    aria-label={
+                      lang === "fr"
+                        ? `Agrandir la photo : ${effectiveProject.coverAlt?.[lang] || effectiveProject.title[lang]}`
+                        : `Enlarge photo: ${effectiveProject.coverAlt?.[lang] || effectiveProject.title[lang]}`
+                    }
+                  >
+                    <ResponsivePortfolioImage
+                      imageId={effectiveProject.coverImageId}
+                      ownerType="project"
+                      ownerId={effectiveProject.id}
+                      mediaSlot="cover"
+                      mediaMetadata={content.media[effectiveProject.coverImageId]}
+                      alt={effectiveProject.coverAlt?.[lang] || effectiveProject.title[lang]}
+                      className={styles.detailCoverImg}
+                      loading="eager"
+                    />
+                    <span className={styles.zoomBadge} aria-hidden="true">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <circle cx="11" cy="11" r="8" />
+                        <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                        <line x1="11" y1="8" x2="11" y2="14" />
+                        <line x1="8" y1="11" x2="14" y2="11" />
+                      </svg>
+                    </span>
+                  </button>
                 </div>
               ) : null}
 
@@ -846,18 +1049,45 @@ export default function PortfolioPage() {
                     {lang === "fr" ? "Galerie photos" : "Photo gallery"}
                   </h3>
                   <div className={styles.detailPhotoGrid}>
-                    {effectiveProject.galleryImageIds.map((gid) => (
-                      <div key={gid} className={styles.photoGridItem}>
-                        <ResponsivePortfolioImage
-                          imageId={gid}
-                          ownerType="project"
-                          ownerId={effectiveProject.id}
-                          mediaSlot="gallery"
-                          mediaMetadata={content.media[gid]}
-                          alt={effectiveProject.title[lang]}
-                        />
-                      </div>
-                    ))}
+                    {effectiveProject.galleryImageIds.map((gid) => {
+                      const photoIndex = detailPhotos.findIndex((p) => p.imageId === gid);
+                      return (
+                        <div key={gid} className={styles.photoGridItem}>
+                          <button
+                            type="button"
+                            className={styles.photoGridBtn}
+                            onClick={(e) => {
+                              triggerPhotoRef.current = e.currentTarget;
+                              setLightboxLoading(true);
+                              setLightboxError(false);
+                              setLightboxIndex(photoIndex >= 0 ? photoIndex : 0);
+                            }}
+                            aria-label={
+                              lang === "fr"
+                                ? `Agrandir la photo : ${effectiveProject.galleryAlt?.[gid]?.[lang] || effectiveProject.title[lang]}`
+                                : `Enlarge photo: ${effectiveProject.galleryAlt?.[gid]?.[lang] || effectiveProject.title[lang]}`
+                            }
+                          >
+                            <ResponsivePortfolioImage
+                              imageId={gid}
+                              ownerType="project"
+                              ownerId={effectiveProject.id}
+                              mediaSlot="gallery"
+                              mediaMetadata={content.media[gid]}
+                              alt={effectiveProject.galleryAlt?.[gid]?.[lang] || effectiveProject.title[lang]}
+                            />
+                            <span className={styles.zoomBadge} aria-hidden="true">
+                              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <circle cx="11" cy="11" r="8" />
+                                <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                                <line x1="11" y1="8" x2="11" y2="14" />
+                                <line x1="8" y1="11" x2="14" y2="11" />
+                              </svg>
+                            </span>
+                          </button>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -948,6 +1178,19 @@ export default function PortfolioPage() {
                               <h3 className={styles.projectInfoTitle}>{p.title[lang]}</h3>
                             </Link>
                             <p className={styles.projectVideoDesc}>{p.summary[lang]}</p>
+                            <Link
+                              to={`${getPortfolioProjectUrl(p, lang, content.categories)}${dirParam}`}
+                              preventScrollReset
+                              className={`${styles.projectCtaBtn} ${styles.projectCtaBtnVideo}`}
+                            >
+                              <span>{lang === "fr" ? "Découvrir le projet" : "Discover the project"}</span>
+                              <span className={`${styles.circleIcon} ${styles.circleIconLarge}`} aria-hidden="true">
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#F5F6F7" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="M5 12 H19" />
+                                  <path d="M13 6 L19 12 L13 18" />
+                                </svg>
+                              </span>
+                            </Link>
                           </div>
                         </div>
                       );
@@ -1015,6 +1258,21 @@ export default function PortfolioPage() {
                           >
                             {p.summary[lang]}
                           </p>
+                          <Link
+                            to={`${getPortfolioProjectUrl(p, lang, content.categories)}${dirParam}`}
+                            preventScrollReset
+                            className={`${styles.projectCtaBtn} ${
+                              isLeft ? styles.projectCtaBtnEven : styles.projectCtaBtnOdd
+                            }`}
+                          >
+                            <span>{lang === "fr" ? "Découvrir le projet" : "Discover the project"}</span>
+                            <span className={`${styles.circleIcon} ${styles.circleIconLarge}`} aria-hidden="true">
+                              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#F5F6F7" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M5 12 H19" />
+                                <path d="M13 6 L19 12 L13 18" />
+                              </svg>
+                            </span>
+                          </Link>
                         </div>
                       </div>
                     );
@@ -1028,19 +1286,21 @@ export default function PortfolioPage() {
                 )}
               </div>
 
-              {/* "Voir plus de photos" Masonry Gallery - only if gallery images exist! */}
-              {categoryGalleryImages.length > 0 && (
-                <>
-                  <div className={styles.galleryToggleWrap}>
+              {/* Media Toggle Buttons (Photos & Videos) */}
+              {(categoryGalleryImages.length > 0 || categoryVideos.length > 0) && (
+                <div className={styles.galleryToggleWrap}>
+                  {categoryGalleryImages.length > 0 && (
                     <button
                       type="button"
                       className={styles.togglePhotosBtn}
                       onClick={() => setShowGallery(!showGallery)}
+                      aria-expanded={showGallery}
+                      aria-controls="category-photos-panel"
                     >
                       <span>
                         {showGallery
-                          ? activeSec.lessPhotosButton[lang]
-                          : activeSec.morePhotosButton[lang]}
+                          ? activeSec.lessPhotosButton?.[lang] || (lang === "fr" ? "Voir moins de photos" : "See fewer photos")
+                          : activeSec.morePhotosButton?.[lang] || (lang === "fr" ? "Voir plus de photos" : "See more photos")}
                       </span>
                       <span
                         className={`${styles.chevronIcon} ${
@@ -1060,27 +1320,101 @@ export default function PortfolioPage() {
                         </svg>
                       </span>
                     </button>
-                  </div>
-
-                  {showGallery && (
-                    <div className={styles.masonryGrid}>
-                      {categoryGalleryImages.map((imgItem, idx) => (
-                        <div key={`${imgItem.imageId}-${idx}`} className={styles.masonryItem}>
-                          <div className={styles.masonryThumb}>
-                            <ResponsivePortfolioImage
-                              imageId={imgItem.imageId}
-                              ownerType="project"
-                              ownerId={imgItem.projectId}
-                              mediaSlot="gallery"
-                              mediaMetadata={content.media[imgItem.imageId]}
-                              alt={imgItem.alt}
-                            />
-                          </div>
-                        </div>
-                      ))}
-                    </div>
                   )}
-                </>
+
+                  {categoryVideos.length > 0 && (
+                    <button
+                      type="button"
+                      className={styles.toggleMediaBtn}
+                      onClick={() => setShowVideos(!showVideos)}
+                      aria-expanded={showVideos}
+                      aria-controls="category-videos-panel"
+                    >
+                      <span>
+                        {showVideos
+                          ? activeSec.lessVideosButton?.[lang] ||
+                            (lang === "fr" ? "Voir moins de vidéos" : "See fewer videos")
+                          : activeSec.moreVideosButton?.[lang] ||
+                            (lang === "fr" ? "Voir plus de vidéos" : "See more videos")}
+                      </span>
+                      <span
+                        className={`${styles.chevronIcon} ${
+                          showVideos ? styles.chevronOpen : styles.chevronClosed
+                        }`}
+                        aria-hidden="true"
+                      >
+                        <svg
+                          width="18"
+                          height="18"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                        >
+                          <path d="M6 9 L12 15 L18 9" />
+                        </svg>
+                      </span>
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* Photos Panel */}
+              {categoryGalleryImages.length > 0 && showGallery && (
+                <div id="category-photos-panel" className={styles.masonryGrid}>
+                  {categoryGalleryImages.map((imgItem, idx) => (
+                    <div key={`${imgItem.imageId}-${idx}`} className={styles.masonryItem}>
+                      <div className={styles.masonryThumb}>
+                        <ResponsivePortfolioImage
+                          imageId={imgItem.imageId}
+                          ownerType="project"
+                          ownerId={imgItem.projectId}
+                          mediaSlot="gallery"
+                          mediaMetadata={content.media[imgItem.imageId]}
+                          alt={imgItem.alt}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Videos Panel */}
+              {categoryVideos.length > 0 && showVideos && (
+                <div id="category-videos-panel" className={styles.videosGrid}>
+                  {categoryVideos.map((vid, idx) => (
+                    <div key={`${vid.provider}:${vid.videoId}-${idx}`} className={styles.videoGridItem}>
+                      <div className={styles.videoThumbCard}>
+                        {vid.posterImageId ? (
+                          <ResponsivePortfolioImage
+                            imageId={vid.posterImageId}
+                            ownerType="project"
+                            ownerId={vid.posterOwnerId}
+                            mediaSlot={vid.posterMediaSlot}
+                            mediaMetadata={content.media[vid.posterImageId]}
+                            alt={vid.title}
+                            className={styles.videoPosterImg}
+                          />
+                        ) : (
+                          <div className={styles.videoPosterPlaceholder} />
+                        )}
+                        <div className={styles.videoOverlay}>
+                          <button
+                            type="button"
+                            className={styles.videoPlayBtn}
+                            onClick={() => setActiveVideoUrl(vid.url)}
+                            aria-label={`${lang === "fr" ? "Lire la vidéo" : "Play video"} : ${vid.title}`}
+                          >
+                            <svg width="22" height="24" viewBox="0 0 26 28" fill="none">
+                              <path d="M4 3 L23 14 L4 25 Z" fill="#F5F6F7" />
+                            </svg>
+                          </button>
+                        </div>
+                      </div>
+                      <p className={styles.videoItemTitle}>{vid.title}</p>
+                    </div>
+                  ))}
+                </div>
               )}
 
               {/* Showreel Section - only if showreel video is configured! */}
@@ -1129,7 +1463,7 @@ export default function PortfolioPage() {
       <ScrollToTop
         key={phase === "open" ? `panel-${location.pathname}` : "overview"}
         targetRef={phase === "open" ? panelRef : undefined}
-        hidden={phase === "opening" || phase === "closing" || Boolean(activeVideoUrl)}
+        hidden={phase === "opening" || phase === "closing" || Boolean(activeVideoUrl) || lightboxIndex !== null}
         className={styles.portfolioScrollToTop}
       />
 
@@ -1141,6 +1475,114 @@ export default function PortfolioPage() {
           videoUrl={activeVideoUrl}
           lang={lang}
         />
+      )}
+
+      {/* Photo Lightbox Dialog */}
+      {lightboxIndex !== null && detailPhotos[lightboxIndex] && (
+        <div
+          ref={lightboxRef}
+          role="dialog"
+          aria-modal="true"
+          aria-label={
+            lang === "fr"
+              ? `Photo ${lightboxIndex + 1} sur ${detailPhotos.length}`
+              : `Photo ${lightboxIndex + 1} of ${detailPhotos.length}`
+          }
+          className={styles.lightboxOverlay}
+          onClick={() => setLightboxIndex(null)}
+        >
+          <span className={styles.lightboxCounter} aria-hidden="true">
+            {lightboxIndex + 1} / {detailPhotos.length}
+          </span>
+
+          <button
+            ref={lightboxCloseBtnRef}
+            type="button"
+            className={styles.lightboxCloseBtn}
+            onClick={() => setLightboxIndex(null)}
+            aria-label={lang === "fr" ? "Fermer la visionneuse" : "Close photo viewer"}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+              <path
+                d="M18 6 L6 18 M6 6 L18 18"
+                stroke="#F5F6F7"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+
+          {detailPhotos.length > 1 && (
+            <>
+              <button
+                type="button"
+                className={`${styles.lightboxNavBtn} ${styles.lightboxPrevBtn}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setLightboxIndex((lightboxIndex - 1 + detailPhotos.length) % detailPhotos.length);
+                  setLightboxLoading(true);
+                  setLightboxError(false);
+                }}
+                aria-label={lang === "fr" ? "Photo précédente" : "Previous photo"}
+              >
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M15 18 L9 12 L15 6" />
+                </svg>
+              </button>
+
+              <button
+                type="button"
+                className={`${styles.lightboxNavBtn} ${styles.lightboxNextBtn}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setLightboxIndex((lightboxIndex + 1) % detailPhotos.length);
+                  setLightboxLoading(true);
+                  setLightboxError(false);
+                }}
+                aria-label={lang === "fr" ? "Photo suivante" : "Next photo"}
+              >
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M9 18 L15 12 L9 6" />
+                </svg>
+              </button>
+            </>
+          )}
+
+          <div className={styles.lightboxContent} onClick={(e) => e.stopPropagation()}>
+            {lightboxLoading && !lightboxError && (
+              <div className={styles.lightboxStatus} role="status" aria-live="polite">
+                {lang === "fr" ? "Chargement de la photo..." : "Loading photo..."}
+              </div>
+            )}
+
+            {lightboxError && (
+              <div className={styles.lightboxError} role="alert">
+                {lang === "fr"
+                  ? "Impossible de charger la photo en haute définition."
+                  : "Unable to load high-resolution photo."}
+              </div>
+            )}
+
+            <ResponsivePortfolioImage
+              imageId={detailPhotos[lightboxIndex].imageId}
+              ownerType="project"
+              ownerId={detailPhotos[lightboxIndex].ownerId}
+              mediaSlot={detailPhotos[lightboxIndex].slot}
+              mediaMetadata={content.media[detailPhotos[lightboxIndex].imageId]}
+              alt={detailPhotos[lightboxIndex].alt}
+              className={styles.lightboxImage}
+              sizes="100vw"
+              loading="eager"
+              preferLargest
+              onLoad={() => setLightboxLoading(false)}
+              onError={() => {
+                setLightboxLoading(false);
+                setLightboxError(true);
+              }}
+            />
+          </div>
+        </div>
       )}
     </div>
   );
