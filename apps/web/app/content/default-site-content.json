@@ -494,94 +494,150 @@
     "email": "",
     "instagramUrl": "",
     "youtubeUrl": "",
-    "isPublished": false
+    "isPublished": false,
+    "rpmJurisdiction": "",
+    "privacyEmail": "",
+    "dpoDesignated": false,
+    "dpoContact": "",
+    "hostingCountry": "Belgique",
+    "emailService": "Serveur local / SMTP (Brevo envisagé, non activé)",
+    "galleryStorageService": "Stockage serveur local Parallax",
+    "retentionContactRequests": "1 à 2 ans après le dernier échange",
+    "retentionClientRecords": "7 ans (obligations fiscales et comptables belges)",
+    "retentionMediaGalleries": "Minimum 3 mois selon devis",
+    "clientTypes": "both"
   },
   "legalPages": {
     "mentions": {
-      "lastUpdated": "2026-10-15T00:00:00.000Z",
+      "lastUpdated": "2026-10-18T00:00:00.000Z",
       "published": null,
       "draft": {
         "seoTitle": {
           "fr": "Mentions légales | Parallax - Studio photo & vidéo",
-          "en": "Legal notice | Parallax - Photo & video studio"
+          "en": "Legal Notice | Parallax - Photo & Video Studio"
         },
         "seoDescription": {
-          "fr": "Mentions légales et informations éditoriales de la plateforme Parallax.",
-          "en": "Legal notice and editorial information for the Parallax platform."
+          "fr": "Mentions légales et informations éditoriales de l'exploitant du site Parallax, hébergement et droits réservés.",
+          "en": "Legal notice and editorial information regarding the operator of Parallax, web hosting, and reserved rights."
         },
         "publicTitle": {
           "fr": "Mentions légales",
-          "en": "Legal notice"
+          "en": "Legal Notice"
         },
         "intro": {
-          "fr": "Les présentes mentions légales précisent l'identité de l'éditeur de la plateforme Parallax, ainsi que les coordonnées d'hébergement et de contact.",
-          "en": "This legal notice details the publisher of the Parallax platform, as well as hosting and contact information."
+          "fr": "Conformément aux dispositions du Code de droit économique belge et aux obligations d'information des services de la société de l'information, les présentes mentions légales précisent l'identité de l'éditeur de la plateforme Parallax, ses coordonnées de contact, son hébergeur ainsi que les conditions d'utilisation du site.",
+          "en": "In accordance with the provisions of the Belgian Code of Economic Law and information requirements for information society services, this legal notice details the publisher of the Parallax platform, contact details, web host, and terms of website use."
         },
-        "effectiveDate": "15 octobre 2026",
+        "effectiveDate": "18 octobre 2026",
         "version": 0,
         "sections": [
           {
             "id": "editor",
             "title": {
-              "fr": "Éditeur de la plateforme",
-              "en": "Platform publisher"
+              "fr": "1. Éditeur de la plateforme et exploitant",
+              "en": "1. Platform Publisher and Operator"
             },
             "paragraphs": [
               {
-                "fr": "Le site Parallax est édité par l'entité juridique exploitante renseignée dans les paramètres d'entreprise.",
-                "en": "The Parallax website is published by the operating legal entity specified in company settings."
+                "fr": "Le présent site internet accessible à l'adresse officielle de Parallax est édité et exploité par {{company.legalOperatorText}}, établi à l'adresse suivante : {{company.address}}.",
+                "en": "This website, accessible at the official Parallax address, is published and operated by {{company.legalOperatorText}}, located at: {{company.address}}."
+              },
+              {
+                "fr": "Forme juridique : {{company.legalForm}}.",
+                "en": "Legal structure: {{company.legalForm}}."
+              },
+              {
+                "fr": "Numéro d'entreprise (BCE / Banque-Carrefour des Entreprises) : {{company.enterpriseNumber}} — Numéro de TVA intracommunautaire : {{company.vatNumber}} ({{company.vatRegime}}).",
+                "en": "Enterprise number (BCE / Crossroads Bank for Enterprises): {{company.enterpriseNumber}} — Intra-community VAT number: {{company.vatNumber}} ({{company.vatRegime}})."
+              },
+              {
+                "fr": "Registre des Personnes Morales (RPM) / Tribunal de l'entreprise compétent : {{company.rpmJurisdiction}}.",
+                "en": "Competent Enterprise Court / Registry of Legal Entities (RPM): {{company.rpmJurisdiction}}."
               }
             ]
           },
           {
-            "id": "registration",
+            "id": "contact",
             "title": {
-              "fr": "Immatriculation et coordonnées professionnelles",
-              "en": "Registration and business details"
+              "fr": "2. Coordonnées de contact et direction éditoriale",
+              "en": "2. Contact Details and Editorial Direction"
             },
             "paragraphs": [
               {
-                "fr": "Siège social et coordonnées : voir informations d'entreprise renseignées ci-dessous.",
-                "en": "Registered office and contact details: see company information provided below."
-              }
-            ]
-          },
-          {
-            "id": "publication",
-            "title": {
-              "fr": "Responsable de la publication",
-              "en": "Publication director"
-            },
-            "paragraphs": [
+                "fr": "Pour toute question relative au site, aux prestations présentées ou aux commandes en cours, vous pouvez contacter le studio par courrier électronique à l'adresse {{company.email}} ou par téléphone au {{company.phone}}.",
+                "en": "For any inquiries regarding the website, presented services, or current orders, you may contact the studio by email at {{company.email}} or by phone at {{company.phone}}."
+              },
               {
-                "fr": "Le responsable de la publication est précisé dans les informations d'entreprise.",
-                "en": "The publication director is specified in company information."
+                "fr": "Responsable de la publication : {{company.publicationDirector}}. Ce dernier assure la responsabilité éditoriale des contenus publiés directement par le studio sur la plateforme.",
+                "en": "Publication director: {{company.publicationDirector}}, responsible for the editorial content directly published by the studio on the platform."
               }
             ]
           },
           {
             "id": "hosting",
             "title": {
-              "fr": "Hébergement",
-              "en": "Hosting provider"
+              "fr": "3. Hébergement de la plateforme",
+              "en": "3. Platform Hosting Provider"
             },
             "paragraphs": [
               {
-                "fr": "L'hébergement de la plateforme est assuré par des infrastructures sécurisées conformes aux normes européennes.",
-                "en": "Platform hosting is provided by secure infrastructures complying with European standards."
+                "fr": "L'hébergement de l'infrastructure web, du serveur applicatif et des bases de données du site est assuré par {{company.hostingProvider}}, dont les coordonnées physiques sont situées à l'adresse suivante : {{company.hostingAddress}} ({{company.hostingCountry}}).",
+                "en": "Web infrastructure, application server, and databases for this platform are hosted by {{company.hostingProvider}}, located at: {{company.hostingAddress}} ({{company.hostingCountry}})."
+              },
+              {
+                "fr": "Le prestataire d'hébergement assure la mise à disposition technique et le maintien en conditions opérationnelles des serveurs sans intervenir sur les contenus éditoriaux diffusés par Parallax.",
+                "en": "The hosting provider delivers technical server availability and maintenance without intervening in the editorial content published by Parallax."
+              }
+            ]
+          },
+          {
+            "id": "purpose",
+            "title": {
+              "fr": "4. Objet du site et nature des services",
+              "en": "4. Website Purpose and Services"
+            },
+            "paragraphs": [
+              {
+                "fr": "Le site a pour objet la présentation des activités artistiques, cinématographiques et photographiques du studio Parallax (notamment réalisation de clips musicaux, publicités, portraits, documentaires et direction artistique), la mise à disposition d'un formulaire de prise de contact et de demande de devis, ainsi que l'accès sécurisé aux galeries privées destinées aux clients.",
+                "en": "The purpose of this website is to showcase the artistic, cinematic, and photographic productions of Parallax studio (including music video direction, commercials, portraits, documentaries, and art direction), provide an inquiry and quote request form, and deliver secure private gallery access to clients."
+              },
+              {
+                "fr": "Le site constitue une vitrine professionnelle et un espace d'échanges précontractuels. Aucune conclusion de contrat ou paiement n'est effectué directement en ligne via un panier d'achat.",
+                "en": "The website serves as a professional showcase and pre-contractual inquiry portal. No direct transactional cart or immediate online payment is executed through this interface."
               }
             ]
           },
           {
             "id": "intellectual_property",
             "title": {
-              "fr": "Propriété intellectuelle et droits réservés",
-              "en": "Intellectual property and reserved rights"
+              "fr": "5. Propriété intellectuelle et droits d'auteur",
+              "en": "5. Intellectual Property and Copyright"
             },
             "paragraphs": [
               {
-                "fr": "L'ensemble des photographies, vidéos, textes, éléments graphiques et sonores diffusés sur le site Parallax sont protégés par le droit d'auteur et les dispositions du Code de droit économique belge. Toute reproduction ou diffusion sans accord préalable écrit est strictement interdite.",
-                "en": "All photographs, videos, texts, graphic elements, and sounds published on Parallax are protected by copyright and Belgian economic law. Any unauthorized reproduction or broadcast is strictly prohibited."
+                "fr": "L'intégralité des éléments composant le site Parallax — incluant de manière non limitative les photographies, vidéos, masters audiovisuels, bandes-annonces, textes, éléments graphiques, logos, mises en page, code source et typographies locales — est protégée par les dispositions du Livre XI du Code de droit économique belge relatif au droit d'auteur et aux droits voisins, ainsi que par les conventions internationales applicables.",
+                "en": "All components of the Parallax website — including without limitation photographs, videos, audiovisual masters, trailers, texts, graphic assets, logos, layouts, source code, and local typography — are protected by Book XI of the Belgian Code of Economic Law regarding copyright and neighbouring rights, as well as applicable international treaties."
+              },
+              {
+                "fr": "Toute reproduction, représentation, diffusion, extraction, adaptation ou rediffusion publique, totale ou partielle, sur quelque support que ce soit, est strictement interdite sans l'accord préalable, exprès et écrit de Parallax ou des ayants droit concernés, à l'exception des actes strictement autorisés par la loi (notamment les courtes citations justifiées par le caractère critique, polémique, pédagogique ou d'information, sous réserve de la mention claire de la source et du nom de l'auteur).",
+                "en": "Any reproduction, representation, distribution, extraction, adaptation, or public retransmission, in whole or in part, through any medium whatsoever, is strictly prohibited without prior express written authorization from Parallax or relevant rights holders, save for statutory exceptions recognized by law (such as justified short citations with clear attribution)."
+              }
+            ]
+          },
+          {
+            "id": "links_availability",
+            "title": {
+              "fr": "6. Liens externes et disponibilité du service",
+              "en": "6. External Links and Availability"
+            },
+            "paragraphs": [
+              {
+                "fr": "Le site peut contenir des liens hypertextes renvoyant vers des sites web tiers (notamment des plateformes de diffusion vidéo ou des profils de réseaux sociaux). Parallax n'exerce aucun contrôle continu sur ces services externes et décline toute responsabilité quant à leur contenu, leur disponibilité ou leurs politiques de confidentialité respectives.",
+                "en": "This website may contain hyperlinks directing to third-party services (such as video platforms or social media profiles). Parallax exercises no ongoing control over third-party platforms and disclaims liability regarding their content, availability, or privacy practices."
+              },
+              {
+                "fr": "Parallax met en œuvre des moyens raisonnables pour assurer l'accès continu et la sécurité du site. L'accès peut néanmoins être momentanément suspendu pour des raisons de maintenance technique, de mise à jour ou en cas d'événement échappant au contrôle du studio.",
+                "en": "Parallax implements reasonable measures to ensure continuous site access and security. Access may nevertheless be temporarily suspended for technical maintenance, updates, or circumstances beyond the studio's control."
               }
             ]
           }
@@ -589,103 +645,237 @@
       }
     },
     "privacy": {
-      "lastUpdated": "2026-10-15T00:00:00.000Z",
+      "lastUpdated": "2026-10-18T00:00:00.000Z",
       "published": null,
       "draft": {
         "seoTitle": {
-          "fr": "Politique de confidentialité | Parallax",
-          "en": "Privacy policy | Parallax"
+          "fr": "Politique de confidentialité | Parallax - Protection des données (RGPD)",
+          "en": "Privacy Policy | Parallax - Data Protection (GDPR)"
         },
         "seoDescription": {
-          "fr": "Engagement de confidentialité et protection des données personnelles (RGPD) du studio Parallax.",
-          "en": "Privacy policy and personal data protection (GDPR) of Parallax studio."
+          "fr": "Politique de protection des données personnelles de Parallax conforme au RGPD et à la loi belge du 30 juillet 2018.",
+          "en": "Personal data protection policy of Parallax in compliance with the GDPR and the Belgian Act of 30 July 2018."
         },
         "publicTitle": {
           "fr": "Politique de confidentialité",
-          "en": "Privacy policy"
+          "en": "Privacy Policy"
         },
         "intro": {
-          "fr": "Parallax attache une importance fondamentale à la protection de votre vie privée et de vos données personnelles, en stricte conformité avec le RGPD (Règlement UE 2016/679) et la législation belge.",
-          "en": "Parallax is committed to protecting your privacy and personal data in strict compliance with the GDPR (EU Regulation 2016/679) and Belgian legislation."
+          "fr": "Parallax accorde une importance primordiale au respect de votre vie privée et à la protection de vos données personnelles. La présente politique détaille les traitements de données mis en œuvre lors de votre navigation sur le site, de l'utilisation du formulaire de contact, de l'accès aux galeries privées et du visionnage de vidéos, conformément au Règlement Général sur la Protection des Données (Règlement UE 2016/679 - RGPD) et à la loi belge du 30 juillet 2018.",
+          "en": "Parallax is committed to respecting your privacy and protecting your personal data. This policy details the data processing activities conducted when browsing the website, submitting an inquiry, accessing private client galleries, and watching videos, in compliance with the General Data Protection Regulation (EU Regulation 2016/679 - GDPR) and the Belgian Act of 30 July 2018."
         },
-        "effectiveDate": "15 octobre 2026",
+        "effectiveDate": "18 octobre 2026",
         "version": 0,
         "sections": [
           {
-            "id": "data_controller",
+            "id": "controller",
             "title": {
-              "fr": "1. Responsable du traitement",
-              "en": "1. Data controller"
+              "fr": "1. Responsable du traitement et contact vie privée",
+              "en": "1. Data Controller and Privacy Contact"
             },
             "paragraphs": [
               {
-                "fr": "Le responsable du traitement des données personnelles collectées sur le site est l'exploitant de Parallax. Pour toute question relative à vos données, vous pouvez nous écrire à l'adresse de contact dédiée.",
-                "en": "The data controller for personal data collected on the site is the operator of Parallax. For any question regarding your data, you can reach out via the dedicated contact email."
+                "fr": "Le responsable du traitement des données à caractère personnel collectées sur ce site est {{company.legalOperatorText}}, dont le siège est établi à {{company.address}} (N° d'entreprise BCE : {{company.enterpriseNumber}}).",
+                "en": "The data controller for personal data collected on this website is {{company.legalOperatorText}}, with registered office at {{company.address}} (Enterprise number BCE: {{company.enterpriseNumber}})."
+              },
+              {
+                "fr": "Pour toute question relative à la protection de vos données personnelles ou pour exercer vos droits, vous pouvez contacter notre référent vie privée ({{company.privacyContact}}) à l'adresse électronique dédiée : {{company.privacyEmail}}.",
+                "en": "For any questions regarding personal data protection or to exercise your rights, you can reach our privacy contact ({{company.privacyContact}}) at the dedicated email address: {{company.privacyEmail}}."
+              },
+              {
+                "fr": "Compte tenu de la nature de ses activités (studio de création photo et vidéo) et du volume des traitements ne comportant aucun traitement à grande échelle de données sensibles ni surveillance systématique au sens de l'article 37 du RGPD, Parallax n'est pas soumis à l'obligation de désigner un Délégué à la Protection des Données (DPO).",
+                "en": "Given the nature of its activities (creative photo and video studio) and absence of large-scale processing of special category data or systematic monitoring under Article 37 of the GDPR, Parallax is not required to appoint a Data Protection Officer (DPO)."
               }
             ]
           },
           {
-            "id": "contact_requests",
+            "id": "contact_form",
             "title": {
-              "fr": "2. Demandes de contact et devis",
-              "en": "2. Contact inquiries and quotes"
+              "fr": "2. Formulaire de contact et demandes de devis",
+              "en": "2. Inquiry Form and Quote Requests"
             },
             "paragraphs": [
               {
-                "fr": "Lorsque vous utilisez notre formulaire de contact, nous collectons votre nom ou société, votre adresse e-mail, ainsi que facultativement votre téléphone, l'échéance souhaitée, le type de projet et le message transmis. Ces données sont traitées dans le seul but de répondre à votre demande et d'établir un devis ou d'exécuter des mesures précontractuelles. Elles ne sont jamais cédées ni exploitées à des fins de prospection non sollicitée.",
-                "en": "When you use our contact form, we collect your name or company, email address, and optionally your phone, timeline, project type, and message. This data is processed solely to answer your inquiry, establish a quote, or perform pre-contractual steps. It is never sold or used for unsolicited prospecting."
+                "fr": "Lorsque vous utilisez le formulaire de contact mis à votre disposition sur notre site, nous collectons les données suivantes : votre nom ou raison sociale ainsi que votre adresse e-mail (champs obligatoires indispensables pour identifier votre demande et vous répondre). Vous pouvez également renseigner facultativement votre numéro de téléphone, l'échéance souhaitée pour votre projet, le type de prestation envisagée (clip musical, publicité, portrait, documentaire, autre) et la description libre de votre projet.",
+                "en": "When you use the contact form provided on our website, we collect your name or business name and your email address (mandatory fields essential for identifying and answering your inquiry). You may also optionally provide your telephone number, target timeline, project category (music video, commercial, portrait, documentary, other), and project description."
+              },
+              {
+                "fr": "Base légale et finalité : Ces données sont traitées dans le seul but d'instruire votre demande, d'échanger sur vos besoins artistiques et techniques, et d'établir une proposition commerciale chiffrée (devis). Ce traitement repose sur l'exécution de mesures précontractuelles prises à votre demande (article 6, paragraphe 1, point b du RGPD).",
+                "en": "Legal basis and purpose: This data is processed solely to assess your inquiry, exchange on your creative and technical requirements, and formulate a detailed quote. This processing is based on the performance of pre-contractual measures taken at your request (Article 6(1)(b) of the GDPR)."
+              },
+              {
+                "fr": "Conséquence de la non-fourniture : Le défaut de transmission des données obligatoires (nom et e-mail) empêchera le studio de traiter votre message et d'établir un devis. Les données transmises ne sont en aucun cas vendues, cédées ou utilisées à des fins de prospection commerciale non sollicitée.",
+                "en": "Consequence of non-provision: Failure to provide mandatory details (name and email) will prevent the studio from processing your request and preparing a quote. Transmitted data is under no circumstances sold, transferred, or used for unsolicited marketing."
               }
             ]
           },
           {
             "id": "client_galleries",
             "title": {
-              "fr": "3. Galeries privées clients et sécurité des médias",
-              "en": "3. Private client galleries and media security"
+              "fr": "3. Espace client et galeries privées sécurisées",
+              "en": "3. Client Area and Secure Private Galleries"
             },
             "paragraphs": [
               {
-                "fr": "L'accès aux galeries privées s'effectue au moyen d'un code d'accès unique sécurisé. Une session temporaire chiffrée protège la consultation des photos et le téléchargement des médias. La durée de conservation des galeries est administrable et adaptée aux besoins de chaque projet sans suppression arbitraire automatique.",
-                "en": "Access to private galleries is granted through a secure unique access code. An encrypted temporary session protects photo viewing and media downloads. The retention duration of galleries is configurable by the administrator based on project requirements without arbitrary automatic deletion."
+                "fr": "Dans le cadre de l'exécution des prestations photographiques ou audiovisuelles commandées, Parallax met à disposition de ses clients des espaces de galerie privée protégés par un code d'accès unique remis personnellement au client.",
+                "en": "As part of photographic or audiovisual services, Parallax provides clients with private gallery spaces protected by a unique access code delivered personally to the client."
+              },
+              {
+                "fr": "Sécurité et intégrité : L'accès à la galerie fait l'objet d'une session technique d'authentification signée cryptographiquement (__parallax_gallery_session). Les fichiers photographiques et vidéos sont hébergés sur le serveur sécurisé du studio afin de permettre la consultation des épreuves et le téléchargement des médias haute définition autorisés par contrat.",
+                "en": "Security and integrity: Gallery access relies on a cryptographically signed technical authentication session (__parallax_gallery_session). Photographic and video files are hosted on the studio's secure server to allow proof viewing and download of contractually authorized high-resolution media."
+              },
+              {
+                "fr": "Nature du service : Les galeries privées constituent un espace de livraison et de consultation temporaire, convenu pour la durée précisée au devis (minimum 3 mois). Elles ne constituent pas un service de sauvegarde définitive ou de stockage d'archivage illimité dans le temps. Il appartient au client de procéder au téléchargement et à la conservation pérenne de ses fichiers dès réception.",
+                "en": "Nature of service: Private galleries serve as a temporary consultation and delivery platform, established for the duration specified in the quote (minimum 3 months). They do not constitute an indefinite permanent backup service. Clients are responsible for downloading and securely archiving their final media upon delivery."
               }
             ]
           },
           {
-            "id": "security_rate_limit",
+            "id": "public_portfolio",
             "title": {
-              "fr": "4. Sécurité, intégrité et limitation de débit",
-              "en": "4. Security, integrity, and rate limiting"
+              "fr": "4. Diffusion publique des œuvres et réalisations (Portfolio)",
+              "en": "4. Public Showcase of Works (Portfolio)"
             },
             "paragraphs": [
               {
-                "fr": "Pour prévenir les attaques par force brute et garantir la disponibilité de la plateforme, les adresses IP font l'objet d'un hachage cryptographique irréversible HMAC-SHA256 avec clé secrète, dans une base de données locale restreinte. Les données d'accès glissantes sont conservées pendant une durée maximale de 15 minutes avant purge automatique.",
-                "en": "To prevent brute-force attacks and ensure platform availability, IP addresses undergo irreversible HMAC-SHA256 cryptographic hashing with a secret key in a restricted local database. Sliding access records are retained for a maximum of 15 minutes before automated purge."
+                "fr": "Les photographies et productions audiovisuelles présentées sur le portfolio public du site sont diffusées dans le respect du droit à l'image des personnes reconnaissables et du droit d'auteur des artistes, créateurs et partenaires impliqués.",
+                "en": "Photographs and audiovisual works featured in the public portfolio are displayed in accordance with individual image rights and the copyright of artists, creators, and involved partners."
+              },
+              {
+                "fr": "Chaque diffusion publique repose sur les autorisations contractuelles préalablement convenues lors de la production ou sur l'accord exprès des personnes concernées. La passation d'une commande de prestation ou l'accès à une galerie privée n'emporte aucune autorisation implicite de diffusion publique de l'image du client.",
+                "en": "Public displays rely on prior contractual authorizations agreed during production or express consent from involved individuals. Booking a production service or accessing a private gallery conveys no implied permission to broadcast client imagery publicly."
               }
             ]
           },
           {
-            "id": "external_video",
+            "id": "security_rate_limiting",
             "title": {
-              "fr": "5. Lecteurs vidéo externes (YouTube et Vimeo)",
-              "en": "5. External video players (YouTube and Vimeo)"
+              "fr": "5. Sécurité de l'infrastructure et limitation de débit (Anti-spam)",
+              "en": "5. Infrastructure Security and Rate Limiting"
             },
             "paragraphs": [
               {
-                "fr": "Pour garantir votre confidentialité, aucun lecteur tiers (YouTube ou Vimeo), script, cookie tiers ou préconnexion réseau n'est chargé avant votre autorisation explicite. Vous pouvez accorder une lecture ponctuelle ou mémoriser vos préférences pour une durée maximale de 6 mois. Vos préférences sont révocables à tout moment.",
-                "en": "To protect your privacy, no third-party player (YouTube or Vimeo), script, third-party cookie, or network preconnection is loaded prior to your explicit authorization. You may allow a single playback or save your preferences for up to 6 months. Your preferences can be revoked at any time."
+                "fr": "Afin de protéger le site contre les attaques par déni de service (DDoS), les soumissions automatisées malveillantes (robots de spam) et les tentatives de force brute sur les espaces sécurisés, un dispositif technique de limitation de débit est déployé sur le serveur.",
+                "en": "To protect the platform against denial-of-service (DDoS) attacks, automated spam submissions, and brute-force attempts on authenticated interfaces, a technical rate-limiting mechanism is deployed on the server."
+              },
+              {
+                "fr": "Pseudonymisation et non-conservation des adresses IP en clair : L'adresse IP de votre connexion n'est jamais stockée en clair dans nos journaux de sécurité. Elle fait l'objet d'un hachage cryptographique pseudonymisé HMAC-SHA256 utilisant une clé secrète serveur locale stricte (RATE_LIMIT_SECRET). L'empreinte pseudonymisée résultante est enregistrée temporairement dans une base locale restreinte afin de comptabiliser les requêtes sur une fenêtre glissante courte.",
+                "en": "Pseudonymization and absence of plaintext IP storage: Your connection IP address is never stored in plaintext within security records. It undergoes pseudonymized HMAC-SHA256 cryptographic hashing using a strict local secret key (RATE_LIMIT_SECRET). The resulting pseudonym is temporarily recorded in a restricted local database to tally requests over a sliding window."
+              },
+              {
+                "fr": "Base légale : Ce traitement est fondé sur l'intérêt légitime de Parallax à garantir la sécurité, l'intégrité et la disponibilité continue de ses services en ligne (article 6, paragraphe 1, point f du RGPD). Les compteurs et empreintes éphémères sont automatiquement purgés selon les fenêtres d'accès définies.",
+                "en": "Legal basis: This processing is grounded in the legitimate interest of Parallax to guarantee the security, integrity, and operational availability of its online services (Article 6(1)(f) of the GDPR). Counters and ephemeral hashes are automatically purged according to active sliding windows."
+              }
+            ]
+          },
+          {
+            "id": "recipients_processors",
+            "title": {
+              "fr": "6. Destinataires des données et sous-traitants techniques",
+              "en": "6. Data Recipients and Technical Processors"
+            },
+            "paragraphs": [
+              {
+                "fr": "Les données personnelles collectées sur le site sont destinées exclusivement aux membres habilités de l'équipe Parallax en charge de la gestion des projets et du suivi client. Elles ne font l'objet d'aucune commercialisation.",
+                "en": "Personal data collected on this website is intended exclusively for authorized members of the Parallax team handling project management and client relations. It is never marketed to third parties."
+              },
+              {
+                "fr": "Sous-traitants techniques : L'hébergement des données est assuré par {{company.hostingProvider}} ({{company.hostingAddress}}, {{company.hostingCountry}}). L'acheminement des messages du formulaire de contact est opéré par protocole de messagerie sécurisé vers la boîte professionnelle du studio. Parallax ne recourt à aucun sous-traitant de routage publicitaire ou marketing. Si un prestataire d'envoi transactionnel (tel que Brevo / Sendinblue) venait à être activé pour le transport des notifications, un contrat de sous-traitance conforme à l'article 28 du RGPD garantissant la localisation des traitements et la sécurité des données sera formellement établi.",
+                "en": "Technical processors: Data hosting is provided by {{company.hostingProvider}} ({{company.hostingAddress}}, {{company.hostingCountry}}). Transmission of contact inquiries operates via secure email protocols directly to the studio's mailbox. Parallax utilizes no third-party marketing or profiling processors. If a transactional routing service (such as Brevo / Sendinblue) were to be configured for notifications, a compliant processor agreement under Article 28 of the GDPR guaranteeing processing location and data security would be established."
+              },
+              {
+                "fr": "Transferts hors Union européenne : Parallax s'attache à maintenir l'ensemble de ses hébergements au sein de l'Espace Économique Européen ou en Suisse (pays bénéficiant d'une décision d'adéquation de la Commission européenne). Aucun transfert de données vers un pays tiers ne présentant pas un niveau de protection adéquat n'est effectué sans garanties appropriées.",
+                "en": "Transfers outside the European Union: Parallax prioritizes hosting infrastructure within the European Economic Area or Switzerland (a country benefiting from an adequacy decision by the European Commission). No data transfer to a third country lacking adequate protection is carried out without appropriate safeguards."
+              }
+            ]
+          },
+          {
+            "id": "video_players",
+            "title": {
+              "fr": "7. Lecteurs vidéo externes (YouTube et Vimeo) et consentement",
+              "en": "7. External Video Players (YouTube & Vimeo) and Consent"
+            },
+            "paragraphs": [
+              {
+                "fr": "Le portfolio de Parallax présente des créations audiovisuelles hébergées sur les plateformes vidéo YouTube et Vimeo. Afin de préserver intégralement votre confidentialité lors de votre visite, aucun script tiers, aucun cookie externe et aucune connexion aux serveurs de ces plateformes n'est effectué lors du chargement initial de nos pages.",
+                "en": "The Parallax portfolio features audiovisual works hosted on video platforms YouTube and Vimeo. To fully preserve your privacy during browsing, no third-party scripts, external trackers, or server connections to these platforms occur during initial page load."
+              },
+              {
+                "fr": "Consentement préalable : L'ouverture d'un lecteur externe est strictement subordonnée à votre accord préalable (article 6, paragraphe 1, point a du RGPD). Lorsque vous cliquez sur le bouton de lecture, une modale de consentement vous informe de la nature du lecteur tiers et vous permet d'autoriser la lecture ponctuelle pour la session en cours ou de mémoriser votre accord pour une durée maximale de 6 mois.",
+                "en": "Prior consent: Opening an external player is strictly conditional upon your prior consent (Article 6(1)(a) of the GDPR). When clicking to play, a consent dialog informs you of the third-party player and allows you either to authorize playback once for the active session or remember your choice for up to 6 months."
+              },
+              {
+                "fr": "Même configurées avec des paramètres de minimisation (domaine youtube-nocookie.com pour YouTube, paramètre dnt=1 pour Vimeo), ces plateformes sont susceptibles de collecter des données techniques lors du visionnage. Vous pouvez à tout moment retirer votre consentement en accédant à la page Cookies et Préférences ou via le lien « Gérer mes préférences » en pied de page : tout lecteur actif est alors immédiatement démonté.",
+                "en": "Even configured with privacy parameters (youtube-nocookie.com domain for YouTube, dnt=1 flag for Vimeo), external platforms may process technical browsing data upon playback. You can withdraw your consent at any time through our Cookies page or the 'Manage preferences' footer link: any active player is then immediately unmounted."
+              }
+            ]
+          },
+          {
+            "id": "retention_periods",
+            "title": {
+              "fr": "8. Durées de conservation des données",
+              "en": "8. Data Retention Periods"
+            },
+            "paragraphs": [
+              {
+                "fr": "Les données personnelles sont conservées pendant des durées proportionnées aux finalités pour lesquelles elles ont été collectées, conformément aux exigences légales belges :",
+                "en": "Personal data is retained for periods proportionate to the purposes for which it was gathered, in accordance with Belgian legal obligations:"
+              }
+            ],
+            "listItems": [
+              {
+                "fr": "Demandes de contact et devis sans suite : Conservées le temps nécessaire à l'échange précontractuel, avec une durée maximale de 1 à 2 ans à compter du dernier contact, avant suppression définitive.",
+                "en": "Unpursued inquiries and quotes: Retained for the duration of pre-contractual exchanges, up to a maximum of 1 to 2 years following last contact, prior to permanent deletion."
+              },
+              {
+                "fr": "Dossiers clients, contrats signés et pièces de facturation : Conservés pendant une durée de 7 ans (ou 10 ans selon la nature des obligations de responsabilité contractuelle) à compter de la clôture de l'exercice comptable, conformément aux obligations fiscales et comptables belges.",
+                "en": "Client records, executed contracts, and accounting documents: Retained for 7 years (or 10 years according to statutory contract limitation periods) following fiscal year closure, in compliance with Belgian tax and accounting law."
+              },
+              {
+                "fr": "Médias et galeries privées en ligne : Disponibles en ligne pendant la période convenue au devis (minimum 3 mois), après quoi l'accès est désactivé et les médias sont archivés ou purgés selon les termes du contrat.",
+                "en": "Media and online private client galleries: Kept online for the period agreed upon in the quote (minimum 3 months), after which access is deactivated and media is archived or purged according to contract terms."
+              },
+              {
+                "fr": "Données techniques anti-spam et cookies : Contexte de formulaire valide 2 heures, jeton flash supprimé à la première lecture (60 secondes maximum), cookie de préférences vidéo valide 180 jours.",
+                "en": "Technical anti-abuse and cookies: Form context valid 2 hours, flash notice cleared upon read (60 seconds max), video preferences cookie valid 180 days."
               }
             ]
           },
           {
             "id": "user_rights",
             "title": {
-              "fr": "6. Vos droits et voies de recours (RGPD)",
-              "en": "6. Your rights and remedies (GDPR)"
+              "fr": "9. Vos droits et modalités d'exercice",
+              "en": "9. Your Rights and How to Exercise Them"
             },
             "paragraphs": [
               {
-                "fr": "Conformément au RGPD, vous disposez d'un droit d'accès, de rectification, d'effacement, de limitation du traitement et d'opposition concernant vos données personnelles. Vous pouvez exercer ces droits en nous contactant directement. Vous disposez également du droit d'introduire une réclamation auprès de l'Autorité de Protection des Données belge (APD - www.autoriteprotectiondonnees.be).",
-                "en": "In accordance with the GDPR, you have the right to access, rectify, erase, restrict processing, and object to processing of your personal data. You may exercise these rights by contacting us directly. You also have the right to lodge a complaint with the Belgian Data Protection Authority (APD / GBA - www.autoriteprotectiondonnees.be)."
+                "fr": "Conformément aux articles 15 à 22 du RGPD, vous disposez des droits suivants à l'égard de vos données personnelles : droit d'accès (obtenir confirmation et copie de vos données), droit de rectification (corriger des données inexactes), droit à l'effacement (obtenir la suppression de vos données lorsqu'un motif légal est satisfait), droit à la limitation du traitement, droit d'opposition (pour les traitements fondés sur l'intérêt légitime) et droit à la portabilité de vos données.",
+                "en": "In accordance with Articles 15 to 22 of the GDPR, you hold the following rights regarding your personal data: right of access (obtain confirmation and copy of your data), right to rectification (correct inaccurate details), right to erasure (obtain deletion where statutory grounds are met), right to restriction of processing, right to object (for processing based on legitimate interests), and right to data portability."
+              },
+              {
+                "fr": "Pour les traitements reposant sur votre consentement (notamment l'activation des lecteurs vidéo), vous pouvez retirer ce consentement à tout instant, sans porter atteinte à la licéité du traitement effectué avant ce retrait.",
+                "en": "For processing reliant upon your consent (such as third-party video player activation), you may withdraw your consent at any time, without affecting the lawfulness of processing based on consent before its withdrawal."
+              },
+              {
+                "fr": "Modalités d'exercice : Vous pouvez adresser toute demande par courrier électronique à {{company.privacyEmail}}. Afin de prévenir les usurpations d'identité, une confirmation ou un justificatif raisonnable d'identité ne pourra être exigé qu'en cas de doute légitime sur l'identité du demandeur, sans démarche disproportionnée. Nous répondrons à votre demande dans un délai maximal d'un mois.",
+                "en": "How to exercise: You may submit your request by email to {{company.privacyEmail}}. To prevent identity theft, reasonable identity verification will only be requested in cases of legitimate doubt, avoiding disproportionate burdens. We will respond within one month."
+              },
+              {
+                "fr": "Voie de recours auprès de l'autorité de contrôle : Si vous estimez que le traitement de vos données enfreint la réglementation applicable, vous avez le droit d'introduire une réclamation auprès de l'Autorité de Protection des Données belge (APD) : Rue de la Presse 35, 1000 Bruxelles — Téléphone : +32 (0)2 274 48 00 — E-mail : contact@apd-gba.be — Site officiel : www.autoriteprotectiondonnees.be.",
+                "en": "Right to lodge a complaint with the supervisory authority: If you consider that data processing violates applicable regulations, you have the right to lodge a complaint with the supervisory authority (Belgian Data Protection Authority - APD / GBA): Rue de la Presse 35, 1000 Brussels — Phone: +32 (0)2 274 48 00 — Email: contact@apd-gba.be — Official website: www.autoriteprotectiondonnees.be."
+              }
+            ]
+          },
+          {
+            "id": "automated_decision",
+            "title": {
+              "fr": "10. Prise de décision automatisée et profilage",
+              "en": "10. Automated Decision-Making and Profiling"
+            },
+            "paragraphs": [
+              {
+                "fr": "Parallax ne met en œuvre aucune prise de décision entièrement automatisée ni aucun profilage au sens de l'article 22 du RGPD susceptible de produire des effets juridiques vous concernant ou de vous affecter de manière significative.",
+                "en": "Parallax carries out no solely automated decision-making or profiling within the meaning of Article 22 of the GDPR that produces legal effects concerning you or similarly significantly affects you."
               }
             ]
           }
@@ -693,90 +883,247 @@
       }
     },
     "terms": {
-      "lastUpdated": "2026-10-15T00:00:00.000Z",
+      "lastUpdated": "2026-10-18T00:00:00.000Z",
       "published": null,
       "draft": {
         "seoTitle": {
-          "fr": "Conditions Générales de Vente (CGV) | Parallax",
-          "en": "Terms of Service | Parallax"
+          "fr": "Conditions Générales de Vente et de Prestations (CGV) | Parallax",
+          "en": "General Terms and Conditions of Service | Parallax"
         },
         "seoDescription": {
-          "fr": "Conditions générales régissant les prestations audiovisuelles et photographiques de Parallax.",
-          "en": "Terms governing audiovisual and photographic production services provided by Parallax."
+          "fr": "Conditions générales régissant les prestations de production vidéo, clips, tournages et photographie du studio Parallax.",
+          "en": "General terms and conditions governing video production, music videos, filming, and photography services by Parallax studio."
         },
         "publicTitle": {
-          "fr": "Conditions générales de vente",
-          "en": "Terms of service"
+          "fr": "Conditions générales de prestation de services",
+          "en": "General Terms and Conditions of Service"
         },
         "intro": {
-          "fr": "Les présentes conditions générales régissent l'ensemble des prestations de production audiovisuelle, réalisation de clips, photographie et direction artistique proposées par Parallax.",
-          "en": "These terms of service govern all audiovisual production, music video direction, photography, and art direction services provided by Parallax."
+          "fr": "Les présentes conditions générales régissent l'ensemble des prestations photographiques, audiovisuelles, de réalisation, de captation, de montage et de direction artistique proposées par {{company.legalOperatorText}} (ci-après dénommé « le studio » ou « Parallax ») à ses clients professionnels et particuliers.",
+          "en": "These general terms and conditions govern all photographic, audiovisual, directing, filming, editing, and art direction services provided by {{company.legalOperatorText}} (hereinafter referred to as 'the studio' or 'Parallax') to its commercial and individual clients."
         },
-        "effectiveDate": "15 octobre 2026",
+        "effectiveDate": "18 octobre 2026",
         "version": 0,
         "sections": [
           {
             "id": "scope",
             "title": {
               "fr": "1. Objet et champ d'application",
-              "en": "1. Scope of application"
+              "en": "1. Scope and Application"
             },
             "paragraphs": [
               {
-                "fr": "Toute commande de prestation implique l'adhésion entière et sans réserve du client aux présentes conditions générales de vente, qui prévalent sur tout document contradictoire.",
-                "en": "Any order of services implies full and unreserved acceptance by the client of these terms, prevailing over any conflicting document."
+                "fr": "Les présentes conditions générales s'appliquent à toutes les commandes de prestations passées auprès de Parallax, tant par des clients professionnels (entreprises, artistes, labels, agences, institutions — B2B) que, le cas échéant, par des consommateurs (personnes physiques agissant à des fins non professionnelles — B2C).",
+                "en": "These general terms apply to all orders placed with Parallax, both by business clients (companies, artists, record labels, agencies, institutions — B2B) and, where applicable, by consumers (individuals acting outside trade or professional capacity — B2C)."
+              },
+              {
+                "fr": "Les conditions générales sont communiquées au client préalablement à toute passation de commande ou signature de devis. Toute commande implique l'acceptation des présentes conditions, sous réserve des stipulations expresses convenues entre les parties dans le devis écrit, lesquelles prévalent sur les présentes conditions générales.",
+                "en": "These terms are delivered or made accessible to the client prior to order confirmation or quote signature. Every order entails acceptance of these conditions, subject to specific written terms set forth in the formal quote, which prevail over these general conditions."
               }
             ]
           },
           {
-            "id": "quotes",
+            "id": "quotes_orders",
             "title": {
-              "fr": "2. Devis, commandes et acomptes",
-              "en": "2. Quotes, orders, and deposits"
+              "fr": "2. Devis préalable et formation du contrat",
+              "en": "2. Detailed Quote and Contract Formation"
             },
             "paragraphs": [
               {
-                "fr": "Chaque prestation fait l'objet d'un devis préalable détaillé stipulant la durée, les livrables attendus, les lieux de tournage et les modalités financières convenues entre les parties.",
-                "en": "Each service is subject to a prior detailed quote specifying duration, expected deliverables, shooting locations, and agreed financial terms."
+                "fr": "La simple transmission d'une demande par le formulaire de contact du site ne constitue pas un engagement contractuel ni une commande ferme. Chaque projet donne lieu à l'établissement d'un devis écrit et personnalisé par Parallax.",
+                "en": "Submitting an inquiry via the website contact form does not constitute a binding contract or firm order. Every project initiates the preparation of a customized written quote by Parallax."
+              },
+              {
+                "fr": "Contenu du devis : Le devis détaille le périmètre artistique et technique de la mission (dates et lieux de tournage/prise de vue, livrables attendus, formats, durée indicative, calendrier prévisionnel et conditions financières convenues). La durée de validité de nos offres est de 30 jours à compter de leur émission, sauf mention particulière au devis.",
+                "en": "Quote content: The quote specifies the artistic and technical scope of the project (shooting dates and locations, deliverables, formats, target durations, production schedule, and agreed financial terms). Our quotes remain valid for 30 days from issuance, unless stated otherwise."
+              },
+              {
+                "fr": "Formation du contrat : Le contrat est valablement conclu dès réception par Parallax du devis approuvé sans réserve par le client (signature manuscrite, électronique ou bon pour accord formel par écrit) et, lorsque le devis le prévoit, du versement de l'acompte de réservation requis.",
+                "en": "Contract formation: The contract is legally formed upon receipt by Parallax of the quote accepted without reservation by the client (handwritten or electronic signature, or written confirmation) and, where specified in the quote, payment of the designated reservation deposit."
               }
             ]
           },
           {
-            "id": "delivery",
+            "id": "pricing_payment",
             "title": {
-              "fr": "3. Délais de réalisation et livraison",
-              "en": "3. Delivery timelines and file delivery"
+              "fr": "3. Tarifs, taxes et modalités de règlement",
+              "en": "3. Pricing, Taxes, and Payment Terms"
             },
             "paragraphs": [
               {
-                "fr": "Les fichiers finaux (vidéos masterisées, photos haute définition) sont mis à disposition via un espace de galerie privée sécurisé ou par transfert numérique dédié.",
-                "en": "Final files (mastered videos, high-resolution photos) are made available through a secure private gallery or dedicated digital transfer."
+                "fr": "Prix et fiscalité : Les prix sont exprimés en euros (€). Ils sont établis conformément au régime fiscal applicable de l'exploitant ({{company.vatRegime}}). Si le studio bénéficie du régime de la franchise de taxe pour petites entreprises (article 56bis du Code de la TVA belge), les prestations sont facturées hors taxe avec la mention légale correspondante. Dans le cas contraire, la taxe sur la valeur ajoutée (TVA) belge au taux en vigueur est appliquée.",
+                "en": "Pricing and taxation: Prices are stated in euros (€). They are established in accordance with the applicable tax regime of the operator ({{company.vatRegime}}). If the studio benefits from the small business exemption scheme (Article 56bis of the Belgian VAT Code), invoices are issued without VAT with the statutory reference. Otherwise, Belgian VAT at the current legal rate is applied."
+              },
+              {
+                "fr": "Échéancier de paiement : Sauf calendrier particulier stipulé au devis, les prestations font l'objet d'un acompte à la réservation de la date (habituellement 30 % à 50 % du montant total), le solde étant exigible à la livraison des livrables finaux masterisés ou sous 14 jours calendrier suivant la facture de solde.",
+                "en": "Payment schedule: Unless a specific schedule is set forth in the quote, services require a reservation deposit upon booking (typically 30% to 50% of the total quote), with the remaining balance due upon delivery of final mastered files or within 14 calendar days of final invoice issuance."
+              },
+              {
+                "fr": "Frais annexes : Les frais spécifiques engagés pour la production (déplacements au-delà du rayon kilométrique convenu, hébergements, régies, locations de matériels hors parc studio, droits musicaux ou figurants mandatés) sont expressément chiffrés au devis ou refacturés à prix coûtant sur justificatifs après accord préalable du client.",
+                "en": "Ancillary expenses: Specific expenses incurred for production (travel outside agreed radius, accommodation, catering, external specialized equipment rental, licensed music, or mandated cast) are explicitly priced in the quote or rebilled at cost upon receipts with client prior consent."
+              },
+              {
+                "fr": "Retard de paiement (B2B) : Conformément à la loi belge du 2 août 2002 relative à la lutte contre le retard de paiement dans les transactions commerciales, tout montant demeuré impayé à l'échéance par un client professionnel produira de plein droit et sans mise en demeure préalable un intérêt au taux légal applicable aux transactions commerciales, ainsi qu'une indemnité forfaitaire légale minimale de 40 euros pour frais de recouvrement, sans préjudice de la réclamation d'une indemnisation complémentaire sur justificatifs.",
+                "en": "Late payment (B2B): In accordance with the Belgian Act of 2 August 2002 on combating late payment in commercial transactions, any sum unpaid by a business client upon maturity shall automatically and without formal notice incur interest at the statutory rate applicable to commercial transactions, alongside a statutory minimum lump sum indemnity of 40 euros for recovery costs, without prejudice to documented additional claims."
               }
             ]
           },
           {
-            "id": "intellectual_property",
+            "id": "client_cooperation",
             "title": {
-              "fr": "4. Droits d'auteur et cession de droits",
-              "en": "4. Copyright and licensing"
+              "fr": "4. Collaboration du client et autorisations préalables",
+              "en": "4. Client Cooperation and Necessary Permissions"
             },
             "paragraphs": [
               {
-                "fr": "Parallax demeure titulaire des droits de propriété intellectuelle sur les œuvres créées. Les droits d'exploitation et de diffusion cédés au client sont expressément délimités par le devis et le contrat de cession convenus.",
-                "en": "Parallax retains copyright in all created works. The exploitation and broadcast rights granted to the client are explicitly delimited by the quote and agreed assignment contract."
+                "fr": "Obligation de collaboration : La réussite d'un projet visuel exige une coopération loyale et active du client. Ce dernier s'engage à fournir dans les délais convenus l'ensemble des éléments indispensables à la production (briefs artistiques, éléments de charte, validations intermédiaires, plannings de tournage).",
+                "en": "Cooperation duty: Successful visual production requires fair and active client cooperation. The client undertakes to provide all necessary assets in a timely manner (creative briefs, branding guidelines, intermediate approvals, shooting schedules)."
+              },
+              {
+                "fr": "Autorisations de lieux et droit à l'image des intervenants : Sauf mission expresse d'organisation et de régie confiée à Parallax dans le devis, il appartient au client de s'assurer de la disponibilité et de l'obtention de toutes les autorisations requises pour les lieux de tournage privés ou publics concernés, ainsi que des accords écrits relatifs au droit à l'image des comédiens, mannequins, figurants ou collaborateurs désignés par le client pour figurer dans la production.",
+                "en": "Location permits and image release agreements: Unless location scouting and management are explicitly entrusted to Parallax in the quote, the client is responsible for securing all necessary permits for private or public shooting locations, as well as written image releases from actors, models, extras, or staff designated by the client to appear in the production."
               }
             ]
           },
           {
-            "id": "disputes",
+            "id": "schedule_force_majeure",
             "title": {
-              "fr": "5. Droit applicable et juridiction compétente",
-              "en": "5. Applicable law and jurisdiction"
+              "fr": "5. Planning, report météo et force majeure",
+              "en": "5. Scheduling, Weather Postponement, and Force Majeure"
             },
             "paragraphs": [
               {
-                "fr": "Les présentes conditions sont soumises au droit belge. En cas de différend relatif à l'interprétation ou à l'exécution d'un contrat, les parties s'engagent à rechercher une solution amiable avant tout recours judiciaire devant les tribunaux compétents.",
-                "en": "These terms are governed by Belgian law. In the event of a dispute, the parties undertake to seek an amicable resolution prior to any legal proceedings before the competent courts."
+                "fr": "Organisation des tournages : Les dates de tournage et de prise de vue sont fixées d'un commun accord lors de la validation du devis. Parallax réserve les dates et les équipes correspondantes.",
+                "en": "Production scheduling: Shooting and filming dates are established by mutual agreement upon quote confirmation. Parallax reserves corresponding studio dates and production crew."
+              },
+              {
+                "fr": "Report pour intempéries : Pour les prises de vue extérieures tributaires des conditions météorologiques, en cas d'intempéries manifestes compromettant la sécurité ou la qualité esthétique du projet, les parties conviendront d'une date de report d'un commun accord, sans indemnité ni pénalité de part et d'autre. Seuls les frais tiers non récupérables d'ores et déjà engagés pour la date initiale (ex. location de véhicule régie ou matériel non annulable) demeurent à la charge du client.",
+                "en": "Weather postponement: For outdoor filming dependent upon weather conditions, in the event of severe weather compromising safety or artistic quality, the parties shall agree on a rescheduled date without penalty. Only non-recoverable third-party expenses already incurred for the initial date (e.g. non-cancellable specialty gear) remain payable by the client."
+              },
+              {
+                "fr": "Annulation : En cas d'annulation totale de la prestation à l'initiative du client hors cas de force majeure, l'acompte versé reste acquis à Parallax à titre d'indemnité forfaitaire couvrant le travail préparatoire déjà accompli et la réservation exclusive des dates dans l'agenda du studio. En cas d'annulation imputable à Parallax hors cas de force majeure, les sommes versées par le client lui seront intégralement restituées.",
+                "en": "Cancellation: In the event of total cancellation by the client outside of force majeure, the deposit paid remains retained by Parallax as compensation for preparatory work and calendar reservation. In the event of cancellation by Parallax outside force majeure, all sums received shall be refunded in full to the client."
+              },
+              {
+                "fr": "Force majeure : Aucune des parties ne sera tenue pour responsable de l'inexécution ou du retard dans l'exécution de ses obligations en cas de survenance d'un cas de force majeure tel que défini par le droit civil belge (événement imprévisible, irrésistible et extérieur).",
+                "en": "Force majeure: Neither party shall be held liable for failure or delay in performing obligations due to an event of force majeure as defined under Belgian civil law (unforeseeable, irresistible, and external event)."
+              }
+            ]
+          },
+          {
+            "id": "deliverables_revisions",
+            "title": {
+              "fr": "6. Livrables, cycle de révisions et galeries",
+              "en": "6. Deliverables, Revision Cycles, and Galleries"
+            },
+            "paragraphs": [
+              {
+                "fr": "Livraison des œuvres : Les livrables convenus (fichiers vidéo masterisés en haute définition/4K, photographies sélectionnées et étalonnées) sont mis à disposition via une galerie privée en ligne ou par lien de transfert numérique sécurisé dans les délais indicatifs convenus au devis.",
+                "en": "Delivery of works: Agreed deliverables (mastered video files in HD/4K, graded photographs) are delivered via a secure online private gallery or dedicated digital transfer link within the target timeframe specified in the quote."
+              },
+              {
+                "fr": "Cycle de révisions : Sauf disposition spécifique au devis, le prix convenu inclut un cycle de révisions mineures portant sur le montage, le rythme ou l'étalonnage des fichiers présentés, dans la limite des orientations artistiques fixées dans le brief initial. Les demandes de modifications substantielles, changements de concept intervenant après validation d'étape ou demandes d'ajouts ultérieurs feront l'objet d'un avenant chiffré préalable.",
+                "en": "Revision cycle: Unless stated otherwise in the quote, agreed pricing includes one round of minor revisions on editing, pacing, or grading, strictly within the scope of the initial brief. Substantial changes, concept pivots after stage approvals, or additional requests will be quoted through a separate amendment."
+              },
+              {
+                "fr": "Disponibilité des galeries et conservation des sources : La galerie client en ligne reste accessible pendant une durée minimale de 3 mois à compter de sa mise à disposition. Le client est tenu de télécharger et de sécuriser ses fichiers finaux dès réception. Parallax n'assure pas un service d'archivage pérenne indéfini des fichiers sources bruts (rushs de tournage non montés, fichiers RAW) au-delà de la livraison finale, sauf contrat d'archivage expressément souscrit.",
+                "en": "Gallery availability and raw footage retention: Client online galleries remain accessible for a minimum of 3 months from initial release. Clients must download and back up their final master files upon delivery. Parallax does not provide indefinite long-term archiving of unedited raw assets (raw footage, RAW stills) beyond final delivery, unless an explicit storage agreement is concluded."
+              }
+            ]
+          },
+          {
+            "id": "intellectual_property_rights",
+            "title": {
+              "fr": "7. Propriété intellectuelle et droits d'exploitation",
+              "en": "7. Intellectual Property and Exploitation Licensing"
+            },
+            "paragraphs": [
+              {
+                "fr": "Titularité des droits d'auteur : Conformément aux dispositions du Livre XI du Code de droit économique belge, Parallax conserve la pleine propriété intellectuelle et les droits d'auteur (moraux et patrimoniaux) sur l'ensemble de ses créations audiovisuelles, photographiques et artistiques.",
+                "en": "Copyright ownership: Under Book XI of the Belgian Code of Economic Law, Parallax retains full intellectual property and moral and economic copyright over all created audiovisual, photographic, and artistic works."
+              },
+              {
+                "fr": "Étendue de la cession de droits d'exploitation : Le paiement intégral du prix convenu confère au client le droit d'exploiter et de diffuser les livrables finaux livrés, strictement dans les limites définies au devis (supports convenus : réseaux sociaux, site internet, diffusion interne, projection, etc. ; durée d'utilisation et périmètre géographique expressément spécifiés).",
+                "en": "Scope of exploitation licensing: Full payment of the agreed quote grants the client the right to exploit and broadcast the final delivered masters, strictly within the bounds specified in the quote (agreed channels: social media, website, internal corporate, public display; specified term and territory)."
+              },
+              {
+                "fr": "Aucune cession implicite ou illimitée : Aucune cession globale, universelle ou sans limitation de durée n'est présumée sans accord écrit exprès. Les fichiers de travail et sources (rushs bruts non retenus, profils d'étalonnage, fichiers de projet) demeurent la propriété exclusive du studio et ne font l'objet d'aucune transmission, sauf convention particulière distincte.",
+                "en": "No implied or unlimited transfer: No global, universal, or perpetual transfer is presumed without express written agreement. Working files and raw assets (discarded takes, color grading nodes, project timelines) remain the exclusive property of the studio and are not transferred unless subject to a separate written agreement."
+              },
+              {
+                "fr": "Droit de promotion du studio : Sauf clause de confidentialité ou embargo expressément convenu par écrit au devis, Parallax se réserve le droit d'utiliser des extraits des réalisations finales et des photographies à titre de référence artistique sur son portfolio public, son site web et ses réseaux sociaux professionnels.",
+                "en": "Studio promotional rights: Unless confidentiality or an embargo is expressly stipulated in the written quote, Parallax reserves the right to showcase excerpts of final masters and stills as artistic references within its public portfolio, website, and professional social media."
+              }
+            ]
+          },
+          {
+            "id": "liability_claims",
+            "title": {
+              "fr": "8. Responsabilité et réclamations",
+              "en": "8. Liability and Claims"
+            },
+            "paragraphs": [
+              {
+                "fr": "Obligation de moyens : Parallax s'engage à exécuter ses prestations avec tout le soin raisonnable, la diligence requise et selon les règles de l'art de la profession (obligation de moyens).",
+                "en": "Duty of reasonable care: Parallax undertakes to execute its services with reasonable care, professional diligence, and according to established industry practices (obligation of means)."
+              },
+              {
+                "fr": "Limitation de responsabilité : La responsabilité du studio ne saurait être engagée pour des dommages indirects, des pertes d'exploitation, des pertes de chance, ou des retards résultant de la défaillance d'éléments ou d'intervenants fournis par le client ou un tiers. Dans tous les cas où la responsabilité de Parallax serait engagée envers un client professionnel, le montant total des indemnités ne pourra excéder le montant effectivement perçu par le studio pour la prestation concernée.",
+                "en": "Limitation of liability: The studio shall not be liable for indirect damages, loss of profits, loss of business opportunity, or delays resulting from failure of assets or third parties supplied by the client. In all cases where liability is established towards a business client, total damages shall not exceed the amount actually received by the studio for the disputed service."
+              },
+              {
+                "fr": "Délai de réclamation : Toute réclamation relative à la conformité des livrables doit être notifiée par écrit et de manière motivée dans un délai de 14 jours calendrier suivant la mise à disposition des fichiers. À défaut de réclamation dans ce délai, les livrables sont réputés définitivement agréés.",
+                "en": "Claim deadline: Any claim concerning deliverable conformity must be submitted in writing with detailed grounds within 14 calendar days of file availability. Absent a claim within this period, deliverables are deemed definitively accepted."
+              }
+            ]
+          },
+          {
+            "id": "consumer_rights",
+            "title": {
+              "fr": "9. Dispositions protectrices applicables aux consommateurs (B2C)",
+              "en": "9. Protective Provisions for Consumers (B2C)"
+            },
+            "paragraphs": [
+              {
+                "fr": "Dispositions impératives : Lorsque le client agit en qualité de consommateur (personne physique acquérant des services à des fins non professionnelles), il bénéficie des droits impératifs conférés par le Livre VI du Code de droit économique belge relatif aux pratiques du marché et à la protection du consommateur.",
+                "en": "Mandatory statutory rules: When the client acts as a consumer (an individual purchasing services outside professional capacity), they benefit from mandatory statutory rights under Book VI of the Belgian Code of Economic Law on market practices and consumer protection."
+              },
+              {
+                "fr": "Droit de rétractation à distance : Pour les contrats conclus à distance (notamment par échanges électroniques à la suite d'une demande sur le site), le consommateur dispose en principe d'un délai légal de 14 jours calendrier pour se rétracter sans avoir à motiver sa décision, à compter du jour de la conclusion du contrat.",
+                "en": "Right of withdrawal in distance contracts: For contracts concluded remotely (via electronic communication following an online inquiry), consumers hold in principle a statutory right of withdrawal of 14 calendar days without giving reasons, running from contract conclusion."
+              },
+              {
+                "fr": "Exceptions légales au droit de rétractation (article VI.53 du CDE) : Conformément à la législation belge, le droit de rétractation ne peut être exercé pour : 1° Les contrats de service après que le service a été pleinement exécuté, si l'exécution a commencé avec l'accord préalable exprès du consommateur et la reconnaissance de la perte de son droit de rétractation une fois le contrat exécuté ; 2° Les biens confectionnés selon les spécifications du consommateur ou nettement personnalisés (tels que les tirages sur mesure ou les montages sur mesure réalisés pour le client) ; 3° Les prestations de services liées à des activités de loisirs si le contrat prévoit une date ou une période d'exécution spécifique (réservation d'une date de tournage ou d'événement dédiée).",
+                "en": "Statutory exceptions to withdrawal (Article VI.53 of the CEL): In accordance with Belgian law, the right of withdrawal cannot be exercised for: (1) Service contracts once the service has been fully performed, if performance began with the consumer's prior express consent and acknowledgment that withdrawal rights are lost upon full performance; (2) Goods made to consumer specifications or clearly personalized (such as bespoke prints or custom editing); (3) Services linked to leisure activities if the contract provides for a specific date or period of performance (booking a dedicated event or filming date)."
+              },
+              {
+                "fr": "Exécution anticipée à la demande du consommateur : Si le consommateur demande expressément que la prestation ou le travail préparatoire débute avant l'expiration du délai de rétractation de 14 jours, il conserve son droit de rétractation jusqu'à la pleine exécution du service mais reste redevable envers Parallax d'un montant proportionné aux prestations accomplies jusqu'au moment de la notification de sa rétractation.",
+                "en": "Early performance at consumer request: If the consumer expressly requests performance or preparatory work to commence prior to expiration of the 14-day withdrawal period, they retain withdrawal rights until full performance but remain liable to Parallax for an amount proportionate to services executed up to notification of withdrawal."
+              }
+            ]
+          },
+          {
+            "id": "disputes_law",
+            "title": {
+              "fr": "10. Règlement des litiges, médiation et droit applicable",
+              "en": "10. Dispute Resolution, Mediation, and Governing Law"
+            },
+            "paragraphs": [
+              {
+                "fr": "Droit applicable : Les présentes conditions générales et tous les contrats et devis conclus avec Parallax sont régis et interprétés exclusivement selon le droit belge.",
+                "en": "Governing law: These general terms and all quotes and contracts concluded with Parallax are governed and construed exclusively under Belgian law."
+              },
+              {
+                "fr": "Règlement amiable : En cas de différend ou de litige survenant à l'occasion de l'interprétation, de la validité ou de l'exécution d'une prestation, les parties s'engagent à rechercher prioritairement une issue amiable en se notifiant leurs griefs par lettre recommandée ou par courrier électronique motivé.",
+                "en": "Amicable settlement: In the event of any dispute arising from the interpretation, validity, or performance of a service, the parties agree to seek an amicable resolution prior to formal litigation by notifying their grounds in writing."
+              },
+              {
+                "fr": "Médiation de la consommation (B2C) : Pour les litiges non résolus impliquant un consommateur, ce dernier peut recourir gratuitement au Service de Médiation pour le Consommateur institué par le SPF Économie belge : Boulevard du Roi Albert II 8 Bte 1, 1000 Bruxelles — Téléphone : +32 (0)2 702 52 20 — E-mail : contact@mediationconsommateur.be — Site : www.mediationconsommateur.be.",
+                "en": "Consumer mediation (B2C): For unresolved disputes involving a consumer, the client may submit a complaint free of charge to the Belgian Consumer Mediation Service: Boulevard du Roi Albert II 8 Bte 1, 1000 Brussels — Phone: +32 (0)2 702 52 20 — Email: contact@mediationconsommateur.be — Website: www.mediationconsommateur.be."
+              },
+              {
+                "fr": "Compétence juridictionnelle : À défaut d'accord amiable : pour les clients professionnels (B2B), compétence exclusive est attribuée aux tribunaux de l'arrondissement judiciaire du siège social de l'exploitant ({{company.rpmJurisdiction}} ou Bruxelles) ; pour les consommateurs (B2C), les règles légales de compétence territoriale du Code judiciaire belge s'appliquent.",
+                "en": "Jurisdiction: Failing amicable resolution: for business clients (B2B), exclusive jurisdiction is assigned to the courts of the judicial district of the operator's registered office ({{company.rpmJurisdiction}} or Brussels); for consumers (B2C), statutory jurisdiction rules under the Belgian Judicial Code apply."
               }
             ]
           }
@@ -784,64 +1131,123 @@
       }
     },
     "cookies": {
-      "lastUpdated": "2026-10-15T00:00:00.000Z",
+      "lastUpdated": "2026-10-18T00:00:00.000Z",
       "published": null,
       "draft": {
         "seoTitle": {
           "fr": "Politique relative aux cookies et traceurs | Parallax",
-          "en": "Cookie and tracking policy | Parallax"
+          "en": "Cookie and Tracker Policy | Parallax"
         },
         "seoDescription": {
-          "fr": "Inventaire des cookies techniques et gestion de vos préférences sur Parallax.",
-          "en": "Technical cookie inventory and preference management on Parallax."
+          "fr": "Inventaire réel des cookies techniques, absence de traceurs publicitaires et gestion du consentement vidéo sur Parallax.",
+          "en": "Actual technical cookie inventory, absence of advertising trackers, and video consent management on Parallax."
         },
         "publicTitle": {
-          "fr": "Politique relative aux cookies",
-          "en": "Cookie policy"
+          "fr": "Politique relative aux cookies et traceurs",
+          "en": "Cookie and Tracker Policy"
         },
         "intro": {
-          "fr": "Parallax utilise exclusivement des traceurs techniques indispensables au bon fonctionnement du site et applique une politique stricte de consentement préalable pour l'affichage des lecteurs vidéo externes.",
-          "en": "Parallax uses strictly necessary technical trackers required for website operation and enforces strict prior consent for external video players."
+          "fr": "Le site Parallax applique une politique stricte de minimisation technique des traceurs : aucun cookie publicitaire, aucun outil de profilage comportemental et aucun outil de pistage d'audience tiers n'est utilisé. Seuls des cookies strictement techniques nécessaires au fonctionnement sécurisé du site sont mis en œuvre, et l'activation des lecteurs vidéo externes (YouTube et Vimeo) est soumise à votre consentement exprès préalable.",
+          "en": "Parallax enforces strict technical tracker minimization: no advertising cookies, behavioral profiling tools, or third-party tracking scripts are utilized. Only strictly necessary technical cookies essential for secure website operation are deployed, and external video player activation (YouTube and Vimeo) remains conditional upon your prior express consent."
         },
-        "effectiveDate": "15 octobre 2026",
+        "effectiveDate": "18 octobre 2026",
         "version": 0,
         "sections": [
           {
             "id": "what_is_cookie",
             "title": {
-              "fr": "1. Qu'est-ce qu'un cookie ou traceur ?",
-              "en": "1. What is a cookie or tracker?"
+              "fr": "1. Qu'est-ce qu'un cookie ou traceur technique ?",
+              "en": "1. What Is a Cookie or Technical Tracker?"
             },
             "paragraphs": [
               {
-                "fr": "Un cookie est un fichier texte de petite taille déposé sur votre terminal lors de la consultation d'un site web. Conformément aux recommandations de l'Autorité de Protection des Données (APD), les cookies strictement nécessaires au fonctionnement technique sont dispensés de consentement préalable mais font l'objet d'une information transparente dans l'inventaire ci-dessous.",
-                "en": "A cookie is a small text file placed on your device when browsing a website. In accordance with Belgian DPA guidance, strictly necessary technical cookies are exempt from prior consent but are documented transparently in the inventory below."
+                "fr": "Un cookie est un fichier texte de petite taille déposé sur votre terminal (ordinateur, tablette ou smartphone) par le serveur du site web consulté. Conformément à l'article 129 de la loi belge du 13 juin 2005 relative aux communications électroniques et aux lignes directrices de l'Autorité de Protection des Données (APD), les cookies ayant pour finalité exclusive de permettre ou faciliter la communication par voie électronique, ou strictement nécessaires à la fourniture d'un service expressément demandé par l'utilisateur, sont dispensés de consentement préalable.",
+                "en": "A cookie is a small text file placed on your terminal (computer, tablet, or smartphone) by the web server visited. In accordance with Article 129 of the Belgian Electronic Communications Act of 13 June 2005 and guidance from the Data Protection Authority (APD / GBA), cookies with the sole purpose of enabling electronic transmission, or strictly necessary to deliver a service expressly requested by the user, are exempt from prior consent."
+              },
+              {
+                "fr": "Parallax utilise exclusivement cette catégorie de cookies strictement nécessaires pour sécuriser les soumissions de formulaire, maintenir les sessions d'authentification et mémoriser les choix de confidentialité que vous avez expressément validés.",
+                "en": "Parallax utilizes exclusively this category of strictly necessary cookies to secure form submissions, maintain authenticated sessions, and record privacy choices you have expressly confirmed."
               }
             ]
           },
           {
-            "id": "external_players",
+            "id": "inventory_description",
             "title": {
-              "fr": "2. Lecteurs vidéo externes (YouTube et Vimeo)",
-              "en": "2. Third-party video players (YouTube and Vimeo)"
+              "fr": "2. Inventaire technique réel et fidèle au code",
+              "en": "2. Technical Inventory Faithful to the Codebase"
             },
             "paragraphs": [
               {
-                "fr": "Parallax ne charge aucun script, iframe ou traceur YouTube/Vimeo par défaut. Lorsque vous choisissez de visionner une vidéo, vous pouvez autoriser la lecture ponctuelle ou mémoriser votre accord pour 6 mois. Votre accord est retirable à tout instant.",
-                "en": "Parallax does not load any YouTube or Vimeo script, iframe, or tracker by default. When you choose to watch a video, you can authorize playback once or remember your choice for 6 months. Your consent can be withdrawn at any time."
+                "fr": "Le tableau ci-dessous dresse l'inventaire complet des traceurs et cookies de première partie générés par l'application Parallax, avec leur durée d'expiration réelle constatée dans le code du site :",
+                "en": "The table below establishes the complete inventory of first-party cookies and trackers deployed by Parallax, alongside actual expiration lifetimes implemented in code:"
+              }
+            ],
+            "listItems": [
+              {
+                "fr": "__parallax_admin_session : Cookie de première partie, strictement technique, réservé aux administrateurs autorisés pour maintenir la session back-office et protéger contre les falsifications de requêtes (CSRF). Durée de rétention : 8 heures (glissante). Attributs de sécurité : HttpOnly, SameSite=Strict, Secure (en production).",
+                "en": "__parallax_admin_session: First-party strictly technical cookie, restricted to authorized administrators to maintain back-office session and protect against CSRF attacks. Retention: 8 hours (sliding). Security attributes: HttpOnly, SameSite=Strict, Secure (production)."
+              },
+              {
+                "fr": "__parallax_gallery_session : Cookie de première partie, strictement technique, émis lors de la saisie d'un code valide d'accès à une galerie privée pour maintenir la consultation sécurisée des photos et le téléchargement des médias. Durée de rétention : bornée par la session avec un maximum technique de 8 heures. Attributs : HttpOnly, SameSite=Lax, Secure (en production).",
+                "en": "__parallax_gallery_session: First-party strictly technical cookie, issued upon entry of a valid access code for a private client gallery to preserve secure viewing and downloads. Retention: bounded by session up to a technical maximum of 8 hours. Attributes: HttpOnly, SameSite=Lax, Secure (production)."
+              },
+              {
+                "fr": "__parallax_contact_ctx : Cookie de première partie, strictement technique, éphémère, assurant la liaison cryptographique anti-spam et la protection anti-usurpation lors de l'envoi d'un message via le formulaire de contact. Durée de rétention : 2 heures. Attributs : HttpOnly, SameSite=Lax, Secure (en production).",
+                "en": "__parallax_contact_ctx: First-party strictly technical ephemeral cookie, providing anti-spam cryptographic binding and tampering prevention during contact form submission. Retention: 2 hours. Attributes: HttpOnly, SameSite=Lax, Secure (production)."
+              },
+              {
+                "fr": "__parallax_contact_flash : Cookie de première partie, strictement technique, à usage unique, émis selon le modèle PRG (Post-Redirect-Get) pour afficher temporairement la notification de succès ou d'erreur après soumission d'une demande. Durée de rétention : supprimé immédiatement à la première lecture (expiration technique maximale de 60 secondes). Attributs : HttpOnly, SameSite=Lax, Secure (en production).",
+                "en": "__parallax_contact_flash: First-party strictly technical single-use cookie, issued via the PRG (Post-Redirect-Get) pattern to temporarily display confirmation feedback after inquiry submission. Retention: deleted immediately upon initial read (maximum technical expiration of 60 seconds). Attributes: HttpOnly, SameSite=Lax, Secure (production)."
+              },
+              {
+                "fr": "__parallax_privacy_prefs : Cookie de première partie, catégorie préférences, émis uniquement lorsque vous cochez expressément la case « Mémoriser mon choix pour mes prochaines visites » lors de l'activation des lecteurs vidéo externes. Durée de rétention : 180 jours (environ 6 mois). Attributs : HttpOnly, SameSite=Lax, signé cryptographiquement HMAC-SHA256 par le serveur pour garantir son intégrité.",
+                "en": "__parallax_privacy_prefs: First-party preference cookie, issued only when you explicitly tick 'Remember my choice for future visits' upon activating external video players. Retention: 180 days (~6 months). Attributes: HttpOnly, SameSite=Lax, cryptographically HMAC-SHA256 signed by the server to prevent tampering."
+              },
+              {
+                "fr": "Stockage de session du navigateur (sessionStorage) : Utilisé localement par le mécanisme ScrollRestoration de la navigation pour rétablir la position de défilement de l'écran lors d'un retour arrière. Ce stockage reste confiné à votre navigateur, n'est jamais transmis au serveur et est effacé automatiquement dès la fermeture de votre onglet ou fenêtre de navigation.",
+                "en": "Browser session storage (sessionStorage): Utilized locally by the framework ScrollRestoration mechanism to restore scroll position when navigating back. This storage remains confined within your browser, is never transmitted to the server, and is cleared automatically upon closing your tab or browser window."
               }
             ]
           },
           {
-            "id": "manage_preferences",
+            "id": "video_embeds_consent",
             "title": {
-              "fr": "3. Gestion et retrait de votre consentement",
-              "en": "3. Managing and withdrawing your consent"
+              "fr": "3. Lecteurs vidéo externes (YouTube et Vimeo) et consentement",
+              "en": "3. External Video Players (YouTube & Vimeo) and Consent"
             },
             "paragraphs": [
               {
-                "fr": "Vous pouvez à tout moment modifier ou révoquer vos choix en matière de lecteurs vidéo externes à l'aide des boutons ci-dessous ou depuis le lien accessible en pied de page.",
-                "en": "You can modify or revoke your preferences regarding external video players at any time using the buttons below or via the footer link."
+                "fr": "Pour préserver votre vie privée, Parallax ne charge aucun lecteur vidéo tiers par défaut. Lors de l'ouverture d'un projet vidéo, le lecteur n'est chargé qu'après votre autorisation expresse.",
+                "en": "To preserve your privacy, Parallax loads no third-party video players by default. When opening a video project, the external player loads only after your express authorization."
+              },
+              {
+                "fr": "Accord ponctuel vs Mémorisation : Si vous choisissez d'activer la vidéo sans mémoriser votre choix, l'accord est conservé uniquement en mémoire vive (JavaScript) pour la vidéo active. Aucun cookie n'est écrit. L'accord est immédiatement révoqué dès que vous fermez la modale ou quittez la page. Si vous choisissez de mémoriser votre accord, le cookie signé __parallax_privacy_prefs est enregistré pour 180 jours.",
+                "en": "One-time consent vs Saved preferences: If you authorize playback without saving your choice, consent is held solely in volatile memory (JavaScript) for the active video. No cookie is written. Consent is immediately revoked upon closing the modal or leaving the page. If you choose to save your choice, the signed __parallax_privacy_prefs cookie is saved for 180 days."
+              },
+              {
+                "fr": "Révocation instantanée : Vous pouvez révoquer vos consentements à tout instant à l'aide des boutons ci-dessous ou depuis le lien « Gérer mes préférences » en bas de page. Le retrait entraîne le démontage immédiat de tout lecteur vidéo actif dans le DOM.",
+                "en": "Instant revocation: You can revoke your consent at any time using the buttons below or through the 'Manage preferences' footer link. Revocation instantly unmounts any active video player from the DOM."
+              }
+            ]
+          },
+          {
+            "id": "managing_cookies",
+            "title": {
+              "fr": "4. Gestion de vos choix et configuration du navigateur",
+              "en": "4. Managing Preferences and Browser Settings"
+            },
+            "paragraphs": [
+              {
+                "fr": "Vous pouvez à tout moment gérer ou réinitialiser vos choix de confidentialité directement sur cette page à l'aide du formulaire interactif ci-dessous.",
+                "en": "You can manage or reset your privacy choices on this platform at any time using the interactive form below."
+              },
+              {
+                "fr": "Configuration du navigateur : Vous pouvez également configurer votre navigateur pour bloquer ou supprimer les cookies existants. Notez que le blocage complet des cookies techniques empêchera l'accès aux galeries privées sécurisées et la soumission du formulaire de contact.",
+                "en": "Browser configuration: You may also configure your browser to block or delete existing cookies. Note that blocking strictly necessary technical cookies will prevent access to private client galleries and contact form submissions."
+              },
+              {
+                "fr": "Distinction des domaines : Parallax peut effacer ou révoquer les cookies et autorisations émis sous son propre nom de domaine. La suppression des éventuels cookies déposés directement par YouTube (Google) ou Vimeo après que vous avez autorisé la lecture d'une vidéo relève des paramètres de votre navigateur ou des centres de préférences respectifs de ces fournisseurs.",
+                "en": "Domain distinction: Parallax can delete or revoke cookies and permissions issued under its own domain. Deletion of cookies placed directly by YouTube (Google) or Vimeo after you authorized playback depends upon your browser settings or the respective privacy preference portals of those providers."
               }
             ]
           }
@@ -863,8 +1269,8 @@
               "en": "Authenticated admin session management and CSRF attack protection."
             },
             "duration": {
-              "fr": "8 heures",
-              "en": "8 hours"
+              "fr": "8 heures (glissante)",
+              "en": "8 hours (sliding)"
             },
             "exemptionJustification": {
               "fr": "Strictement nécessaire au service d'administration sécurisé demandé par l'exploitant.",
@@ -883,12 +1289,12 @@
             },
             "category": "technical",
             "purpose": {
-              "fr": "Maintien de la session de consultation sécurisée de galerie privée pour le client authentifié.",
-              "en": "Maintaining the secure private gallery consultation session for the authenticated client."
+              "fr": "Maintien de la session d'accès sécurisé à une galerie privée pour le client authentifié par code.",
+              "en": "Maintaining the secure private gallery consultation session for the code-authenticated client."
             },
             "duration": {
-              "fr": "8 heures",
-              "en": "8 hours"
+              "fr": "8 heures maximum (bornée par la session)",
+              "en": "8 hours maximum (bounded by session)"
             },
             "exemptionJustification": {
               "fr": "Strictement nécessaire à la fourniture de la galerie privée demandée par le client.",
@@ -935,7 +1341,7 @@
               "en": "Single-use temporary display of confirmation notice after submission (PRG pattern)."
             },
             "duration": {
-              "fr": "60 secondes (effacé à la lecture)",
+              "fr": "60 secondes (effacé à la première lecture)",
               "en": "60 seconds (cleared upon read)"
             },
             "exemptionJustification": {
@@ -959,12 +1365,12 @@
               "en": "Remembering user preferences regarding third-party YouTube and Vimeo video players."
             },
             "duration": {
-              "fr": "180 jours (6 mois)",
-              "en": "180 days (6 months)"
+              "fr": "180 jours (~6 mois)",
+              "en": "180 days (~6 months)"
             },
             "exemptionJustification": {
-              "fr": "Traceur de préférences activé uniquement à la demande expresse de l'utilisateur.",
-              "en": "Preferences tracker activated only upon express user choice."
+              "fr": "Stocke exclusivement le consentement préalable explicite requis par la réglementation.",
+              "en": "Exclusively stores the explicit prior consent required by applicable regulations."
             }
           }
         ]

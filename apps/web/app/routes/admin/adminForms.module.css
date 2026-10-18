@@ -488,6 +488,91 @@
   border: 1px solid rgba(239, 68, 68, 0.3);
 }
 
+.readinessReady {
+  margin-top: 12px;
+  font-size: 13px;
+  color: #34d399;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.readinessPending {
+  margin-top: 12px;
+  font-size: 13px;
+  color: #f59e0b;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.readinessLink {
+  color: var(--px-accent);
+  text-decoration: underline;
+  margin-top: 2px;
+}
+
+.readinessLink:hover {
+  color: var(--px-accent-hover);
+}
+
+.companyTokensBox {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--px-border);
+  border-radius: var(--r-card);
+  padding: 20px 24px;
+  margin-bottom: 28px;
+}
+
+.companyTokensGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px 20px;
+  margin: 16px 0;
+  font-size: 13px;
+}
+
+.companyTokenItem {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.companyTokenKey {
+  color: var(--px-text-3);
+  font-size: 11px;
+  font-family: monospace;
+}
+
+.companyTokenValue {
+  color: var(--px-text);
+  font-weight: 500;
+  word-break: break-word;
+}
+
+.companyTokenMissing {
+  color: #f59e0b;
+  font-style: italic;
+}
+
+.previewToggleRow {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 0.5px solid var(--px-border);
+}
+
+.resolvedPreviewBox {
+  margin-top: 8px;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border-left: 2px solid var(--px-accent);
+  border-radius: var(--r-input);
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--px-text-2);
+  white-space: pre-line;
+}
+
 .previewButton {
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid var(--px-border);
