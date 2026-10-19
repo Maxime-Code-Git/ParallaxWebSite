@@ -44,6 +44,7 @@ import {
   type LegalPersonalityType,
   type VatRegimeType,
   COMPANY_TOKEN_DETAILS,
+  cleanTypography,
 } from "./site-content.shared";
 
 export class RevisionConflictError extends Error {
@@ -101,7 +102,10 @@ export function validateLocalizedString(val: unknown, context: string): Localize
   if (typeof obj.en !== "string") {
     throw new ValidationError(`${context}.en doit être une chaîne de caractères.`);
   }
-  return { fr: obj.fr, en: obj.en };
+  return {
+    fr: cleanTypography(obj.fr, "fr"),
+    en: cleanTypography(obj.en, "en"),
+  };
 }
 
 export function validateAllowedImageId(val: unknown, context: string): AllowedImageId {

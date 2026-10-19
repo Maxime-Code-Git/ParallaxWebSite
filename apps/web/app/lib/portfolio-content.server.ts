@@ -15,6 +15,7 @@ import {
   type PortfolioMediaItem,
   portfolioContentSchema,
   migratePortfolioContentV1ToV2,
+  cleanPortfolioContent,
 } from "./portfolio-content.shared";
 import {
   verifySecurePathChain,
@@ -434,14 +435,15 @@ export function getPublicPortfolioContent(customPath?: string): {
   publicCategories: PortfolioCategoryItem[];
 } {
   const { content } = getRawPortfolioContent(customPath);
+  const cleanedContent = cleanPortfolioContent(content);
 
-  const publicCategories = content.categories
+  const publicCategories = cleanedContent.categories
     .filter((c) => c.status === "published")
     .sort((a, b) => a.order - b.order);
 
   const publishedCategoryIds = new Set(publicCategories.map((c) => c.id));
 
-  const publicProjects = content.projects
+  const publicProjects = cleanedContent.projects
     .filter((p) => p.status === "published" && !p.archived && publishedCategoryIds.has(p.category))
     .sort((a, b) => a.order - b.order);
 
@@ -482,7 +484,7 @@ export function getPublicPortfolioContent(customPath?: string): {
     schemaVersion: 2,
     revision: content.revision,
     updatedAt: content.updatedAt,
-    overview: content.overview,
+    overview: cleanedContent.overview,
     categories: publicCategories,
     sections,
     projects: publicProjects,
@@ -562,7 +564,8 @@ export async function savePortfolioContent(
     );
   }
 
-  const categories = Array.isArray(nextContent.categories) ? nextContent.categories : [];
+  const cleaned = cleanPortfolioContent(nextContent);
+  const categories = Array.isArray(cleaned.categories) ? cleaned.categories : [];
   const sections: Record<string, PortfolioCategoryItem> = {};
   for (const c of categories) {
     sections[c.id] = c;
@@ -570,7 +573,7 @@ export async function savePortfolioContent(
 
   const newRevision = crypto.randomBytes(16).toString("hex");
   const toSave: PortfolioContent = {
-    ...nextContent,
+    ...cleaned,
     schemaVersion: 2,
     revision: newRevision,
     updatedAt: new Date().toISOString(),

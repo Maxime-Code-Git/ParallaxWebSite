@@ -5,6 +5,11 @@ import { Header } from "../../components/public/Header";
 import { Footer } from "../../components/public/Footer";
 import { ScrollToTop } from "../../components/public/ScrollToTop";
 import { ResponsiveSiteImage } from "../../components/public/ResponsiveSiteImage";
+import {
+  cleanCommonContent,
+  cleanStudioContent,
+  cleanTypography,
+} from "../../lib/site-content.shared";
 import styles from "./studio.module.css";
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -16,20 +21,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   return {
     lang,
-    common: siteContent.common,
-    studio: siteContent.studio,
+    common: cleanCommonContent(siteContent.common),
+    studio: cleanStudioContent(siteContent.studio),
     media: siteContent.media || {},
   };
 }
 
 export function meta({ data }: { data?: Awaited<ReturnType<typeof loader>> }) {
   if (!data) {
-    return [{ title: "Parallax - Studio" }];
+    return [{ title: "Studio | Parallax" }];
   }
   const { studio, lang } = data;
   return [
-    { title: studio.seo.title[lang] },
-    { name: "description", content: studio.seo.description[lang] },
+    { title: cleanTypography(studio.seo.title[lang]) },
+    { name: "description", content: cleanTypography(studio.seo.description[lang]) },
   ];
 }
 

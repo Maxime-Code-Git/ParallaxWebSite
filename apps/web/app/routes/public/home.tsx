@@ -7,7 +7,12 @@ import { Footer } from "../../components/public/Footer";
 import { ScrollToTop } from "../../components/public/ScrollToTop";
 import { VideoModal } from "../../components/public/VideoModal";
 import { ResponsiveSiteImage } from "../../components/public/ResponsiveSiteImage";
-import { resolveSempraButtonUrl } from "../../lib/site-content.shared";
+import {
+  resolveSempraButtonUrl,
+  cleanCommonContent,
+  cleanHomeContent,
+  cleanTypography,
+} from "../../lib/site-content.shared";
 import styles from "./home.module.css";
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -19,8 +24,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   return {
     lang,
-    common: siteContent.common,
-    home: siteContent.home,
+    common: cleanCommonContent(siteContent.common),
+    home: cleanHomeContent(siteContent.home),
     media: siteContent.media || {},
   };
 }
@@ -31,8 +36,8 @@ export function meta({ data }: { data?: Awaited<ReturnType<typeof loader>> }) {
   }
   const { home, lang } = data;
   return [
-    { title: home.seo.title[lang] },
-    { name: "description", content: home.seo.description[lang] },
+    { title: cleanTypography(home.seo.title[lang]) },
+    { name: "description", content: cleanTypography(home.seo.description[lang]) },
   ];
 }
 

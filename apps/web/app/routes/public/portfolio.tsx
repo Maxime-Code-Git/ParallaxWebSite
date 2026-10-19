@@ -19,7 +19,7 @@ import {
 } from "../../lib/portfolio-content.shared";
 import { getPublicPortfolioContent } from "../../lib/portfolio-content.server";
 import { getSiteContent, type CommonContent } from "../../lib/site-content.server";
-import { cleanTypography } from "../../lib/site-content.shared";
+import { cleanTypography, cleanCommonContent } from "../../lib/site-content.shared";
 import { ENV } from "../../lib/env.server";
 import {
   getPortfolioOverviewUrl,
@@ -101,7 +101,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const lang: "fr" | "en" = pathname.startsWith("/en") ? "en" : "fr";
 
   const { content, publicProjects, publicCategories } = getPublicPortfolioContent();
-  const common = getSiteContent().common;
+  const common = cleanCommonContent(getSiteContent().common);
 
   // Use route params: client navigations keep the .data suffix in request.url.
   let activeCategory: PortfolioCategory | null = null;

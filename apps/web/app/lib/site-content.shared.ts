@@ -749,85 +749,27 @@ export function isRpmOnlyParagraph(text: string): boolean {
   );
 }
 
-/**
- * Normalizes typography by removing em-dashes (U+2014, &mdash;, etc.) and replacing them
- * with appropriate punctuation according to context (parentheses for incises, colons/pipes
- * for titles and coordinates, commas for lists and status badges).
- */
-export function cleanTypography(str: string | null | undefined): string {
-  if (!str || typeof str !== "string") return "";
-  let s = str.replace(/&mdash;|&#8212;|&#x2014;/gi, "\u2014");
+import {
+  cleanTypography,
+  cleanLocalizedString,
+  cleanCommonContent,
+  cleanHomeContent,
+  cleanStudioContent,
+  cleanContactContent,
+  cleanLegalDocument,
+  cleanPortfolioContent,
+} from "@parallax/shared";
 
-  if (!s.includes("\u2014")) return s;
-
-  // 1. Legal incise: " — incluant de manière non limitative ... — " -> " (incluant de manière non limitative ...) "
-  s = s.replace(
-    /\s*\u2014\s*(incluant de manière non limitative [^\u2014]+?)\s*\u2014\s*/gi,
-    " ($1) "
-  );
-  s = s.replace(
-    /\s*\u2014\s*(including without limitation [^\u2014]+?)\s*\u2014\s*/gi,
-    " ($1) "
-  );
-
-  // 2. Juxtaposed postal addresses and contact details (APD, Consumer Mediation)
-  s = s.replace(
-    /(\d{4}\s+(?:Bruxelles|Brussels))\s*\u2014\s*(Téléphone|Phone)\s*:\s*([^\u2014]+?)\s*\u2014\s*(E-mail|Email)\s*:\s*([^\u2014]+?)\s*\u2014\s*(Site officiel|Official website|Site)\s*:\s*(\S+)/gi,
-    "$1 | $2 : $3 | $4 : $5 | $6 : $7"
-  );
-
-  // 3. BCE and VAT mentions
-  s = s.replace(
-    /\s*\u2014\s*(Numéro de TVA intracommunautaire)/gi,
-    ", numéro de TVA intracommunautaire"
-  );
-  s = s.replace(
-    /\s*\u2014\s*(Intra-community VAT number)/gi,
-    ", intra-community VAT number"
-  );
-  s = s.replace(/\s*\u2014\s*(Régime TVA)/gi, ", régime TVA");
-  s = s.replace(/\s*\u2014\s*(VAT regime)/gi, ", VAT regime");
-
-  // 4. B2B / B2C mentions in parentheses
-  s = s.replace(/\s*\u2014\s*(B2[BC]\))/g, ", $1");
-
-  // 5. Explicit editorial descriptions requested by Maxime
-  s = s.replace(
-    /Des films qui racontent le réel\s*\u2014\s*portraits de métiers/g,
-    "Des films qui racontent le réel : portraits de métiers"
-  );
-  s = s.replace(
-    /Films that tell real stories\s*\u2014\s*portraits of trades/g,
-    "Films that tell real stories: portraits of trades"
-  );
-  s = s.replace(
-    /Des films de marque et de produit\s*\u2014\s*studio/g,
-    "Des films de marque et de produit : studio"
-  );
-  s = s.replace(
-    /Brand and product films\s*\u2014\s*studio/g,
-    "Brand and product films: studio"
-  );
-  s = s.replace(
-    /Ce que ce projet raconte\s*\u2014\s*son émotion/g,
-    "Ce que ce projet raconte : son émotion"
-  );
-  s = s.replace(
-    /What this project carries\s*\u2014\s*its emotion/g,
-    "What this project carries: its emotion"
-  );
-
-  // 6. Title brand suffix: " — Parallax" -> " | Parallax"
-  s = s.replace(/\s*\u2014\s*(Parallax)/g, " | $1");
-
-  // 7. General fallback for any remaining em-dashes
-  s = s.replace(/\s*\u2014\s*/g, " | ");
-  s = s.replace(/\u2014/g, " - ");
-
-  // Clean double spaces and spacing before closing parenthesis
-  s = s.replace(/\s+\)/g, ")").replace(/[ ]{2,}/g, " ").trim();
-  return s;
-}
+export {
+  cleanTypography,
+  cleanLocalizedString,
+  cleanCommonContent,
+  cleanHomeContent,
+  cleanStudioContent,
+  cleanContactContent,
+  cleanLegalDocument,
+  cleanPortfolioContent,
+};
 
 export function resolveCompanyTokens(
   text: string,
@@ -845,15 +787,32 @@ export function resolveCompanyTokens(
   // Handle VAT paragraph cleanly when business is non-subject to VAT and has no VAT number
   let processedText = text;
   if (isVatNumberApplicable(company) === false && !company?.vatNumber?.trim()) {
-    const regime = company?.vatRegime?.trim() || (lang === "fr" ? "Non assujetti" : "Non-subject to VAT");
+    let regime = company?.vatRegime?.trim();
+    if (lang === "en") {
+      if (!regime || /non[- ]assujetti/i.test(regime)) {
+        regime = "Non-subject to VAT";
+      }
+    } else if (!regime) {
+      regime = "Non assujetti à la TVA";
+    }
     processedText = processedText
       .replace(
-        /(?:—|-|\||,)?\s*Numéro de TVA intracommunautaire : \{\{company\.vatNumber\}\} \(\{\{company\.vatRegime\}\}\)\./g,
-        `, régime TVA : ${regime}.`
+        /\s*([—\-|,]?)\s*numéro de tva intracommunautaire\s*:\s*\{\{company\.vatNumber\}\}(?:\s*\(\{\{company\.vatRegime\}\}\))?\.?/gi,
+        (_match, sep, offset) => {
+          if (sep || offset > 0) {
+            return `, régime TVA : ${regime}.`;
+          }
+          return `Régime TVA : ${regime}.`;
+        }
       )
       .replace(
-        /(?:—|-|\||,)?\s*Intra-community VAT number: \{\{company\.vatNumber\}\} \(\{\{company\.vatRegime\}\}\)\./g,
-        `, VAT regime: ${regime}.`
+        /\s*([—\-|,]?)\s*intra-community vat number\s*:\s*\{\{company\.vatNumber\}\}(?:\s*\(\{\{company\.vatRegime\}\}\))?\.?/gi,
+        (_match, sep, offset) => {
+          if (sep || offset > 0) {
+            return `, VAT regime: ${regime}.`;
+          }
+          return `VAT regime: ${regime}.`;
+        }
       );
   }
 

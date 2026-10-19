@@ -1429,3 +1429,5 @@ export function calculateEffectiveSide(
   // Even index -> left, Odd index -> right
   return showcaseIndex % 2 === 0 ? "left" : "right";
 }
+
+export { cleanPortfolioContent } from "@parallax/shared";

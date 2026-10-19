@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-import { describe, it, expect, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import { fileURLToPath } from "node:url";
 
 vi.mock("react-router", async (importOriginal) => {
@@ -21,9 +22,11 @@ import {
   DEFAULT_LEGAL_PAGES_CONTENT,
   type CommonContent,
 } from "../app/lib/site-content.shared";
-import { createDefaultPortfolioContent } from "../app/lib/portfolio-content.server";
+import { createDefaultPortfolioContent, savePortfolioContent } from "../app/lib/portfolio-content.server";
 import { links as rootLinks } from "../app/root";
 import { LegalPageView } from "../app/components/public/LegalPageView";
+import defaultSiteContent from "../app/content/default-site-content.json";
+import { adaptPortfolioContent, adaptSiteContentDrafts } from "../../../scripts/adapt-typography.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -268,6 +271,204 @@ describe("Typography (No Em-Dashes) and Favicon Validation Suite", () => {
       expect(str).not.toContain("—");
       expect(str).not.toContain("&mdash;");
       expect(str).not.toContain("&#8212;");
+    });
+  });
+
+  describe("5. Targeted Adaptation Script (adapt-typography)", () => {
+    let tmpDir: string;
+    let tmpPortfolioPath: string;
+    let tmpSitePath: string;
+
+    beforeEach(() => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "parallax-typo-test-"));
+      tmpPortfolioPath = path.join(tmpDir, "portfolio-content.json");
+      tmpSitePath = path.join(tmpDir, "site-content.json");
+    });
+
+    afterEach(() => {
+      if (fs.existsSync(tmpDir)) {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it("adapts custom editorial fields across Home, Studio, Contact and drafts", () => {
+      const siteData = structuredClone(defaultSiteContent);
+      siteData.home.hero.title.fr = "Un titre — personnalisé";
+      siteData.home.hero.subtitle.en = "A subtitle — customized";
+      siteData.studio.hero.title.fr = "Studio — présentation";
+      siteData.contactPage.hero.title.fr = "Contact — écrivez-nous";
+      siteData.legalPages.mentions.draft.sections[0].paragraphs[0].fr = "Texte — mentions personnalisées";
+
+      fs.writeFileSync(tmpSitePath, JSON.stringify(siteData, null, 2), "utf-8");
+
+      const res = adaptSiteContentDrafts(tmpSitePath);
+      expect(res.success).toBe(true);
+      expect(res.changed).toBe(true);
+      expect(res.newRevision).toBeDefined();
+
+      const updated = JSON.parse(fs.readFileSync(tmpSitePath, "utf-8"));
+      expect(updated.home.hero.title.fr).toBe("Un titre | personnalisé");
+      expect(updated.home.hero.subtitle.en).toBe("A subtitle | customized");
+      expect(updated.studio.hero.title.fr).toBe("Studio | présentation");
+      expect(updated.contactPage.hero.title.fr).toBe("Contact | écrivez-nous");
+      expect(updated.legalPages.mentions.draft.sections[0].paragraphs[0].fr).toBe("Texte | mentions personnalisées");
+
+      // Verify second pass is strictly idempotent
+      const pass2 = adaptSiteContentDrafts(tmpSitePath);
+      expect(pass2.success).toBe(true);
+      expect(pass2.changed).toBe(false);
+      expect(pass2.newRevision).toBeUndefined();
+    });
+
+    it("adapts custom portfolio overview, categories, projects, alts, and summaries", () => {
+      const portfolioData = createDefaultPortfolioContent();
+      portfolioData.overview.intro.fr = "Introduction — personnalisée";
+      portfolioData.categories[0].intro.fr = "Des films qui racontent le réel — portraits de métiers, de lieux et de savoir-faire, du repérage au montage.";
+      portfolioData.projects[0].summary.fr = "Résumé — personnalisé";
+      portfolioData.projects[0].seo.title.fr = "Projet — Parallax";
+
+      fs.writeFileSync(tmpPortfolioPath, JSON.stringify(portfolioData, null, 2), "utf-8");
+
+      const res = adaptPortfolioContent(tmpPortfolioPath);
+      expect(res.success).toBe(true);
+      expect(res.changed).toBe(true);
+      expect(res.newRevision).toBeDefined();
+
+      const updated = JSON.parse(fs.readFileSync(tmpPortfolioPath, "utf-8"));
+      expect(updated.overview.intro.fr).toBe("Introduction | personnalisée");
+      expect(updated.categories[0].intro.fr).toBe("Des films qui racontent le réel : portraits de métiers, de lieux et de savoir-faire, du repérage au montage.");
+      expect(updated.projects[0].summary.fr).toBe("Résumé | personnalisé");
+      expect(updated.projects[0].seo.title.fr).toBe("Projet | Parallax");
+
+      // Verify second pass is strictly idempotent
+      const pass2 = adaptPortfolioContent(tmpPortfolioPath);
+      expect(pass2.success).toBe(true);
+      expect(pass2.changed).toBe(false);
+    });
+
+    it("handles JSON encoded \\u2014, &mdash;, and entities", () => {
+      const portfolioData = createDefaultPortfolioContent();
+      portfolioData.overview.intro.fr = "Introduction &mdash; test entité";
+      portfolioData.projects[0].summary.fr = "Résumé \\u2014 test échappé";
+
+      fs.writeFileSync(tmpPortfolioPath, JSON.stringify(portfolioData, null, 2), "utf-8");
+
+      const res = adaptPortfolioContent(tmpPortfolioPath);
+      expect(res.success).toBe(true);
+      expect(res.changed).toBe(true);
+
+      const updated = JSON.parse(fs.readFileSync(tmpPortfolioPath, "utf-8"));
+      expect(updated.overview.intro.fr).toBe("Introduction | test entité");
+      expect(updated.projects[0].summary.fr).toBe("Résumé | test échappé");
+    });
+
+    it("rejects corrupted JSON, invalid schema, or unsupported versions without rewrite", () => {
+      // 1. Corrupted JSON
+      fs.writeFileSync(tmpPortfolioPath, "{ corrupted json: ", "utf-8");
+      const resCorrupt = adaptPortfolioContent(tmpPortfolioPath);
+      expect(resCorrupt.success).toBe(false);
+      expect(resCorrupt.reason).toBe("corrupted");
+
+      // 2. Unsupported version
+      const badVersion = { ...createDefaultPortfolioContent(), schemaVersion: 99 };
+      fs.writeFileSync(tmpPortfolioPath, JSON.stringify(badVersion), "utf-8");
+      const resVersion = adaptPortfolioContent(tmpPortfolioPath);
+      expect(resVersion.success).toBe(false);
+      expect(resVersion.reason).toBe("unsupported_version");
+
+      // 3. Invalid schema
+      const invalidSchema = { schemaVersion: 2, revision: "abc" };
+      fs.writeFileSync(tmpPortfolioPath, JSON.stringify(invalidSchema), "utf-8");
+      const resInvalid = adaptPortfolioContent(tmpPortfolioPath);
+      expect(resInvalid.success).toBe(false);
+      expect(resInvalid.reason).toBe("invalid_schema");
+
+      // Verify no backup was created
+      const files = fs.readdirSync(tmpDir);
+      expect(files.filter((f) => f.includes(".safety.bak")).length).toBe(0);
+    });
+  });
+
+  describe("6. Stale Revision Conflict & Admin Save Safety", () => {
+    let tmpDir: string;
+    let tmpPortfolioPath: string;
+
+    beforeEach(() => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "parallax-conflict-test-"));
+      tmpPortfolioPath = path.join(tmpDir, "portfolio-content.json");
+    });
+
+    afterEach(() => {
+      if (fs.existsSync(tmpDir)) {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it("updates revision upon adaptation, causing savePortfolioContent with stale revision to throw RevisionConflictError", async () => {
+      const initialPortfolio = createDefaultPortfolioContent();
+      initialPortfolio.overview.seo.title.fr = "Portfolio — Parallax";
+      const initialRevision = initialPortfolio.revision;
+
+      fs.writeFileSync(tmpPortfolioPath, JSON.stringify(initialPortfolio, null, 2), "utf-8");
+
+      // Admin tab has read initial content and retains initialRevision
+      const staleContent = structuredClone(initialPortfolio);
+
+      // Run adaptation
+      const adaptRes = adaptPortfolioContent(tmpPortfolioPath);
+      expect(adaptRes.success).toBe(true);
+      expect(adaptRes.changed).toBe(true);
+      expect(adaptRes.newRevision).toBeDefined();
+      expect(adaptRes.newRevision).not.toBe(initialRevision);
+
+      // Admin tab tries to save with stale revision: must be rejected with RevisionConflictError
+      await expect(
+        savePortfolioContent(staleContent, initialRevision, tmpPortfolioPath)
+      ).rejects.toThrow();
+
+      // Verify the adapted file on disk was preserved and not overwritten with old cadratin
+      const onDisk = JSON.parse(fs.readFileSync(tmpPortfolioPath, "utf-8"));
+      expect(onDisk.overview.seo.title.fr).toBe("Portfolio | Parallax");
+      expect(onDisk.revision).toBe(adaptRes.newRevision);
+    });
+  });
+
+  describe("7. VAT non_subject and Historical Template Compatibility", () => {
+    const nonSubjectCompany = {
+      tradeName: "Parallax",
+      enterpriseNumber: "0123.456.789",
+      vatNumber: "",
+      vatRegime: "Non assujetti à la TVA",
+      vatRegimeType: "non_subject" as const,
+      legalPersonality: "natural_person" as const,
+    };
+
+    it("resolves DEFAULT mentions draft with non_subject without empty VAT number in FR", () => {
+      const templateFr = DEFAULT_LEGAL_PAGES_CONTENT.mentions.draft.sections[0].paragraphs[2].fr;
+      const resolved = resolveCompanyTokens(templateFr, nonSubjectCompany, "public", "fr");
+
+      expect(resolved).toContain("Numéro d'entreprise (BCE / Banque-Carrefour des Entreprises) : 0123.456.789, régime TVA : Non assujetti à la TVA.");
+      expect(resolved).not.toContain("numéro de TVA intracommunautaire :");
+      expect(resolved).not.toContain("—");
+    });
+
+    it("resolves DEFAULT mentions draft with non_subject without empty VAT number in EN", () => {
+      const templateEn = DEFAULT_LEGAL_PAGES_CONTENT.mentions.draft.sections[0].paragraphs[2].en;
+      const resolved = resolveCompanyTokens(templateEn, nonSubjectCompany, "public", "en");
+
+      expect(resolved).toContain("Enterprise number (BCE / Crossroads Bank for Enterprises): 0123.456.789, VAT regime: Non-subject to VAT.");
+      expect(resolved).not.toContain("intra-community VAT number:");
+      expect(resolved).not.toContain("—");
+    });
+
+    it("is compatible with historical capitalized and hyphenated templates", () => {
+      const historicalFr = "Numéro d'entreprise : {{company.enterpriseNumber}} — Numéro de TVA intracommunautaire : {{company.vatNumber}} ({{company.vatRegime}}).";
+      const resolved = resolveCompanyTokens(historicalFr, nonSubjectCompany, "public", "fr");
+      expect(resolved).toBe("Numéro d'entreprise : 0123.456.789, régime TVA : Non assujetti à la TVA.");
+
+      const historicalEn = "Enterprise number: {{company.enterpriseNumber}} — Intra-community VAT number: {{company.vatNumber}} ({{company.vatRegime}}).";
+      const resolvedEn = resolveCompanyTokens(historicalEn, nonSubjectCompany, "public", "en");
+      expect(resolvedEn).toBe("Enterprise number: 0123.456.789, VAT regime: Non-subject to VAT.");
     });
   });
 });

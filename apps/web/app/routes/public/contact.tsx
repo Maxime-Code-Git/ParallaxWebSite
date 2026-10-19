@@ -10,6 +10,7 @@ import {
   type ContactActionResult,
   type ContactLoaderData,
 } from "../../lib/contact.server";
+import { cleanTypography } from "../../lib/site-content.shared";
 import styles from "./contact.module.css";
 
 export async function loader(args: LoaderFunctionArgs) {
@@ -44,8 +45,8 @@ export function meta({ data }: { data?: ContactLoaderData }) {
   }
   const { content, lang } = data;
   return [
-    { title: content.contactPage.seo.title[lang] },
-    { name: "description", content: content.contactPage.seo.description[lang] },
+    { title: cleanTypography(content.contactPage.seo.title[lang]) },
+    { name: "description", content: cleanTypography(content.contactPage.seo.description[lang]) },
   ];
 }
 
