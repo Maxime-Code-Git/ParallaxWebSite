@@ -26,15 +26,23 @@ import {
   type LegalDocument,
   type SiteContent,
 } from "../app/lib/site-content.shared";
+import { spawnSync } from "node:child_process";
 import {
   saveHomeContent,
   saveCompanyContent,
   saveLegalPageDraft,
   getPublicLegalDocument,
   getRawSiteContent,
+  validateSiteContent,
+  ValidationError,
+  RevisionConflictError,
 } from "../app/lib/site-content.server";
 import { createDefaultPortfolioContent, savePortfolioContent } from "../app/lib/portfolio-content.server";
 import { portfolioContentSchema } from "../app/lib/portfolio-content.shared";
+import {
+  validatePortfolioContentDocument,
+  validateSiteContentDocument,
+} from "@parallax/shared";
 import { links as rootLinks } from "../app/root";
 import { LegalPageView } from "../app/components/public/LegalPageView";
 import defaultSiteContent from "../app/content/default-site-content.json";
@@ -436,7 +444,7 @@ describe("Typography (No Em-Dashes) and Favicon Validation Suite", () => {
       // Admin tab tries to save with stale revision: must be rejected with RevisionConflictError
       await expect(
         savePortfolioContent(staleContent, initialRevision, tmpPortfolioPath)
-      ).rejects.toThrow();
+      ).rejects.toThrow(RevisionConflictError);
 
       // Verify the adapted file on disk was preserved and not overwritten with old cadratin
       const onDisk = JSON.parse(fs.readFileSync(tmpPortfolioPath, "utf-8"));
@@ -742,6 +750,271 @@ describe("Typography (No Em-Dashes) and Favicon Validation Suite", () => {
       expect(item?.purpose.fr).toBe("Mémoriser l'état | de session");
       expect(item?.duration.fr).toBe("Session | jusqu'à fermeture");
       expect(item?.exemptionJustification?.fr).toBe("Strictement nécessaire | au service");
+    });
+  });
+
+  describe("11. Parity and Domain Validator Unification Suite", () => {
+    let tmpDir: string;
+    let tmpSitePath: string;
+    let tmpPortfolioPath: string;
+
+    beforeEach(() => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "parallax-parity-test-"));
+      tmpSitePath = path.join(tmpDir, "site-content.json");
+      tmpPortfolioPath = path.join(tmpDir, "portfolio-content.json");
+    });
+
+    afterEach(() => {
+      if (fs.existsSync(tmpDir)) {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it("Reproduction A: rejects corrupted home.showreel.title.fr = 0 before cleaning, keeping source byte-for-byte intact and creating zero backups", () => {
+      const siteData = structuredClone(defaultSiteContent);
+      (siteData.home.showreel.title as unknown as { fr: unknown }).fr = 0;
+      siteData.home.hero.title.fr = "Titre — personnalisé";
+
+      // 1. Canonical domain validator throws
+      expect(() => validateSiteContent(siteData)).toThrow(ValidationError);
+
+      // 2. Pure document validator wrapper returns invalid_schema
+      const docValidation = validateSiteContentDocument(siteData);
+      expect(docValidation).toMatchObject({ success: false, reason: "invalid_schema" });
+
+      // 3. Write to test fixture
+      fs.writeFileSync(tmpSitePath, JSON.stringify(siteData, null, 2), "utf-8");
+      const bytesBefore = fs.readFileSync(tmpSitePath);
+
+      // 4. Adaptation fails before cleaning and does not rewrite or repair
+      const res = adaptSiteContentDrafts(tmpSitePath);
+      expect(res.success).toBe(false);
+      expect(res.reason).toBe("invalid_schema");
+
+      // 5. Source is strictly byte-for-byte identical
+      const bytesAfter = fs.readFileSync(tmpSitePath);
+      expect(bytesAfter.equals(bytesBefore)).toBe(true);
+
+      // 6. No safety backup was created
+      const files = fs.readdirSync(tmpDir);
+      expect(files.filter((f) => f.includes(".safety.bak")).length).toBe(0);
+    });
+
+    it("Reproduction B: rejects corrupted projects[0].status = 'invalid-status' before cleaning, keeping source byte-for-byte intact and creating zero backups", () => {
+      const portfolioData = createDefaultPortfolioContent();
+      (portfolioData.projects[0] as unknown as { status: string }).status = "invalid-status";
+      portfolioData.overview.intro.fr = "Intro — personnalisée";
+
+      // 1. Canonical domain validator fails safeParse
+      const canonicalResult = portfolioContentSchema.safeParse(portfolioData);
+      expect(canonicalResult.success).toBe(false);
+
+      // 2. Pure document validator wrapper returns invalid_schema
+      const docValidation = validatePortfolioContentDocument(portfolioData);
+      expect(docValidation).toMatchObject({ success: false, reason: "invalid_schema" });
+
+      // 3. Write to test fixture
+      fs.writeFileSync(tmpPortfolioPath, JSON.stringify(portfolioData, null, 2), "utf-8");
+      const bytesBefore = fs.readFileSync(tmpPortfolioPath);
+
+      // 4. Adaptation fails before cleaning and does not rewrite
+      const res = adaptPortfolioContent(tmpPortfolioPath);
+      expect(res.success).toBe(false);
+      expect(res.reason).toBe("invalid_schema");
+
+      // 5. Source is strictly byte-for-byte identical
+      const bytesAfter = fs.readFileSync(tmpPortfolioPath);
+      expect(bytesAfter.equals(bytesBefore)).toBe(true);
+
+      // 6. No safety backup was created
+      const files = fs.readdirSync(tmpDir);
+      expect(files.filter((f) => f.includes(".safety.bak")).length).toBe(0);
+    });
+
+    it("rejects corrupted nested bilingual field across both canonical validator and adaptation CLI", () => {
+      const siteData = structuredClone(defaultSiteContent);
+      (siteData.studio.hero.title as unknown as { fr: unknown }).fr = null;
+
+      expect(() => validateSiteContent(siteData)).toThrow(ValidationError);
+      const docVal = validateSiteContentDocument(siteData);
+      expect(docVal).toMatchObject({ success: false, reason: "invalid_schema" });
+
+      fs.writeFileSync(tmpSitePath, JSON.stringify(siteData, null, 2), "utf-8");
+      const res = adaptSiteContentDrafts(tmpSitePath);
+      expect(res.success).toBe(false);
+      expect(res.reason).toBe("invalid_schema");
+
+      const files = fs.readdirSync(tmpDir);
+      expect(files.filter((f) => f.includes(".safety.bak")).length).toBe(0);
+    });
+
+    it("rejects invalid enum across both canonical validator and adaptation CLI", () => {
+      const portData = createDefaultPortfolioContent();
+      (portData.projects[0] as unknown as { side: string }).side = "invalid-side";
+
+      const canonicalResult = portfolioContentSchema.safeParse(portData);
+      expect(canonicalResult.success).toBe(false);
+
+      const docVal = validatePortfolioContentDocument(portData);
+      expect(docVal).toMatchObject({ success: false, reason: "invalid_schema" });
+
+      fs.writeFileSync(tmpPortfolioPath, JSON.stringify(portData, null, 2), "utf-8");
+      const res = adaptPortfolioContent(tmpPortfolioPath);
+      expect(res.success).toBe(false);
+      expect(res.reason).toBe("invalid_schema");
+
+      const files = fs.readdirSync(tmpDir);
+      expect(files.filter((f) => f.includes(".safety.bak")).length).toBe(0);
+    });
+
+    it("rejects incoherent media reference across both canonical validator and adaptation CLI", () => {
+      // 1. Portfolio project referencing non-existent media UUID in registry
+      const portData = createDefaultPortfolioContent();
+      portData.projects[0].coverImageId = "00000000-0000-4000-a000-000000000099";
+
+      const canonicalResult = portfolioContentSchema.safeParse(portData);
+      expect(canonicalResult.success).toBe(false);
+      if (!canonicalResult.success) {
+        expect(canonicalResult.error.errors.some((e: { message: string }) => e.message.includes("introuvable dans le registre"))).toBe(true);
+      }
+
+      const portDocVal = validatePortfolioContentDocument(portData);
+      expect(portDocVal).toMatchObject({ success: false, reason: "invalid_schema" });
+
+      fs.writeFileSync(tmpPortfolioPath, JSON.stringify(portData, null, 2), "utf-8");
+      const resPort = adaptPortfolioContent(tmpPortfolioPath);
+      expect(resPort.success).toBe(false);
+      expect(resPort.reason).toBe("invalid_schema");
+
+      // 2. Site content referencing invalid image ID (not static and not valid UUID)
+      const siteData = structuredClone(defaultSiteContent);
+      siteData.home.showreel.coverImageId = "invalid-image-id-xyz";
+
+      expect(() => validateSiteContent(siteData)).toThrow(ValidationError);
+      const siteDocVal = validateSiteContentDocument(siteData);
+      expect(siteDocVal).toMatchObject({ success: false, reason: "invalid_schema" });
+
+      fs.writeFileSync(tmpSitePath, JSON.stringify(siteData, null, 2), "utf-8");
+      const resSite = adaptSiteContentDrafts(tmpSitePath);
+      expect(resSite.success).toBe(false);
+      expect(resSite.reason).toBe("invalid_schema");
+
+      const files = fs.readdirSync(tmpDir);
+      expect(files.filter((f) => f.includes(".safety.bak")).length).toBe(0);
+    });
+
+    it("accepts valid documents on both paths, applies useful adaptation, and verifies idempotence on second run", () => {
+      const siteData = structuredClone(defaultSiteContent);
+      siteData.home.hero.title.fr = "Titre — personnalisé";
+      const portData = createDefaultPortfolioContent();
+      portData.overview.intro.fr = "Intro — personnalisée";
+
+      // 1. Both canonical validators accept valid documents
+      expect(() => validateSiteContent(siteData)).not.toThrow();
+      expect(portfolioContentSchema.safeParse(portData).success).toBe(true);
+
+      fs.writeFileSync(tmpSitePath, JSON.stringify(siteData, null, 2), "utf-8");
+      fs.writeFileSync(tmpPortfolioPath, JSON.stringify(portData, null, 2), "utf-8");
+
+      // 2. Useful adaptation run
+      const resSite = adaptSiteContentDrafts(tmpSitePath);
+      expect(resSite.success).toBe(true);
+      expect(resSite.changed).toBe(true);
+      expect(resSite.newRevision).toBeDefined();
+
+      const resPort = adaptPortfolioContent(tmpPortfolioPath);
+      expect(resPort.success).toBe(true);
+      expect(resPort.changed).toBe(true);
+      expect(resPort.newRevision).toBeDefined();
+
+      // 3. Second run is strictly idempotent: no writes, no backups, no revision changes
+      const resSite2 = adaptSiteContentDrafts(tmpSitePath);
+      expect(resSite2.success).toBe(true);
+      expect(resSite2.changed).toBe(false);
+
+      const resPort2 = adaptPortfolioContent(tmpPortfolioPath);
+      expect(resPort2.success).toBe(true);
+      expect(resPort2.changed).toBe(false);
+
+      // Verify clean text on disk
+      const onDiskSite = JSON.parse(fs.readFileSync(tmpSitePath, "utf-8"));
+      expect(onDiskSite.home.hero.title.fr).toBe("Titre | personnalisé");
+      expect(onDiskSite.revision).toBe(resSite.newRevision);
+
+      const onDiskPort = JSON.parse(fs.readFileSync(tmpPortfolioPath, "utf-8"));
+      expect(onDiskPort.overview.intro.fr).toBe("Intro | personnalisée");
+      expect(onDiskPort.revision).toBe(resPort.newRevision);
+    });
+
+    it("does not mutate file, change revision, or create backup when file already contains zero em-dashes", () => {
+      const cleanSite = structuredClone(defaultSiteContent);
+      fs.writeFileSync(tmpSitePath, JSON.stringify(cleanSite, null, 2), "utf-8");
+      const bytesBefore = fs.readFileSync(tmpSitePath);
+
+      const res = adaptSiteContentDrafts(tmpSitePath);
+      expect(res.success).toBe(true);
+      expect(res.changed).toBe(false);
+
+      const bytesAfter = fs.readFileSync(tmpSitePath);
+      expect(bytesAfter.equals(bytesBefore)).toBe(true);
+
+      const files = fs.readdirSync(tmpDir);
+      expect(files.filter((f) => f.includes(".safety.bak")).length).toBe(0);
+    });
+
+    it("runs script in real Node subprocess on temporary fixtures: exits 0 for valid content, exits non-zero for invalid content", () => {
+      const subTmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "parallax-node-subproc-"));
+      const subSitePath = path.join(subTmpDir, "site-content.json");
+      const subPortPath = path.join(subTmpDir, "portfolio-content.json");
+
+      try {
+        // 1. Both valid fixtures with em-dashes
+        const siteData = structuredClone(defaultSiteContent);
+        siteData.home.hero.title.fr = "Titre — personnalisé";
+        fs.writeFileSync(subSitePath, JSON.stringify(siteData, null, 2), "utf-8");
+
+        const portData = createDefaultPortfolioContent();
+        portData.overview.intro.fr = "Intro — personnalisée";
+        fs.writeFileSync(subPortPath, JSON.stringify(portData, null, 2), "utf-8");
+
+        const scriptPath = path.resolve(__dirname, "../../../scripts/adapt-typography.js");
+
+        // Execute node subprocess
+        const procSuccess = spawnSync(process.execPath, [scriptPath], {
+          env: {
+            ...process.env,
+            SITE_CONTENT_PATH: subSitePath,
+            PORTFOLIO_CONTENT_PATH: subPortPath,
+          },
+          encoding: "utf-8",
+        });
+
+        expect(procSuccess.status).toBe(0);
+        expect(procSuccess.stdout).toContain("[OK] portfolio-content.json adapté");
+        expect(procSuccess.stdout).toContain("[OK] site-content.json textes éditables adaptés");
+
+        // Verify em-dashes replaced on disk
+        const adaptedSite = JSON.parse(fs.readFileSync(subSitePath, "utf-8"));
+        expect(adaptedSite.home.hero.title.fr).toBe("Titre | personnalisé");
+
+        // 2. Corrupt one fixture (Reproduction A: home.showreel.title.fr = 0)
+        adaptedSite.home.showreel.title.fr = 0;
+        fs.writeFileSync(subSitePath, JSON.stringify(adaptedSite, null, 2), "utf-8");
+
+        const procFailure = spawnSync(process.execPath, [scriptPath], {
+          env: {
+            ...process.env,
+            SITE_CONTENT_PATH: subSitePath,
+            PORTFOLIO_CONTENT_PATH: subPortPath,
+          },
+          encoding: "utf-8",
+        });
+
+        expect(procFailure.status).not.toBe(0);
+        expect(procFailure.stderr).toContain("[ERREUR] site-content.json");
+      } finally {
+        fs.rmSync(subTmpDir, { recursive: true, force: true });
+      }
     });
   });
 });
