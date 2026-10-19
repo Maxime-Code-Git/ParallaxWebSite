@@ -7,6 +7,7 @@ import {
   type CompanyContent,
   type LegalDocument,
   resolveLegalDocument,
+  cleanTypography,
 } from "../../lib/site-content.shared";
 import {
   getSiteContent,
@@ -115,7 +116,7 @@ export function meta({ data }: { data?: {
 
   if (!document) {
     return [
-      { title: lang === "fr" ? "Document en préparation — Parallax" : "Document under preparation — Parallax" },
+      { title: lang === "fr" ? "Document en préparation | Parallax" : "Document under preparation | Parallax" },
       { name: "robots", content: "noindex, nofollow" },
     ];
   }
@@ -125,8 +126,8 @@ export function meta({ data }: { data?: {
   const enUrl = `${base}${alternateUrls.en}`;
 
   return [
-    { title: document.seoTitle[lang] },
-    { name: "description", content: document.seoDescription[lang] },
+    { title: cleanTypography(document.seoTitle[lang]) },
+    { name: "description", content: cleanTypography(document.seoDescription[lang]) },
     { name: "robots", content: "index, follow" },
     { tagName: "link", rel: "canonical", href: canonicalUrl },
     { tagName: "link", rel: "alternate", hrefLang: "fr", href: frUrl },

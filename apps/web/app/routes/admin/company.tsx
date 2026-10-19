@@ -220,7 +220,7 @@ export default function AdminCompanyPage() {
         {loaderData.isCorrupted && (
           <div className={formStyles.alertError} role="alert">
             <p>
-              <strong>Attention — Contenu de secours actif en mémoire :</strong> Le fichier de configuration présente une anomalie de validation et les modifications sont bloquées pour protéger vos données.
+              <strong>Attention : contenu de secours actif en mémoire :</strong> Le fichier de configuration présente une anomalie de validation et les modifications sont bloquées pour protéger vos données.
             </p>
             {loaderData.corruptionError && (
               <p className={formStyles.alertSubText}>
@@ -325,9 +325,9 @@ export default function AdminCompanyPage() {
                 }}
               >
                 <option value="">À déterminer / Non renseigné</option>
-                <option value="natural_person">Personne physique (Entreprise individuelle / Indépendant — RPM non applicable)</option>
-                <option value="unincorporated_association">Association sans personnalité juridique (Association de fait — RPM non applicable)</option>
-                <option value="legal_entity">Personne morale (SRL, SA, ASBL, SC, etc. — RPM applicable)</option>
+                <option value="natural_person">Personne physique (Entreprise individuelle / Indépendant : RPM non applicable)</option>
+                <option value="unincorporated_association">Association sans personnalité juridique (Association de fait : RPM non applicable)</option>
+                <option value="legal_entity">Personne morale (SRL, SA, ASBL, SC, etc. : RPM applicable)</option>
               </select>
               <span className={formStyles.helper}>
                 En droit belge (art. 2:20 CSA), le Registre des Personnes Morales s&apos;applique exclusivement aux personnes morales.

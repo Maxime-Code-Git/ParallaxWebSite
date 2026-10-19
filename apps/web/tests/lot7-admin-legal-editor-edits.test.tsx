@@ -95,7 +95,7 @@ describe("Lot 7 - Admin Legal Editor Unsaved Edits Lifecycle", () => {
     render(<AdminLegalEditPage />);
 
     // Initially published
-    expect(screen.getByText(/Publié \(v1 — 2026-10-15\)/i)).toBeInTheDocument();
+    expect(screen.getByText(/Publié \(v1 \| 2026-10-15\)/i)).toBeInTheDocument();
     expect(screen.queryByTestId("unsaved-badge")).toBeNull();
 
     const titleInput = screen.getByLabelText(/Titre public affiché \(FR\)/i) as HTMLInputElement;

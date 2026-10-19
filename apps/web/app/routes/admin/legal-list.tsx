@@ -125,7 +125,7 @@ export default function AdminLegalListPage() {
                       }
                     >
                       {isPublished
-                        ? `Publié (v${pageRecord.published?.version} — ${pageRecord.published?.effectiveDate})`
+                        ? `Publié (v${pageRecord.published?.version} | ${pageRecord.published?.effectiveDate})`
                         : "Brouillon non publié"}
                     </span>
                   </div>
@@ -153,7 +153,7 @@ export default function AdminLegalListPage() {
                     </div>
                   ) : (
                     <div className={formStyles.readinessReady}>
-                      <span>✓ Brouillon complet — Prêt pour relecture et publication manuelle</span>
+                      <span>✓ Brouillon complet : prêt pour relecture et publication manuelle</span>
                     </div>
                   )}
 

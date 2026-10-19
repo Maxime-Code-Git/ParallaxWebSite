@@ -219,8 +219,8 @@ export function LegalPageView({
             <span className={styles.previewBadge}>Aperçu privé</span>
             <span>
               {lang === "fr"
-                ? "Mode prévisualisation administrateur — ce document n'est pas public."
-                : "Admin preview mode — this document is not public."}
+                ? "Mode prévisualisation administrateur : ce document n'est pas public."
+                : "Admin preview mode: this document is not public."}
             </span>
           </div>
           <span className={styles.previewSubtext}>noindex, no-store</span>
@@ -331,7 +331,7 @@ export function LegalPageView({
                           {company.enterpriseNumber}
                           {isRpmApplicable(company) !== false && company.rpmJurisdiction && (
                             <span className={styles.metaSubtext}>
-                              {" — "}
+                              {", "}
                               {lang === "fr"
                                 ? `RPM : ${company.rpmJurisdiction}`
                                 : `RPR: ${company.rpmJurisdiction}`}
@@ -415,7 +415,7 @@ export function LegalPageView({
                         </div>
                         <div className={styles.identityValue}>
                           {company.hostingProvider}
-                          {company.hostingAddress && ` — ${company.hostingAddress}`}
+                          {company.hostingAddress && `, ${company.hostingAddress}`}
                           {company.hostingCountry && ` (${company.hostingCountry})`}
                         </div>
                       </>

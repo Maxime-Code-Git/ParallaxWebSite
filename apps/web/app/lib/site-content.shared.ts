@@ -749,6 +749,86 @@ export function isRpmOnlyParagraph(text: string): boolean {
   );
 }
 
+/**
+ * Normalizes typography by removing em-dashes (U+2014, &mdash;, etc.) and replacing them
+ * with appropriate punctuation according to context (parentheses for incises, colons/pipes
+ * for titles and coordinates, commas for lists and status badges).
+ */
+export function cleanTypography(str: string | null | undefined): string {
+  if (!str || typeof str !== "string") return "";
+  let s = str.replace(/&mdash;|&#8212;|&#x2014;/gi, "\u2014");
+
+  if (!s.includes("\u2014")) return s;
+
+  // 1. Legal incise: " — incluant de manière non limitative ... — " -> " (incluant de manière non limitative ...) "
+  s = s.replace(
+    /\s*\u2014\s*(incluant de manière non limitative [^\u2014]+?)\s*\u2014\s*/gi,
+    " ($1) "
+  );
+  s = s.replace(
+    /\s*\u2014\s*(including without limitation [^\u2014]+?)\s*\u2014\s*/gi,
+    " ($1) "
+  );
+
+  // 2. Juxtaposed postal addresses and contact details (APD, Consumer Mediation)
+  s = s.replace(
+    /(\d{4}\s+(?:Bruxelles|Brussels))\s*\u2014\s*(Téléphone|Phone)\s*:\s*([^\u2014]+?)\s*\u2014\s*(E-mail|Email)\s*:\s*([^\u2014]+?)\s*\u2014\s*(Site officiel|Official website|Site)\s*:\s*(\S+)/gi,
+    "$1 | $2 : $3 | $4 : $5 | $6 : $7"
+  );
+
+  // 3. BCE and VAT mentions
+  s = s.replace(
+    /\s*\u2014\s*(Numéro de TVA intracommunautaire)/gi,
+    ", numéro de TVA intracommunautaire"
+  );
+  s = s.replace(
+    /\s*\u2014\s*(Intra-community VAT number)/gi,
+    ", intra-community VAT number"
+  );
+  s = s.replace(/\s*\u2014\s*(Régime TVA)/gi, ", régime TVA");
+  s = s.replace(/\s*\u2014\s*(VAT regime)/gi, ", VAT regime");
+
+  // 4. B2B / B2C mentions in parentheses
+  s = s.replace(/\s*\u2014\s*(B2[BC]\))/g, ", $1");
+
+  // 5. Explicit editorial descriptions requested by Maxime
+  s = s.replace(
+    /Des films qui racontent le réel\s*\u2014\s*portraits de métiers/g,
+    "Des films qui racontent le réel : portraits de métiers"
+  );
+  s = s.replace(
+    /Films that tell real stories\s*\u2014\s*portraits of trades/g,
+    "Films that tell real stories: portraits of trades"
+  );
+  s = s.replace(
+    /Des films de marque et de produit\s*\u2014\s*studio/g,
+    "Des films de marque et de produit : studio"
+  );
+  s = s.replace(
+    /Brand and product films\s*\u2014\s*studio/g,
+    "Brand and product films: studio"
+  );
+  s = s.replace(
+    /Ce que ce projet raconte\s*\u2014\s*son émotion/g,
+    "Ce que ce projet raconte : son émotion"
+  );
+  s = s.replace(
+    /What this project carries\s*\u2014\s*its emotion/g,
+    "What this project carries: its emotion"
+  );
+
+  // 6. Title brand suffix: " — Parallax" -> " | Parallax"
+  s = s.replace(/\s*\u2014\s*(Parallax)/g, " | $1");
+
+  // 7. General fallback for any remaining em-dashes
+  s = s.replace(/\s*\u2014\s*/g, " | ");
+  s = s.replace(/\u2014/g, " - ");
+
+  // Clean double spaces and spacing before closing parenthesis
+  s = s.replace(/\s+\)/g, ")").replace(/[ ]{2,}/g, " ").trim();
+  return s;
+}
+
 export function resolveCompanyTokens(
   text: string,
   company: Partial<CompanyContent> | null | undefined,
@@ -768,16 +848,16 @@ export function resolveCompanyTokens(
     const regime = company?.vatRegime?.trim() || (lang === "fr" ? "Non assujetti" : "Non-subject to VAT");
     processedText = processedText
       .replace(
-        /— Numéro de TVA intracommunautaire : \{\{company\.vatNumber\}\} \(\{\{company\.vatRegime\}\}\)\./g,
-        `— Régime TVA : ${regime}.`
+        /(?:—|-|\||,)?\s*Numéro de TVA intracommunautaire : \{\{company\.vatNumber\}\} \(\{\{company\.vatRegime\}\}\)\./g,
+        `, régime TVA : ${regime}.`
       )
       .replace(
-        /— Intra-community VAT number: \{\{company\.vatNumber\}\} \(\{\{company\.vatRegime\}\}\)\./g,
-        `— VAT regime: ${regime}.`
+        /(?:—|-|\||,)?\s*Intra-community VAT number: \{\{company\.vatNumber\}\} \(\{\{company\.vatRegime\}\}\)\./g,
+        `, VAT regime: ${regime}.`
       );
   }
 
-  return processedText.replace(/\{\{([a-zA-Z0-9_.]+)\}\}/g, (_match, tokenKey) => {
+  const resolved = processedText.replace(/\{\{([a-zA-Z0-9_.]+)\}\}/g, (_match, tokenKey) => {
     if (tokenKey === "company.legalOperatorText") {
       const trade = company?.tradeName?.trim() || "Parallax";
       const legal = company?.legalName?.trim();
@@ -832,6 +912,8 @@ export function resolveCompanyTokens(
     // In public mode, omit token rather than leaking raw {{token}} or [à compléter]
     return "";
   });
+
+  return cleanTypography(resolved);
 }
 
 export function findUnresolvedCompanyTokens(
@@ -1069,8 +1151,8 @@ export const DEFAULT_LEGAL_PAGES_CONTENT: LegalPagesContent = {
               en: "Legal structure: {{company.legalForm}}.",
             },
             {
-              fr: "Numéro d'entreprise (BCE / Banque-Carrefour des Entreprises) : {{company.enterpriseNumber}} — Numéro de TVA intracommunautaire : {{company.vatNumber}} ({{company.vatRegime}}).",
-              en: "Enterprise number (BCE / Crossroads Bank for Enterprises): {{company.enterpriseNumber}} — Intra-community VAT number: {{company.vatNumber}} ({{company.vatRegime}}).",
+              fr: "Numéro d'entreprise (BCE / Banque-Carrefour des Entreprises) : {{company.enterpriseNumber}}, numéro de TVA intracommunautaire : {{company.vatNumber}} ({{company.vatRegime}}).",
+              en: "Enterprise number (BCE / Crossroads Bank for Enterprises): {{company.enterpriseNumber}}, intra-community VAT number: {{company.vatNumber}} ({{company.vatRegime}}).",
             },
             {
               fr: "Registre des Personnes Morales (RPM) / Tribunal de l'entreprise compétent : {{company.rpmJurisdiction}}.",
@@ -1137,8 +1219,8 @@ export const DEFAULT_LEGAL_PAGES_CONTENT: LegalPagesContent = {
           },
           paragraphs: [
             {
-              fr: "L'intégralité des éléments composant le site Parallax — incluant de manière non limitative les photographies, vidéos, masters audiovisuels, bandes-annonces, textes, éléments graphiques, logos, mises en page, code source et typographies locales — est protégée par les dispositions du Livre XI du Code de droit économique belge relatif au droit d'auteur et aux droits voisins, ainsi que par les conventions internationales applicables.",
-              en: "All components of the Parallax website — including without limitation photographs, videos, audiovisual masters, trailers, texts, graphic assets, logos, layouts, source code, and local typography — are protected by Book XI of the Belgian Code of Economic Law regarding copyright and neighbouring rights, as well as applicable international treaties.",
+              fr: "L'intégralité des éléments composant le site Parallax (incluant de manière non limitative les photographies, vidéos, masters audiovisuels, bandes-annonces, textes, éléments graphiques, logos, mises en page, code source et typographies locales) est protégée par les dispositions du Livre XI du Code de droit économique belge relatif au droit d'auteur et aux droits voisins, ainsi que par les conventions internationales applicables.",
+              en: "All components of the Parallax website (including without limitation photographs, videos, audiovisual masters, trailers, texts, graphic assets, logos, layouts, source code, and local typography) are protected by Book XI of the Belgian Code of Economic Law regarding copyright and neighbouring rights, as well as applicable international treaties.",
             },
             {
               fr: "Toute reproduction, représentation, diffusion, extraction, adaptation ou rediffusion publique, totale ou partielle, sur quelque support que ce soit, est strictement interdite sans l'accord préalable, exprès et écrit de Parallax ou des ayants droit concernés, à l'exception des actes strictement autorisés par la loi (notamment les courtes citations justifiées par le caractère critique, polémique, pédagogique ou d'information, sous réserve de la mention claire de la source et du nom de l'auteur).",
@@ -1383,8 +1465,8 @@ export const DEFAULT_LEGAL_PAGES_CONTENT: LegalPagesContent = {
               en: "How to exercise: You may submit your request by email to {{company.privacyEmail}}. To prevent identity theft, reasonable identity verification will only be requested in cases of legitimate doubt, avoiding disproportionate burdens. We will respond within one month.",
             },
             {
-              fr: "Voie de recours auprès de l'autorité de contrôle : Si vous estimez que le traitement de vos données enfreint la réglementation applicable, vous avez le droit d'introduire une réclamation auprès de l'Autorité de Protection des Données belge (APD) : Rue de la Presse 35, 1000 Bruxelles — Téléphone : +32 (0)2 274 48 00 — E-mail : contact@apd-gba.be — Site officiel : www.autoriteprotectiondonnees.be.",
-              en: "Right to lodge a complaint with the supervisory authority: If you consider that data processing violates applicable regulations, you have the right to lodge a complaint with the supervisory authority (Belgian Data Protection Authority - APD / GBA): Rue de la Presse 35, 1000 Brussels — Phone: +32 (0)2 274 48 00 — Email: contact@apd-gba.be — Official website: www.autoriteprotectiondonnees.be.",
+              fr: "Voie de recours auprès de l'autorité de contrôle : Si vous estimez que le traitement de vos données enfreint la réglementation applicable, vous avez le droit d'introduire une réclamation auprès de l'Autorité de Protection des Données belge (APD) : Rue de la Presse 35, 1000 Bruxelles | Téléphone : +32 (0)2 274 48 00 | E-mail : contact@apd-gba.be | Site officiel : www.autoriteprotectiondonnees.be.",
+              en: "Right to lodge a complaint with the supervisory authority: If you consider that data processing violates applicable regulations, you have the right to lodge a complaint with the supervisory authority (Belgian Data Protection Authority - APD / GBA): Rue de la Presse 35, 1000 Brussels | Phone: +32 (0)2 274 48 00 | Email: contact@apd-gba.be | Official website: www.autoriteprotectiondonnees.be.",
             },
           ],
         },
@@ -1435,8 +1517,8 @@ export const DEFAULT_LEGAL_PAGES_CONTENT: LegalPagesContent = {
           },
           paragraphs: [
             {
-              fr: "Les présentes conditions générales s'appliquent à toutes les commandes de prestations passées auprès de Parallax, tant par des clients professionnels (entreprises, artistes, labels, agences, institutions — B2B) que, le cas échéant, par des consommateurs (personnes physiques agissant à des fins non professionnelles — B2C).",
-              en: "These general terms apply to all orders placed with Parallax, both by business clients (companies, artists, record labels, agencies, institutions — B2B) and, where applicable, by consumers (individuals acting outside trade or professional capacity — B2C).",
+              fr: "Les présentes conditions générales s'appliquent à toutes les commandes de prestations passées auprès de Parallax, tant par des clients professionnels (entreprises, artistes, labels, agences, institutions, B2B) que, le cas échéant, par des consommateurs (personnes physiques agissant à des fins non professionnelles, B2C).",
+              en: "These general terms apply to all orders placed with Parallax, both by business clients (companies, artists, record labels, agencies, institutions, B2B) and, where applicable, by consumers (individuals acting outside trade or professional capacity, B2C).",
             },
             {
               fr: "Les conditions générales sont communiquées au client préalablement à toute passation de commande ou signature de devis. Toute commande implique l'acceptation des présentes conditions, sous réserve des stipulations expresses convenues entre les parties dans le devis écrit, lesquelles prévalent sur les présentes conditions générales.",
@@ -1640,8 +1722,8 @@ export const DEFAULT_LEGAL_PAGES_CONTENT: LegalPagesContent = {
               en: "Amicable settlement: In the event of any dispute arising from the interpretation, validity, or performance of a service, the parties agree to seek an amicable resolution prior to formal litigation by notifying their grounds in writing.",
             },
             {
-              fr: "Médiation de la consommation (B2C) : Pour les litiges non résolus impliquant un consommateur, ce dernier peut recourir gratuitement au Service de Médiation pour le Consommateur institué par le SPF Économie belge : Boulevard du Roi Albert II 8 Bte 1, 1000 Bruxelles — Téléphone : +32 (0)2 702 52 20 — E-mail : contact@mediationconsommateur.be — Site : www.mediationconsommateur.be.",
-              en: "Consumer mediation (B2C): For unresolved disputes involving a consumer, the client may submit a complaint free of charge to the Belgian Consumer Mediation Service: Boulevard du Roi Albert II 8 Bte 1, 1000 Brussels — Phone: +32 (0)2 702 52 20 — Email: contact@mediationconsommateur.be — Website: www.mediationconsommateur.be.",
+              fr: "Médiation de la consommation (B2C) : Pour les litiges non résolus impliquant un consommateur, ce dernier peut recourir gratuitement au Service de Médiation pour le Consommateur institué par le SPF Économie belge : Boulevard du Roi Albert II 8 Bte 1, 1000 Bruxelles | Téléphone : +32 (0)2 702 52 20 | E-mail : contact@mediationconsommateur.be | Site : www.mediationconsommateur.be.",
+              en: "Consumer mediation (B2C): For unresolved disputes involving a consumer, the client may submit a complaint free of charge to the Belgian Consumer Mediation Service: Boulevard du Roi Albert II 8 Bte 1, 1000 Brussels | Phone: +32 (0)2 702 52 20 | Email: contact@mediationconsommateur.be | Website: www.mediationconsommateur.be.",
             },
             {
               fr: "Compétence juridictionnelle : À défaut de résolution amiable, tout litige relatif à la formation, l'exécution ou l'interprétation des présentes conditions générales sera soumis aux juridictions compétentes selon les règles du droit commun belge, sous réserve des dispositions légales impératives protectrices des consommateurs.",

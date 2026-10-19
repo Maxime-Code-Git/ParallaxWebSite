@@ -45,13 +45,13 @@ export function createDefaultPortfolioContent(): PortfolioContent {
       en: "Documentary",
     },
     intro: {
-      fr: "Des films qui racontent le réel — portraits de métiers, de lieux et de savoir-faire, du repérage au montage.",
-      en: "Films that tell real stories — portraits of trades, places and craft, from scouting to the edit.",
+      fr: "Des films qui racontent le réel : portraits de métiers, de lieux et de savoir-faire, du repérage au montage.",
+      en: "Films that tell real stories: portraits of trades, places and craft, from scouting to the edit.",
     },
     seo: {
       title: {
-        fr: "Documentaire — Parallax | Films documentaires",
-        en: "Documentary — Parallax | Documentary films",
+        fr: "Documentaire | Parallax | Films documentaires",
+        en: "Documentary | Parallax | Documentary films",
       },
       description: {
         fr: "Portraits de métiers, de lieux et de savoir-faire, du repérage au montage.",
@@ -109,17 +109,17 @@ export function createDefaultPortfolioContent(): PortfolioContent {
       en: "Advertising",
     },
     intro: {
-      fr: "Des films de marque et de produit — studio, extérieur, rythme et lumière au service du message.",
-      en: "Brand and product films — studio, outdoor, rhythm and light serving the message.",
+      fr: "Des films de marque et de produit : studio, extérieur, rythme et lumière au service du message.",
+      en: "Brand and product films: studio, outdoor, rhythm and light serving the message.",
     },
     seo: {
       title: {
-        fr: "Publicité — Parallax | Films de marque et produit",
-        en: "Advertising — Parallax | Brand and product films",
+        fr: "Publicité | Parallax | Films de marque et produit",
+        en: "Advertising | Parallax | Brand and product films",
       },
       description: {
-        fr: "Films de marque et de produit — studio, extérieur, rythme et lumière au service du message.",
-        en: "Brand and product films — studio, outdoor, rhythm and light serving the message.",
+        fr: "Films de marque et de produit : studio, extérieur, rythme et lumière au service du message.",
+        en: "Brand and product films: studio, outdoor, rhythm and light serving the message.",
       },
     },
     coverImageId: null,
@@ -177,8 +177,8 @@ export function createDefaultPortfolioContent(): PortfolioContent {
       },
       seo: {
         title: {
-          fr: "Portfolio — Parallax | Réalisations photo et vidéo",
-          en: "Portfolio — Parallax | Photo & video projects",
+          fr: "Portfolio | Parallax | Réalisations photo et vidéo",
+          en: "Portfolio | Parallax | Photo & video projects",
         },
         description: {
           fr: "Découvrez nos réalisations documentaires et publicitaires, entre studio et terrain.",
@@ -213,15 +213,15 @@ export function createDefaultPortfolioContent(): PortfolioContent {
           {
             type: "paragraph",
             text: {
-              fr: "Ce que ce projet raconte — son émotion, son intention.",
-              en: "What this project carries — its emotion, its intent.",
+              fr: "Ce que ce projet raconte : son émotion, son intention.",
+              en: "What this project carries: its emotion, its intent.",
             },
           },
         ],
         seo: {
           title: {
-            fr: "Documentaire boulangerie — Parallax",
-            en: "Bakery documentary — Parallax",
+            fr: "Documentaire boulangerie | Parallax",
+            en: "Bakery documentary | Parallax",
           },
           description: {
             fr: "Un court documentaire sur une boulangerie artisanale.",
@@ -260,15 +260,15 @@ export function createDefaultPortfolioContent(): PortfolioContent {
           {
             type: "paragraph",
             text: {
-              fr: "Ce que ce projet raconte — son émotion, son intention.",
-              en: "What this project carries — its emotion, its intent.",
+              fr: "Ce que ce projet raconte : son émotion, son intention.",
+              en: "What this project carries: its emotion, its intent.",
             },
           },
         ],
         seo: {
           title: {
-            fr: "Publicité vélo — Parallax",
-            en: "Bike commercial — Parallax",
+            fr: "Publicité vélo | Parallax",
+            en: "Bike commercial | Parallax",
           },
           description: {
             fr: "Film publicitaire pour une marque de vélo, entre studio et grand air.",
@@ -307,15 +307,15 @@ export function createDefaultPortfolioContent(): PortfolioContent {
           {
             type: "paragraph",
             text: {
-              fr: "Ce que ce projet raconte — son émotion, son intention.",
-              en: "What this project carries — its emotion, its intent.",
+              fr: "Ce que ce projet raconte : son émotion, son intention.",
+              en: "What this project carries: its emotion, its intent.",
             },
           },
         ],
         seo: {
           title: {
-            fr: "Publicité produit — Parallax",
-            en: "Product commercial — Parallax",
+            fr: "Publicité produit | Parallax",
+            en: "Product commercial | Parallax",
           },
           description: {
             fr: "Nature morte en mouvement pour le lancement d'un produit.",

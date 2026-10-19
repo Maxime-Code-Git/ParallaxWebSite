@@ -139,8 +139,8 @@ export async function action({ request }: ActionFunctionArgs) {
         entrySide: "auto",
         seo: {
           title: {
-            fr: "Nouvelle rubrique — Parallax",
-            en: "New category — Parallax",
+            fr: "Nouvelle rubrique | Parallax",
+            en: "New category | Parallax",
           },
           description: {
             fr: "Découvrez les réalisations de cette rubrique.",
@@ -409,8 +409,8 @@ export async function action({ request }: ActionFunctionArgs) {
         ],
         seo: {
           title: {
-            fr: "Nouveau projet — Parallax",
-            en: "New project — Parallax",
+            fr: "Nouveau projet | Parallax",
+            en: "New project | Parallax",
           },
           description: {
             fr: "Découvrez cette réalisation du studio Parallax.",

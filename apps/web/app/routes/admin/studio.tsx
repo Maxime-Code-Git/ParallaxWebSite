@@ -217,7 +217,7 @@ export default function AdminStudioPage() {
         {isCorrupted && (
           <div className={styles.alertError} role="alert">
             <p>
-              <strong>Attention — Contenu de secours actif en mémoire :</strong> Le fichier de configuration présente une anomalie de validation et les modifications sont bloquées pour protéger vos données.
+              <strong>Attention : contenu de secours actif en mémoire :</strong> Le fichier de configuration présente une anomalie de validation et les modifications sont bloquées pour protéger vos données.
             </p>
             {corruptionError && (
               <p className={styles.alertSubText}>
