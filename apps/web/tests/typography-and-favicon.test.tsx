@@ -18,11 +18,23 @@ vi.mock("react-router", async (importOriginal) => {
 
 import {
   cleanTypography,
+  cleanPortfolioContent,
+  cleanLegalDocument,
   resolveCompanyTokens,
   DEFAULT_LEGAL_PAGES_CONTENT,
   type CommonContent,
+  type LegalDocument,
+  type SiteContent,
 } from "../app/lib/site-content.shared";
+import {
+  saveHomeContent,
+  saveCompanyContent,
+  saveLegalPageDraft,
+  getPublicLegalDocument,
+  getRawSiteContent,
+} from "../app/lib/site-content.server";
 import { createDefaultPortfolioContent, savePortfolioContent } from "../app/lib/portfolio-content.server";
+import { portfolioContentSchema } from "../app/lib/portfolio-content.shared";
 import { links as rootLinks } from "../app/root";
 import { LegalPageView } from "../app/components/public/LegalPageView";
 import defaultSiteContent from "../app/content/default-site-content.json";
@@ -469,6 +481,267 @@ describe("Typography (No Em-Dashes) and Favicon Validation Suite", () => {
       const historicalEn = "Enterprise number: {{company.enterpriseNumber}} — Intra-community VAT number: {{company.vatNumber}} ({{company.vatRegime}}).";
       const resolvedEn = resolveCompanyTokens(historicalEn, nonSubjectCompany, "public", "en");
       expect(resolvedEn).toBe("Enterprise number: 0123.456.789, VAT regime: Non-subject to VAT.");
+    });
+  });
+
+  describe("8. Immutability of Published Snapshots on Disk & Clean Presentation Projection", () => {
+    let tempDir: string;
+    let testSitePath: string;
+    const originalEnv = process.env;
+
+    beforeEach(() => {
+      tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "parallax-snapshot-test-"));
+      testSitePath = path.join(tempDir, "site-content.json");
+      process.env = {
+        ...originalEnv,
+        NODE_ENV: "test",
+        SITE_CONTENT_PATH: testSitePath,
+      };
+    });
+
+    afterEach(() => {
+      process.env = originalEnv;
+      if (fs.existsSync(tempDir)) {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("preserves exact byte-for-byte published snapshot on disk across ordinary saves (Home, Company, Draft, Adaptation)", () => {
+      const content = structuredClone(defaultSiteContent) as SiteContent;
+      const historicalPublishedDoc: LegalDocument = {
+        ...DEFAULT_LEGAL_PAGES_CONTENT.mentions.draft,
+        version: 1,
+        effectiveDate: "2026-01-01",
+        intro: {
+          fr: "Texte historique — publié avec\nsaut de ligne et ponctuation originale.",
+          en: "Historical text — published with\nnewline and original punctuation.",
+        },
+      };
+
+      content.legalPages.mentions.published = historicalPublishedDoc;
+      fs.writeFileSync(testSitePath, JSON.stringify(content, null, 2), "utf-8");
+
+      // Verify initial read
+      const initialRead = getRawSiteContent();
+      expect(initialRead.isCorrupted).toBe(false);
+      expect(initialRead.content.legalPages.mentions.published?.intro.fr).toBe(
+        "Texte historique — publié avec\nsaut de ligne et ponctuation originale."
+      );
+
+      // Save 1: Home content save
+      const homeToSave = structuredClone(initialRead.content.home);
+      homeToSave.hero.title.fr = "Nouveau titre Accueil";
+      const rev1 = saveHomeContent(homeToSave, initialRead.content.revision);
+      expect(rev1).toBeDefined();
+
+      // Read disk after save 1
+      let onDisk = JSON.parse(fs.readFileSync(testSitePath, "utf-8"));
+      expect(onDisk.legalPages.mentions.published).toEqual(historicalPublishedDoc);
+      expect(onDisk.legalPages.mentions.published.intro.fr).toBe(
+        "Texte historique — publié avec\nsaut de ligne et ponctuation originale."
+      );
+      expect(onDisk.legalPages.mentions.published.version).toBe(1);
+
+      // Save 2: Company content save
+      const companyToSave = structuredClone(onDisk.company);
+      companyToSave.tradeName = "Parallax Nouveau";
+      const rev2 = saveCompanyContent(companyToSave, onDisk.revision);
+      expect(rev2).toBeDefined();
+
+      onDisk = JSON.parse(fs.readFileSync(testSitePath, "utf-8"));
+      expect(onDisk.legalPages.mentions.published).toEqual(historicalPublishedDoc);
+      expect(onDisk.legalPages.mentions.published.intro.fr).toBe(
+        "Texte historique — publié avec\nsaut de ligne et ponctuation originale."
+      );
+
+      // Save 3: Legal draft save on another page (e.g. privacy)
+      const privacyDraft = structuredClone(onDisk.legalPages.privacy.draft);
+      privacyDraft.intro.fr = "Nouvelle intro draft — avec cadratin à normaliser";
+      const rev3 = saveLegalPageDraft("privacy", privacyDraft, onDisk.revision);
+      expect(rev3).toBeDefined();
+
+      onDisk = JSON.parse(fs.readFileSync(testSitePath, "utf-8"));
+      expect(onDisk.legalPages.mentions.published).toEqual(historicalPublishedDoc);
+      expect(onDisk.legalPages.mentions.published.intro.fr).toBe(
+        "Texte historique — publié avec\nsaut de ligne et ponctuation originale."
+      );
+      expect(onDisk.legalPages.privacy.draft.intro.fr).toBe(
+        "Nouvelle intro draft | avec cadratin à normaliser"
+      );
+
+      // Save 4: Run adaptSiteContentDrafts
+      const adaptRes = adaptSiteContentDrafts(testSitePath);
+      expect(adaptRes.success).toBe(true);
+
+      onDisk = JSON.parse(fs.readFileSync(testSitePath, "utf-8"));
+      expect(onDisk.legalPages.mentions.published).toEqual(historicalPublishedDoc);
+      expect(onDisk.legalPages.mentions.published.intro.fr).toBe(
+        "Texte historique — publié avec\nsaut de ligne et ponctuation originale."
+      );
+
+      // 2. Separately verify that public presentation projection strips em-dashes
+      const publicDoc = getPublicLegalDocument("mentions");
+      expect(publicDoc).not.toBeNull();
+      expect(publicDoc?.intro.fr).toBe(
+        "Texte historique | publié avec\nsaut de ligne et ponctuation originale."
+      );
+      expect(publicDoc?.intro.fr).not.toContain("—");
+    });
+  });
+
+  describe("9. Full Domain Schema Validation & Security in adapt-typography", () => {
+    let tmpDir: string;
+    let tmpSitePath: string;
+    let tmpPortfolioPath: string;
+
+    beforeEach(() => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "parallax-schema-val-test-"));
+      tmpSitePath = path.join(tmpDir, "site-content.json");
+      tmpPortfolioPath = path.join(tmpDir, "portfolio-content.json");
+    });
+
+    afterEach(() => {
+      if (fs.existsSync(tmpDir)) {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it("rejects site content with invalid email without creating backups or modifying file", () => {
+      const siteData = structuredClone(defaultSiteContent);
+      siteData.company.email = "not-an-email";
+      siteData.home.hero.title.fr = "Titre héro — avec cadratin";
+
+      fs.writeFileSync(tmpSitePath, JSON.stringify(siteData, null, 2), "utf-8");
+
+      const res = adaptSiteContentDrafts(tmpSitePath);
+      expect(res.success).toBe(false);
+      expect(res.reason).toBe("invalid_schema");
+      expect(res.error).toContain("company.email");
+
+      // Verify file is untouched
+      const onDisk = JSON.parse(fs.readFileSync(tmpSitePath, "utf-8"));
+      expect(onDisk.home.hero.title.fr).toBe("Titre héro — avec cadratin");
+
+      // Verify no safety backup created
+      const files = fs.readdirSync(tmpDir);
+      expect(files.filter((f) => f.includes(".safety.bak")).length).toBe(0);
+    });
+
+    it("rejects portfolio content when a project references a non-existent category", () => {
+      const portfolioData = createDefaultPortfolioContent();
+      portfolioData.projects[0].category = "non_existent_category_xyz";
+      portfolioData.overview.intro.fr = "Intro overview — avec cadratin";
+
+      fs.writeFileSync(tmpPortfolioPath, JSON.stringify(portfolioData, null, 2), "utf-8");
+
+      const res = adaptPortfolioContent(tmpPortfolioPath);
+      expect(res.success).toBe(false);
+      expect(res.reason).toBe("invalid_schema");
+      expect(res.error).toContain("non_existent_category_xyz");
+
+      // Verify file is untouched
+      const onDisk = JSON.parse(fs.readFileSync(tmpPortfolioPath, "utf-8"));
+      expect(onDisk.overview.intro.fr).toBe("Intro overview — avec cadratin");
+
+      // Verify no safety backup created
+      const files = fs.readdirSync(tmpDir);
+      expect(files.filter((f) => f.includes(".safety.bak")).length).toBe(0);
+    });
+
+    it("rejects unsupported schema versions without migration or backup creation", () => {
+      // Site with unsupported schemaVersion 2 (expecting 3)
+      const siteV2 = { ...structuredClone(defaultSiteContent), schemaVersion: 2 };
+      fs.writeFileSync(tmpSitePath, JSON.stringify(siteV2), "utf-8");
+      const resSite = adaptSiteContentDrafts(tmpSitePath);
+      expect(resSite.success).toBe(false);
+      expect(resSite.reason).toBe("unsupported_version");
+
+      // Portfolio with unsupported schemaVersion 1 (expecting 2)
+      const portV1 = { ...createDefaultPortfolioContent(), schemaVersion: 1 };
+      fs.writeFileSync(tmpPortfolioPath, JSON.stringify(portV1), "utf-8");
+      const resPort = adaptPortfolioContent(tmpPortfolioPath);
+      expect(resPort.success).toBe(false);
+      expect(resPort.reason).toBe("unsupported_version");
+
+      const files = fs.readdirSync(tmpDir);
+      expect(files.filter((f) => f.includes(".safety.bak")).length).toBe(0);
+    });
+
+    it("rejects insecure or relative paths", () => {
+      const resRelative = adaptPortfolioContent("relative/path.json");
+      expect(resRelative.success).toBe(false);
+      expect(resRelative.reason).toBe("invalid_path");
+
+      const resSiteRelative = adaptSiteContentDrafts("relative/path.json");
+      expect(resSiteRelative.success).toBe(false);
+      expect(resSiteRelative.reason).toBe("invalid_path");
+    });
+  });
+
+  describe("10. Real Field Coverage in Cleaners & Presentation Verification", () => {
+    it("cleans all real fields of PortfolioContent including seeMoreButton, category buttons/alts, coverAlt, and galleryAlt", () => {
+      const portfolio = createDefaultPortfolioContent();
+
+      // Set em-dashes in real delivered fields
+      portfolio.overview.seeMoreButton = { fr: "Voir plus — de projets", en: "See more — projects" };
+      portfolio.categories[0].bannerAlt = { fr: "Bannière — documentaire", en: "Banner — documentary" };
+      portfolio.categories[0].showreelTitle = { fr: "Showreel — documentaire", en: "Showreel — documentary" };
+      portfolio.categories[0].morePhotosButton = { fr: "Plus de photos — afficher", en: "More photos — show" };
+      portfolio.categories[0].lessPhotosButton = { fr: "Moins de photos — masquer", en: "Less photos — hide" };
+      portfolio.categories[0].moreVideosButton = { fr: "Plus de vidéos — afficher", en: "More videos — show" };
+      portfolio.categories[0].lessVideosButton = { fr: "Moins de vidéos — masquer", en: "Less videos — hide" };
+      portfolio.categories[0].backButton = { fr: "Retour — portfolio", en: "Back — portfolio" };
+
+      portfolio.projects[0].coverAlt = { fr: "Couverture — projet 1", en: "Cover — project 1" };
+      portfolio.projects[0].galleryAlt = {
+        "img-test-1": { fr: "Photo 1 — grand format", en: "Photo 1 — wide format" },
+      };
+
+      const cleaned = cleanPortfolioContent(portfolio);
+
+      expect(cleaned.overview.seeMoreButton.fr).toBe("Voir plus | de projets");
+      expect(cleaned.overview.seeMoreButton.en).toBe("See more | projects");
+
+      expect(cleaned.categories[0].bannerAlt?.fr).toBe("Bannière | documentaire");
+      expect(cleaned.categories[0].showreelTitle.fr).toBe("Showreel | documentaire");
+      expect(cleaned.categories[0].morePhotosButton.fr).toBe("Plus de photos | afficher");
+      expect(cleaned.categories[0].lessPhotosButton.fr).toBe("Moins de photos | masquer");
+      expect(cleaned.categories[0].moreVideosButton?.fr).toBe("Plus de vidéos | afficher");
+      expect(cleaned.categories[0].lessVideosButton?.fr).toBe("Moins de vidéos | masquer");
+      expect(cleaned.categories[0].backButton.fr).toBe("Retour | portfolio");
+
+      expect(cleaned.projects[0].coverAlt.fr).toBe("Couverture | projet 1");
+      expect(cleaned.projects[0].galleryAlt?.["img-test-1"]?.fr).toBe("Photo 1 | grand format");
+      expect(cleaned.projects[0].galleryAlt?.["img-test-1"]?.en).toBe("Photo 1 | wide format");
+
+      // Validated against full domain schema validator
+      const schemaCheck = portfolioContentSchema.safeParse(cleaned);
+      expect(schemaCheck.success).toBe(true);
+    });
+
+    it("cleans all real fields of CookieInventoryItem including name, provider, purpose, duration, and exemptionJustification", () => {
+      const doc: LegalDocument = {
+        ...DEFAULT_LEGAL_PAGES_CONTENT.cookies.draft,
+        inventory: [
+          {
+            id: "cookie-1",
+            name: { fr: "Cookie — session", en: "Cookie — session" },
+            provider: { fr: "Parallax — Studio", en: "Parallax — Studio" },
+            category: "technical",
+            purpose: { fr: "Mémoriser l'état — de session", en: "Store state — session" },
+            duration: { fr: "Session — jusqu'à fermeture", en: "Session — until close" },
+            exemptionJustification: { fr: "Strictement nécessaire — au service", en: "Strictly necessary — for service" },
+          },
+        ],
+      };
+
+      const cleaned = cleanLegalDocument(doc);
+      const item = cleaned.inventory?.[0];
+      expect(item?.name.fr).toBe("Cookie | session");
+      expect(item?.provider.fr).toBe("Parallax | Studio");
+      expect(item?.purpose.fr).toBe("Mémoriser l'état | de session");
+      expect(item?.duration.fr).toBe("Session | jusqu'à fermeture");
+      expect(item?.exemptionJustification?.fr).toBe("Strictement nécessaire | au service");
     });
   });
 });

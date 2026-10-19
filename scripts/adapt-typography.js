@@ -13,20 +13,12 @@ import {
   cleanContactContent,
   cleanLegalDocument,
   cleanPortfolioContent,
+  validatePortfolioContentDocument,
+  validateSiteContentDocument,
 } from "@parallax/shared";
 
 // Re-export cleanTypography for any external consumers
 export { cleanTypography };
-
-getMonorepoRoot();
-
-// Ensure .env.local is loaded without overriding existing environment variables
-try {
-  loadEnvLocal();
-} catch (err) {
-  // If .env.local fails to load, log warning but allow explicit paths in test runners
-  console.warn(`[WARN] env-loader: ${err instanceof Error ? err.message : String(err)}`);
-}
 
 /**
  * Validates that no path component in filePath is a symbolic link.
@@ -57,17 +49,59 @@ function checkNoSymlinks(filePath, name) {
 }
 
 /**
- * Resolves configuration file path from environment or default data directory.
+ * Resolves and validates a secure target file path according to project confinement rules.
+ * Does not fall back implicitly into the repository and forbids relative paths.
  */
-function resolveConfiguredPath(varName, defaultFilename) {
-  const envVal = process.env[varName]?.trim();
-  if (envVal) {
-    checkNoSymlinks(envVal, varName);
-    return path.resolve(envVal);
+function resolveSecurePath(customPath, envVarName) {
+  const target = customPath ? String(customPath).trim() : process.env[envVarName]?.trim();
+  if (!target) {
+    throw new Error(`CRITICAL: Chemin non spécifié et variable d'environnement ${envVarName} absente.`);
   }
-  const defaultPath = path.join(os.homedir(), ".parallax-data", defaultFilename);
-  checkNoSymlinks(path.dirname(defaultPath), varName);
-  return defaultPath;
+
+  if (!path.isAbsolute(target)) {
+    throw new Error(`CRITICAL: Le chemin ${target} pour ${envVarName} doit être un chemin absolu.`);
+  }
+
+  checkNoSymlinks(target, envVarName);
+
+  const resolved = path.resolve(target);
+  const repoRoot = getMonorepoRoot();
+  let realRepoRoot = repoRoot;
+  try {
+    realRepoRoot = fs.realpathSync(repoRoot);
+  } catch {
+    // Ignored
+  }
+
+  const relResolved = path.relative(repoRoot, resolved);
+  const relReal = path.relative(realRepoRoot, resolved);
+  if (
+    (!relResolved.startsWith("..") && !path.isAbsolute(relResolved)) ||
+    (!relReal.startsWith("..") && !path.isAbsolute(relReal))
+  ) {
+    throw new Error(`CRITICAL: ${envVarName} ne doit pas se trouver dans le dépôt du projet.`);
+  }
+
+  if (process.env.VITEST || process.env.NODE_ENV === "test") {
+    const tmp = fs.realpathSync(os.tmpdir());
+    let realResolved = resolved;
+    try {
+      realResolved = fs.realpathSync(resolved);
+    } catch {
+      const parent = path.dirname(resolved);
+      try {
+        realResolved = path.join(fs.realpathSync(parent), path.basename(resolved));
+      } catch {
+        // Ignored
+      }
+    }
+    const relTmp = path.relative(tmp, realResolved);
+    if (relTmp.startsWith("..") || path.isAbsolute(relTmp)) {
+      throw new Error(`CRITICAL: En mode test, ${envVarName} doit se trouver sous os.tmpdir().`);
+    }
+  }
+
+  return resolved;
 }
 
 /**
@@ -120,42 +154,16 @@ function createSafetyBackup(filePath) {
 }
 
 /**
- * Validates basic schema structure for portfolio content.
- */
-function validatePortfolioSchema(content) {
-  if (!content || typeof content !== "object") return false;
-  if (typeof content.schemaVersion !== "number" || content.schemaVersion < 1) return false;
-  if (!content.overview || typeof content.overview !== "object") return false;
-  if (!Array.isArray(content.categories)) return false;
-  if (!Array.isArray(content.projects)) return false;
-  return true;
-}
-
-/**
- * Validates basic schema structure for site content.
- */
-function validateSiteSchema(content) {
-  if (!content || typeof content !== "object") return false;
-  if (typeof content.schemaVersion !== "number" || content.schemaVersion < 2) return false;
-  if (!content.common || typeof content.common !== "object") return false;
-  if (!content.home || typeof content.home !== "object") return false;
-  if (!content.studio || typeof content.studio !== "object") return false;
-  if (!content.contactPage || typeof content.contactPage !== "object") return false;
-  if (!content.legalPages || typeof content.legalPages !== "object") return false;
-  return true;
-}
-
-/**
  * Adapts portfolio content by removing em-dashes across all editorial fields.
- * Validates schema, checks revision, updates revision upon useful change, and preserves media registries.
+ * Validates full schema before adaptation, checks revision, updates revision upon useful change,
+ * preserves media registries, and never creates backups or writes on invalid schema.
  */
 export function adaptPortfolioContent(targetPath, expectedRevision) {
   let filePath;
   try {
-    filePath = targetPath ? path.resolve(targetPath) : resolveConfiguredPath("PORTFOLIO_CONTENT_PATH", "portfolio-content.json");
-    checkNoSymlinks(filePath, "PORTFOLIO_CONTENT_PATH");
+    filePath = resolveSecurePath(targetPath, "PORTFOLIO_CONTENT_PATH");
   } catch (err) {
-    return { success: false, reason: "invalid_path", error: err };
+    return { success: false, reason: "invalid_path", error: err instanceof Error ? err.message : String(err) };
   }
 
   if (!fs.existsSync(filePath)) {
@@ -166,29 +174,31 @@ export function adaptPortfolioContent(targetPath, expectedRevision) {
   try {
     raw = fs.readFileSync(filePath, "utf-8");
   } catch (err) {
-    return { success: false, reason: "unreadable", error: err };
+    return { success: false, reason: "unreadable", error: err instanceof Error ? err.message : String(err) };
   }
 
   let content;
   try {
     content = JSON.parse(raw);
   } catch (err) {
-    return { success: false, reason: "corrupted", error: err };
+    return { success: false, reason: "corrupted", error: err instanceof Error ? err.message : String(err) };
   }
 
-  if (!validatePortfolioSchema(content)) {
-    return { success: false, reason: "invalid_schema" };
-  }
-
-  if (content.schemaVersion !== 2) {
+  // Check version and full domain schema strictly BEFORE any cleaning
+  if (typeof content?.schemaVersion !== "number" || content.schemaVersion !== 2) {
     return { success: false, reason: "unsupported_version" };
+  }
+
+  const preValidation = validatePortfolioContentDocument(content);
+  if (!preValidation.success) {
+    return { success: false, reason: preValidation.reason, error: preValidation.error };
   }
 
   if (expectedRevision && content.revision !== expectedRevision) {
     return { success: false, reason: "revision_conflict", serverRevision: content.revision };
   }
 
-  // Deep clean all editorial fields (overview, categories, sections, projects, alts, alts, alts, seo)
+  // Deep clean all real editorial fields (overview with seeMoreButton, categories, projects with coverAlt and galleryAlt)
   const adaptedContent = cleanPortfolioContent(content);
 
   // Compare serialized representations of editorial data to determine if useful change occurred
@@ -198,9 +208,10 @@ export function adaptPortfolioContent(targetPath, expectedRevision) {
     return { success: true, changed: false };
   }
 
-  // Validate the adapted document structure
-  if (!validatePortfolioSchema(adaptedContent)) {
-    return { success: false, reason: "validation_failed" };
+  // Validate the adapted document structure with full schema
+  const postValidation = validatePortfolioContentDocument(adaptedContent);
+  if (!postValidation.success) {
+    return { success: false, reason: "validation_failed", error: postValidation.error };
   }
 
   // Generate new revision and timestamp for domain mutation consistency
@@ -208,7 +219,7 @@ export function adaptPortfolioContent(targetPath, expectedRevision) {
   adaptedContent.revision = newRevision;
   adaptedContent.updatedAt = new Date().toISOString();
 
-  // Create private safety backup out-of-rotation (0600)
+  // Create private safety backup out-of-rotation (0600) only now
   const backupName = createSafetyBackup(filePath);
 
   // Durable atomic write without modifying media registries
@@ -220,14 +231,14 @@ export function adaptPortfolioContent(targetPath, expectedRevision) {
 /**
  * Adapts site content editable drafts and sections by removing em-dashes across all editorial fields.
  * Strictly preserves published legal snapshots and history on disk.
+ * Validates full schema before adaptation and never creates backups or writes on invalid schema.
  */
 export function adaptSiteContentDrafts(targetPath, expectedRevision) {
   let filePath;
   try {
-    filePath = targetPath ? path.resolve(targetPath) : resolveConfiguredPath("SITE_CONTENT_PATH", "site-content.json");
-    checkNoSymlinks(filePath, "SITE_CONTENT_PATH");
+    filePath = resolveSecurePath(targetPath, "SITE_CONTENT_PATH");
   } catch (err) {
-    return { success: false, reason: "invalid_path", error: err };
+    return { success: false, reason: "invalid_path", error: err instanceof Error ? err.message : String(err) };
   }
 
   if (!fs.existsSync(filePath)) {
@@ -238,18 +249,24 @@ export function adaptSiteContentDrafts(targetPath, expectedRevision) {
   try {
     raw = fs.readFileSync(filePath, "utf-8");
   } catch (err) {
-    return { success: false, reason: "unreadable", error: err };
+    return { success: false, reason: "unreadable", error: err instanceof Error ? err.message : String(err) };
   }
 
   let content;
   try {
     content = JSON.parse(raw);
   } catch (err) {
-    return { success: false, reason: "corrupted", error: err };
+    return { success: false, reason: "corrupted", error: err instanceof Error ? err.message : String(err) };
   }
 
-  if (!validateSiteSchema(content)) {
-    return { success: false, reason: "invalid_schema" };
+  // Check version and full domain schema strictly BEFORE any cleaning
+  if (typeof content?.schemaVersion !== "number" || content.schemaVersion !== 3) {
+    return { success: false, reason: "unsupported_version" };
+  }
+
+  const preValidation = validateSiteContentDocument(content);
+  if (!preValidation.success) {
+    return { success: false, reason: preValidation.reason, error: preValidation.error };
   }
 
   if (expectedRevision && content.revision !== expectedRevision) {
@@ -282,8 +299,9 @@ export function adaptSiteContentDrafts(targetPath, expectedRevision) {
   }
 
   // Validate the adapted document structure
-  if (!validateSiteSchema(content)) {
-    return { success: false, reason: "validation_failed" };
+  const postValidation = validateSiteContentDocument(content);
+  if (!postValidation.success) {
+    return { success: false, reason: "validation_failed", error: postValidation.error };
   }
 
   // Generate new revision and timestamp for domain mutation consistency
@@ -291,7 +309,7 @@ export function adaptSiteContentDrafts(targetPath, expectedRevision) {
   content.revision = newRevision;
   content.updatedAt = new Date().toISOString();
 
-  // Create private safety backup out-of-rotation (0600)
+  // Create private safety backup out-of-rotation (0600) only now
   const backupName = createSafetyBackup(filePath);
 
   // Durable atomic write
@@ -336,5 +354,10 @@ export function runAdaptTypography() {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  try {
+    loadEnvLocal();
+  } catch (err) {
+    console.warn(`[WARN] env-loader: ${err instanceof Error ? err.message : String(err)}`);
+  }
   runAdaptTypography();
 }

@@ -44,7 +44,10 @@ import {
   type LegalPersonalityType,
   type VatRegimeType,
   COMPANY_TOKEN_DETAILS,
-  cleanTypography,
+  cleanHomeContent,
+  cleanStudioContent,
+  cleanContactContent,
+  cleanLegalDocument,
 } from "./site-content.shared";
 
 export class RevisionConflictError extends Error {
@@ -103,8 +106,8 @@ export function validateLocalizedString(val: unknown, context: string): Localize
     throw new ValidationError(`${context}.en doit être une chaîne de caractères.`);
   }
   return {
-    fr: cleanTypography(obj.fr, "fr"),
-    en: cleanTypography(obj.en, "en"),
+    fr: obj.fr,
+    en: obj.en,
   };
 }
 
@@ -1290,7 +1293,7 @@ export function saveHomeContent(newHome: HomeContent, previousRevision: string):
     throw new RevisionConflictError();
   }
 
-  const validatedHome = validateHomeContent(newHome);
+  const validatedHome = validateHomeContent(cleanHomeContent(newHome));
 
   // Validate consistency of referenced media
   validateReferencedMediaConsistency(
@@ -1358,7 +1361,7 @@ export function saveStudioContent(newStudio: StudioContent, previousRevision: st
     throw new RevisionConflictError();
   }
 
-  const validatedStudio = validateStudioContent(newStudio);
+  const validatedStudio = validateStudioContent(cleanStudioContent(newStudio));
 
   // Validate consistency of referenced media for studio team members
   for (const member of validatedStudio.team.members) {
@@ -1564,7 +1567,7 @@ export function saveContactPageContent(
     throw new RevisionConflictError();
   }
 
-  const validatedContact = validateContactPageContent(newContactPage);
+  const validatedContact = validateContactPageContent(cleanContactContent(newContactPage));
 
   const updatedHome = structuredClone(current.content.home);
   if (canonicalCoordinates) {
@@ -1730,7 +1733,7 @@ export function saveLegalPageDraft(
     throw new RevisionConflictError(undefined, current.content.revision);
   }
 
-  const validatedDraft = validateLegalDocument(draft, `legalPages.${pageKey}.draft`);
+  const validatedDraft = validateLegalDocument(cleanLegalDocument(draft), `legalPages.${pageKey}.draft`);
 
   const nextRevision = crypto.randomBytes(16).toString("hex");
   const updatedLegalPages = structuredClone(current.content.legalPages);
@@ -1906,10 +1909,10 @@ export function publishLegalPage(
   }
 
   const pageRecord = current.content.legalPages[pageKey];
-  let draft = pageRecord.draft;
+  let draft = cleanLegalDocument(pageRecord.draft);
 
   if (candidateDraft) {
-    draft = validateLegalDocument(candidateDraft, "candidateDraft");
+    draft = validateLegalDocument(cleanLegalDocument(candidateDraft), "candidateDraft");
   }
 
   // Strict server-side validation for publication
@@ -2225,7 +2228,9 @@ export function unpublishLegalPage(
 export function getPublicLegalDocument(pageKey: LegalPageKey): LegalDocument | null {
   if (!LEGAL_PAGE_KEYS.includes(pageKey)) return null;
   const content = getSiteContent();
-  return content.legalPages?.[pageKey]?.published ?? null;
+  const doc = content.legalPages?.[pageKey]?.published ?? null;
+  if (!doc) return null;
+  return cleanLegalDocument(doc);
 }
 
 export function getPublicCompanyContent(): Partial<CompanyContent> {
