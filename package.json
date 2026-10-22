@@ -29,7 +29,9 @@
     "legal:apply-drafts": "node scripts/apply-legal-drafts.js",
     "legal:adapt-drafts": "node scripts/adapt-legal-drafts.js",
     "favicons:generate": "node scripts/generate-favicons.js",
-    "typography:adapt": "node scripts/adapt-typography.js"
+    "typography:adapt": "node scripts/adapt-typography.js",
+    "backup": "node scripts/backup.js",
+    "restore": "node scripts/restore.js"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

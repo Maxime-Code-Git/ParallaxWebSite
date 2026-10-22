@@ -87,4 +87,9 @@ export default [
   route("media/site/:location/:imageId/:variant/:ext", "routes/media/site-variant.ts"),
   route("media/portfolio/:ownerType/:ownerId/:slot/:imageId/:variant/:ext", "routes/media/portfolio-variant.ts"),
   route("admin/media/portfolio/:ownerType/:ownerId/:slot/:imageId/:variant/:ext", "routes/admin/portfolio-media.ts"),
+
+  // Technical SEO & Discovery
+  route("robots.txt", "routes/public/robots.ts", { id: "robots-txt" }),
+  route("sitemap.xml", "routes/public/sitemap.ts", { id: "sitemap-xml" }),
+  route("api/health", "routes/api/health.ts", { id: "health-check" }),
 ] satisfies RouteConfig;

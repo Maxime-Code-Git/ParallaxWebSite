@@ -125,6 +125,8 @@ export function meta({ data }: { data?: {
   const frUrl = `${base}${alternateUrls.fr}`;
   const enUrl = `${base}${alternateUrls.en}`;
 
+  const ogImageUrl = `${base}/img/logo-parallax.png`;
+
   return [
     { title: cleanTypography(document.seoTitle[lang]) },
     { name: "description", content: cleanTypography(document.seoDescription[lang]) },
@@ -133,6 +135,20 @@ export function meta({ data }: { data?: {
     { tagName: "link", rel: "alternate", hrefLang: "fr", href: frUrl },
     { tagName: "link", rel: "alternate", hrefLang: "en", href: enUrl },
     { tagName: "link", rel: "alternate", hrefLang: "x-default", href: frUrl },
+    // Open Graph
+    { property: "og:type", content: "article" },
+    { property: "og:site_name", content: "Parallax" },
+    { property: "og:title", content: cleanTypography(document.seoTitle[lang]) },
+    { property: "og:description", content: cleanTypography(document.seoDescription[lang]) },
+    { property: "og:url", content: canonicalUrl },
+    { property: "og:image", content: ogImageUrl },
+    { property: "og:locale", content: lang === "fr" ? "fr_FR" : "en_US" },
+    { property: "og:locale:alternate", content: lang === "fr" ? "en_US" : "fr_FR" },
+    // Twitter Card
+    { name: "twitter:card", content: "summary" },
+    { name: "twitter:title", content: cleanTypography(document.seoTitle[lang]) },
+    { name: "twitter:description", content: cleanTypography(document.seoDescription[lang]) },
+    { name: "twitter:image", content: ogImageUrl },
   ];
 }
 

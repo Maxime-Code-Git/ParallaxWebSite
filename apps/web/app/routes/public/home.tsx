@@ -7,6 +7,7 @@ import { Footer } from "../../components/public/Footer";
 import { ScrollToTop } from "../../components/public/ScrollToTop";
 import { VideoModal } from "../../components/public/VideoModal";
 import { ResponsiveSiteImage } from "../../components/public/ResponsiveSiteImage";
+import { ENV } from "../../lib/env.server";
 import {
   resolveSempraButtonUrl,
   cleanCommonContent,
@@ -27,6 +28,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     common: cleanCommonContent(siteContent.common),
     home: cleanHomeContent(siteContent.home),
     media: siteContent.media || {},
+    siteUrl: ENV.PUBLIC_SITE_URL,
   };
 }
 
@@ -34,10 +36,39 @@ export function meta({ data }: { data?: Awaited<ReturnType<typeof loader>> }) {
   if (!data) {
     return [{ title: "Parallax" }];
   }
-  const { home, lang } = data;
+  const { home, common, lang, siteUrl } = data;
+  const base = (siteUrl || "").replace(/\/$/, "");
+  const pageTitle = cleanTypography(home.seo.title[lang]);
+  const pageDesc = cleanTypography(home.seo.description[lang]);
+
+  const canonicalUrl = `${base}/${lang}`;
+  const frUrl = `${base}/fr`;
+  const enUrl = `${base}/en`;
+  const ogImageUrl = `${base}/img/index-0ff090a6e4.jpg`;
+  const brand = cleanTypography(common?.brandName) || "Parallax";
+
   return [
-    { title: cleanTypography(home.seo.title[lang]) },
-    { name: "description", content: cleanTypography(home.seo.description[lang]) },
+    { title: pageTitle },
+    { name: "description", content: pageDesc },
+    { name: "robots", content: "index, follow" },
+    { tagName: "link", rel: "canonical", href: canonicalUrl },
+    { tagName: "link", rel: "alternate", hrefLang: "fr", href: frUrl },
+    { tagName: "link", rel: "alternate", hrefLang: "en", href: enUrl },
+    { tagName: "link", rel: "alternate", hrefLang: "x-default", href: frUrl },
+    // Open Graph
+    { property: "og:type", content: "website" },
+    { property: "og:site_name", content: brand },
+    { property: "og:title", content: pageTitle },
+    { property: "og:description", content: pageDesc },
+    { property: "og:url", content: canonicalUrl },
+    { property: "og:image", content: ogImageUrl },
+    { property: "og:locale", content: lang === "fr" ? "fr_FR" : "en_US" },
+    { property: "og:locale:alternate", content: lang === "fr" ? "en_US" : "fr_FR" },
+    // Twitter Card
+    { name: "twitter:card", content: "summary_large_image" },
+    { name: "twitter:title", content: pageTitle },
+    { name: "twitter:description", content: pageDesc },
+    { name: "twitter:image", content: ogImageUrl },
   ];
 }
 

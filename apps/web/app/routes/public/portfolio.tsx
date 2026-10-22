@@ -84,14 +84,30 @@ export function meta({ data }: { data?: LoaderData }) {
   const frUrl = `${base}${alternateUrls.fr}`;
   const enUrl = `${base}${alternateUrls.en}`;
 
+  const ogImageUrl = `${base}/img/projets-141c16b0a2.jpg`;
+
   return [
     { title: pageTitle },
     { name: "description", content: pageDesc },
+    { name: "robots", content: "index, follow" },
     { tagName: "link", rel: "canonical", href: canonicalUrl },
     { tagName: "link", rel: "alternate", hrefLang: "fr", href: frUrl },
     { tagName: "link", rel: "alternate", hrefLang: "en", href: enUrl },
     { tagName: "link", rel: "alternate", hrefLang: "x-default", href: frUrl },
-    { name: "robots", content: "index, follow" },
+    // Open Graph
+    { property: "og:type", content: "website" },
+    { property: "og:site_name", content: "Parallax" },
+    { property: "og:title", content: pageTitle },
+    { property: "og:description", content: pageDesc },
+    { property: "og:url", content: canonicalUrl },
+    { property: "og:image", content: ogImageUrl },
+    { property: "og:locale", content: lang === "fr" ? "fr_FR" : "en_US" },
+    { property: "og:locale:alternate", content: lang === "fr" ? "en_US" : "fr_FR" },
+    // Twitter Card
+    { name: "twitter:card", content: "summary_large_image" },
+    { name: "twitter:title", content: pageTitle },
+    { name: "twitter:description", content: pageDesc },
+    { name: "twitter:image", content: ogImageUrl },
   ];
 }
 

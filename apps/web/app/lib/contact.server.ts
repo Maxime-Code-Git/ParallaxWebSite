@@ -49,6 +49,7 @@ export interface ContactLoaderData {
   flashSuccessId?: string | null;
   smtpAvailable: boolean;
   isPrivacyPolicyPublished: boolean;
+  siteUrl: string;
 }
 
 export interface ContactActionSuccess {
@@ -426,6 +427,7 @@ export async function handleContactLoader(args: LoaderFunctionArgs, forcedLang?:
       flashSuccessId: flashId ?? null,
       smtpAvailable,
       isPrivacyPolicyPublished: Boolean(getPublicLegalDocument("privacy")),
+      siteUrl: ENV.PUBLIC_SITE_URL,
     },
     { headers }
   );
