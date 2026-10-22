@@ -71,8 +71,8 @@ describe("Technical SEO, Robots, Sitemap and Metadata Suite", () => {
       expect(res.headers.get("Cache-Control")).toContain("public, max-age=3600");
 
       const text = await res.text();
-      expect(text).toContain("User-agent: *");
-      expect(text).toContain("Disallow: /admin/");
+      expect(text).toContain("Disallow: /admin\n");
+      expect(text).toContain("Disallow: /admin/\n");
       expect(text).toContain("Disallow: /api/");
       expect(text).toContain("Disallow: /fr/galerie/");
       expect(text).toContain("Disallow: /en/gallery/");

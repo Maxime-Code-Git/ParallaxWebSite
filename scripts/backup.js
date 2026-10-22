@@ -3,21 +3,95 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
+import { fileURLToPath } from "node:url";
 import { getMonorepoRoot, loadEnvLocal } from "./env-loader.js";
+import { validateSiteContentDocument, validatePortfolioContentDocument } from "@parallax/shared";
 
+/**
+ * Computes SHA-256 of a file using a bounded-memory buffer (64 KB).
+ * Never loads large video/media files entirely into memory.
+ */
 export function computeSha256(filePath) {
   const hash = crypto.createHash("sha256");
-  const buffer = fs.readFileSync(filePath);
-  hash.update(buffer);
+  const fd = fs.openSync(filePath, "r");
+  const buffer = Buffer.alloc(64 * 1024);
+  try {
+    let bytesRead = 0;
+    while ((bytesRead = fs.readSync(fd, buffer, 0, buffer.length, null)) > 0) {
+      hash.update(buffer.subarray(0, bytesRead));
+    }
+  } finally {
+    fs.closeSync(fd);
+  }
   return hash.digest("hex");
 }
 
+/**
+ * Checks if childPath is strictly a subpath of parentDir (preventing traversal).
+ */
+export function isSubPath(parentDir, childPath) {
+  const rel = path.relative(path.resolve(parentDir), path.resolve(childPath));
+  return Boolean(rel && !rel.startsWith("..") && !path.isAbsolute(rel));
+}
+
+/**
+ * Backups a SQLite database cleanly using VACUUM INTO.
+ * Guarantees connection closure in finally block and throws on failure (no raw fallback).
+ */
+export function backupSqliteDatabase(srcPath, destPath) {
+  if (!fs.existsSync(srcPath)) {
+    throw new Error(`Fichier SQLite source introuvable : ${srcPath}`);
+  }
+
+  const stat = fs.statSync(srcPath);
+  if (!stat.isFile()) {
+    throw new Error(`Le chemin SQLite source n'est pas un fichier : ${srcPath}`);
+  }
+
+  let db;
+  try {
+    db = new DatabaseSync(srcPath, { readOnly: true });
+    const check = db.prepare("PRAGMA integrity_check").get();
+    if (!check || check.integrity_check !== "ok") {
+      throw new Error(`La base SQLite ${srcPath} a échoué au PRAGMA integrity_check : ${JSON.stringify(check)}`);
+    }
+
+    const destDir = path.dirname(destPath);
+    fs.mkdirSync(destDir, { recursive: true, mode: 0o700 });
+
+    if (fs.existsSync(destPath)) {
+      fs.unlinkSync(destPath);
+    }
+
+    const escapedDest = destPath.replace(/'/g, "''");
+    db.exec(`VACUUM INTO '${escapedDest}'`);
+    fs.chmodSync(destPath, 0o600);
+    return true;
+  } finally {
+    if (db) {
+      try {
+        db.close();
+      } catch {
+        /* ignore close error */
+      }
+    }
+  }
+}
+
+/**
+ * Recursively copies a directory with restricted permissions (0700 dirs, 0600 files).
+ * Skips symlinks to prevent directory traversal.
+ */
 export function copyDirRecursive(srcDir, destDir, fileList = [], baseRel = "") {
   if (!fs.existsSync(srcDir)) return;
   fs.mkdirSync(destDir, { recursive: true, mode: 0o700 });
 
   const entries = fs.readdirSync(srcDir, { withFileTypes: true });
   for (const entry of entries) {
+    if (entry.isSymbolicLink()) {
+      // Reject/ignore symlinks to prevent escaping source boundaries
+      continue;
+    }
     const srcChild = path.join(srcDir, entry.name);
     const destChild = path.join(destDir, entry.name);
     const relChild = path.join(baseRel, entry.name);
@@ -37,36 +111,70 @@ export function copyDirRecursive(srcDir, destDir, fileList = [], baseRel = "") {
   }
 }
 
-export function backupSqliteDatabase(srcPath, destPath) {
-  if (!fs.existsSync(srcPath)) return false;
-
-  const destDir = path.dirname(destPath);
-  fs.mkdirSync(destDir, { recursive: true, mode: 0o700 });
-
-  // Use SQLite VACUUM INTO for clean, checkpointed snapshot
-  try {
-    const db = new DatabaseSync(srcPath, { readOnly: true });
-    // Single quotes are mandatory in SQL syntax for string literals
-    const escapedDest = destPath.replace(/'/g, "''");
-    db.exec(`VACUUM INTO '${escapedDest}'`);
-    db.close();
-    fs.chmodSync(destPath, 0o600);
-    return true;
-  } catch {
-    // If VACUUM INTO fails (e.g. empty uninitialized file), fallback to direct copy
-    fs.copyFileSync(srcPath, destPath);
-    fs.chmodSync(destPath, 0o600);
-    return true;
-  }
-}
-
+/**
+ * Executes a full site backup with pre-validation, SQLite VACUUM INTO, and atomic publication.
+ */
 export function performSiteBackup(options = {}) {
   const root = getMonorepoRoot();
-  const env = options.env || { ...process.env, ...loadEnvLocal(root) };
+
+  // Environment isolation: if options.env is provided (tests), use it exclusively
+  let env;
+  if (options.env) {
+    env = { ...options.env };
+  } else {
+    loadEnvLocal();
+    env = { ...process.env };
+  }
 
   const isDryRun = Boolean(options.dryRun);
   const includeImports = options.includeImports !== false;
-  const allowLive = Boolean(options.allowLive);
+  const serviceStopped = Boolean(options.serviceStopped);
+
+  // 1. Validate required core components and schemas before doing anything
+  if (!env.SITE_CONTENT_PATH) {
+    throw new Error("Composant indispensable manquant : SITE_CONTENT_PATH non configuré.");
+  }
+  const siteContentPath = path.resolve(env.SITE_CONTENT_PATH);
+  if (!fs.existsSync(siteContentPath) || !fs.statSync(siteContentPath).isFile()) {
+    throw new Error(`Fichier indispensable introuvable : SITE_CONTENT_PATH=${siteContentPath}`);
+  }
+
+  let siteContentJson;
+  try {
+    siteContentJson = JSON.parse(fs.readFileSync(siteContentPath, "utf-8"));
+  } catch (err) {
+    throw new Error(`Fichier indispensable SITE_CONTENT corrompu (JSON invalide) : ${err instanceof Error ? err.message : String(err)}`, { cause: err });
+  }
+  const siteContentValidation = validateSiteContentDocument(siteContentJson);
+  if (!siteContentValidation.success) {
+    throw new Error(`Composant indispensable SITE_CONTENT invalide selon le schéma : ${siteContentValidation.error}`);
+  }
+
+  if (!env.PORTFOLIO_CONTENT_PATH) {
+    throw new Error("Composant indispensable manquant : PORTFOLIO_CONTENT_PATH non configuré.");
+  }
+  const portfolioContentPath = path.resolve(env.PORTFOLIO_CONTENT_PATH);
+  if (!fs.existsSync(portfolioContentPath) || !fs.statSync(portfolioContentPath).isFile()) {
+    throw new Error(`Fichier indispensable introuvable : PORTFOLIO_CONTENT_PATH=${portfolioContentPath}`);
+  }
+
+  let portfolioContentJson;
+  try {
+    portfolioContentJson = JSON.parse(fs.readFileSync(portfolioContentPath, "utf-8"));
+  } catch (err) {
+    throw new Error(`Fichier indispensable PORTFOLIO_CONTENT corrompu (JSON invalide) : ${err instanceof Error ? err.message : String(err)}`, { cause: err });
+  }
+  const portfolioContentValidation = validatePortfolioContentDocument(portfolioContentJson);
+  if (!portfolioContentValidation.success) {
+    throw new Error(`Composant indispensable PORTFOLIO_CONTENT invalide selon le schéma : ${portfolioContentValidation.error}`);
+  }
+
+  // 2. Precondition: Operator confirmation that services and workers are stopped
+  if (!isDryRun && !serviceStopped) {
+    throw new Error(
+      "CRITICAL: La cohérence globale de la sauvegarde exige l'arrêt préalable du serveur et des workers Parallax. Confirmez cet arrêt avec l'option 'serviceStopped: true' (ou le drapeau CLI '--service-stopped')."
+    );
+  }
 
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
   const backupId = `parallax-backup-${timestamp}`;
@@ -74,12 +182,12 @@ export function performSiteBackup(options = {}) {
   const defaultBackupRoot = path.join(process.env.HOME || "/tmp", ".parallax-backups");
   const backupDir = options.outDir ? path.resolve(options.outDir) : path.join(defaultBackupRoot, backupId);
 
-  // Inventory required storage paths
+  // 3. Inventory components
   const inventory = [
     {
       component: "SITE_CONTENT",
       type: "file",
-      srcPath: env.SITE_CONTENT_PATH ? path.resolve(env.SITE_CONTENT_PATH) : null,
+      srcPath: siteContentPath,
       destRel: "content/site-content.json",
       required: true,
     },
@@ -93,7 +201,7 @@ export function performSiteBackup(options = {}) {
     {
       component: "PORTFOLIO_CONTENT",
       type: "file",
-      srcPath: env.PORTFOLIO_CONTENT_PATH ? path.resolve(env.PORTFOLIO_CONTENT_PATH) : null,
+      srcPath: portfolioContentPath,
       destRel: "content/portfolio-content.json",
       required: true,
     },
@@ -128,8 +236,9 @@ export function performSiteBackup(options = {}) {
   ];
 
   if (includeImports) {
-    const defaultImport = path.join(root, "gallery-import");
-    const importPath = env.GALLERY_IMPORT_PATH ? path.resolve(env.GALLERY_IMPORT_PATH) : defaultImport;
+    const importPath = env.GALLERY_IMPORT_PATH
+      ? path.resolve(env.GALLERY_IMPORT_PATH)
+      : path.join(root, "gallery-import");
     inventory.push({
       component: "GALLERY_IMPORT",
       type: "dir",
@@ -139,20 +248,55 @@ export function performSiteBackup(options = {}) {
     });
   }
 
-  // Private config (.env.local)
-  const envLocalPath = path.join(root, ".env.local");
-  if (fs.existsSync(envLocalPath)) {
-    inventory.push({
-      component: "ENV_CONFIG",
-      type: "file",
-      srcPath: envLocalPath,
-      destRel: "config/env.local",
-      required: false,
-      isSecret: true,
-    });
+  // Private config (.env.local or custom fixture)
+  if (options.configPath) {
+    const customConfig = path.resolve(options.configPath);
+    if (fs.existsSync(customConfig)) {
+      inventory.push({
+        component: "ENV_CONFIG",
+        type: "file",
+        srcPath: customConfig,
+        destRel: "config/env.local",
+        required: false,
+        isSecret: true,
+      });
+    }
+  } else if (!options.env) {
+    // Normal CLI run: backup monorepo root .env.local if present
+    const envLocalPath = path.join(root, ".env.local");
+    if (fs.existsSync(envLocalPath)) {
+      inventory.push({
+        component: "ENV_CONFIG",
+        type: "file",
+        srcPath: envLocalPath,
+        destRel: "config/env.local",
+        required: false,
+        isSecret: true,
+      });
+    }
   }
 
-  // Precondition and plan summary
+  // 4. Validate output path against sources and existing backups
+  if (fs.existsSync(backupDir)) {
+    throw new Error(`Le dossier de destination existe déjà : ${backupDir}. Spécifiez une destination neuve.`);
+  }
+
+  for (const item of inventory) {
+    if (item.srcPath && fs.existsSync(item.srcPath)) {
+      if (isSubPath(item.srcPath, backupDir) || item.srcPath === backupDir) {
+        throw new Error(
+          `Destination invalide : le dossier de sortie (${backupDir}) se trouve à l'intérieur d'une source (${item.component} -> ${item.srcPath}).`
+        );
+      }
+      if (isSubPath(backupDir, item.srcPath)) {
+        throw new Error(
+          `Destination invalide : le dossier de sortie (${backupDir}) recouvre une source (${item.component} -> ${item.srcPath}).`
+        );
+      }
+    }
+  }
+
+  // Inventory summary calculation
   const summary = [];
   let totalEstimatedBytes = 0;
 
@@ -171,18 +315,18 @@ export function performSiteBackup(options = {}) {
     const stat = fs.statSync(item.srcPath);
     let size = stat.size;
     if (stat.isDirectory()) {
-      // rough directory size
       const countDirSize = (d) => {
         let s = 0;
         try {
           const files = fs.readdirSync(d, { withFileTypes: true });
           for (const f of files) {
+            if (f.isSymbolicLink()) continue;
             const p = path.join(d, f.name);
             if (f.isDirectory()) s += countDirSize(p);
             else if (f.isFile()) s += fs.statSync(p).size;
           }
         } catch {
-          /* ignore */
+          /* ignore unreadable intermediate files */
         }
         return s;
       };
@@ -210,92 +354,111 @@ export function performSiteBackup(options = {}) {
     };
   }
 
-  // Execution: Create backup directory with private 0700 permissions
-  fs.mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+  // 5. Execution: Create private staging directory, then atomically publish
+  const stagingDir = `${backupDir}.staging-${crypto.randomUUID()}`;
+  fs.mkdirSync(stagingDir, { recursive: true, mode: 0o700 });
 
   const manifestFiles = [];
 
-  for (const item of inventory) {
-    if (!item.srcPath || !fs.existsSync(item.srcPath)) {
-      continue;
-    }
+  try {
+    for (const item of inventory) {
+      if (!item.srcPath || !fs.existsSync(item.srcPath)) {
+        continue;
+      }
 
-    const destPath = path.join(backupDir, item.destRel);
-    fs.mkdirSync(path.dirname(destPath), { recursive: true, mode: 0o700 });
+      const destPath = path.join(stagingDir, item.destRel);
+      fs.mkdirSync(path.dirname(destPath), { recursive: true, mode: 0o700 });
 
-    if (item.type === "file") {
-      fs.copyFileSync(item.srcPath, destPath);
-      fs.chmodSync(destPath, 0o600);
-      const stat = fs.statSync(destPath);
-      manifestFiles.push({
-        component: item.component,
-        type: "file",
-        originalPath: item.srcPath,
-        backupRelPath: item.destRel,
-        sizeBytes: stat.size,
-        sha256: computeSha256(destPath),
-        isSecret: Boolean(item.isSecret),
-      });
-    } else if (item.type === "sqlite") {
-      backupSqliteDatabase(item.srcPath, destPath);
-      if (fs.existsSync(destPath)) {
+      if (item.type === "file") {
+        fs.copyFileSync(item.srcPath, destPath);
+        fs.chmodSync(destPath, 0o600);
         const stat = fs.statSync(destPath);
         manifestFiles.push({
           component: item.component,
-          type: "sqlite",
+          type: "file",
           originalPath: item.srcPath,
           backupRelPath: item.destRel,
           sizeBytes: stat.size,
           sha256: computeSha256(destPath),
+          isSecret: Boolean(item.isSecret),
         });
-      }
-    } else if (item.type === "dir") {
-      const fileList = [];
-      copyDirRecursive(item.srcPath, destPath, fileList);
-      for (const f of fileList) {
-        manifestFiles.push({
-          component: item.component,
-          type: "dir_item",
-          originalPath: path.join(item.srcPath, f.relPath),
-          backupRelPath: path.join(item.destRel, f.relPath),
-          sizeBytes: f.sizeBytes,
-          sha256: f.sha256,
-        });
+      } else if (item.type === "sqlite") {
+        backupSqliteDatabase(item.srcPath, destPath);
+        if (fs.existsSync(destPath)) {
+          const stat = fs.statSync(destPath);
+          manifestFiles.push({
+            component: item.component,
+            type: "sqlite",
+            originalPath: item.srcPath,
+            backupRelPath: item.destRel,
+            sizeBytes: stat.size,
+            sha256: computeSha256(destPath),
+          });
+        }
+      } else if (item.type === "dir") {
+        const fileList = [];
+        copyDirRecursive(item.srcPath, destPath, fileList);
+        for (const f of fileList) {
+          manifestFiles.push({
+            component: item.component,
+            type: "dir_item",
+            originalPath: path.join(item.srcPath, f.relPath),
+            backupRelPath: path.join(item.destRel, f.relPath),
+            sizeBytes: f.sizeBytes,
+            sha256: f.sha256,
+          });
+        }
       }
     }
+
+    // Build and write manifest.json
+    const manifest = {
+      backupId,
+      createdAt: new Date().toISOString(),
+      nodeVersion: process.version,
+      serviceStopped: true,
+      includeImports,
+      totalFiles: manifestFiles.length,
+      totalBytes: manifestFiles.reduce((sum, f) => sum + f.sizeBytes, 0),
+      files: manifestFiles,
+    };
+
+    const manifestPath = path.join(stagingDir, "manifest.json");
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), { mode: 0o600 });
+
+    // Atomically rename staging directory to final backup destination
+    fs.renameSync(stagingDir, backupDir);
+
+    return {
+      success: true,
+      dryRun: false,
+      backupDir,
+      manifest,
+    };
+  } catch (err) {
+    // Clean up staging directory on failure to avoid leaving partial artifacts
+    if (fs.existsSync(stagingDir)) {
+      try {
+        fs.rmSync(stagingDir, { recursive: true, force: true });
+      } catch {
+        /* ignore */
+      }
+    }
+    throw err;
   }
-
-  // Create manifest.json
-  const manifest = {
-    backupId,
-    createdAt: new Date().toISOString(),
-    nodeVersion: process.version,
-    allowLive,
-    includeImports,
-    totalFiles: manifestFiles.length,
-    totalBytes: manifestFiles.reduce((sum, f) => sum + f.sizeBytes, 0),
-    files: manifestFiles,
-  };
-
-  const manifestPath = path.join(backupDir, "manifest.json");
-  fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), { mode: 0o600 });
-
-  return {
-    success: true,
-    dryRun: false,
-    backupDir,
-    manifest,
-  };
 }
 
-// CLI entrypoint
-if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(__filename)) {
+// ESM CLI entrypoint
+const isMain = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+if (isMain) {
   const args = process.argv.slice(2);
   const dryRun = args.includes("--dry-run");
-  const allowLive = args.includes("--allow-live");
+  const serviceStopped = args.includes("--service-stopped");
   const noImports = args.includes("--no-imports");
   const outDirIndex = args.indexOf("--out-dir");
   const outDir = outDirIndex !== -1 ? args[outDirIndex + 1] : undefined;
+  const configIndex = args.indexOf("--config-path");
+  const configPath = configIndex !== -1 ? args[configIndex + 1] : undefined;
 
   console.log(`[Parallax Backup] Démarrage de la sauvegarde complète...`);
   if (dryRun) console.log(`[Mode Simulation (--dry-run)] Aucun fichier ne sera écrit.`);
@@ -303,9 +466,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(__filename
   try {
     const res = performSiteBackup({
       dryRun,
-      allowLive,
+      serviceStopped,
       includeImports: !noImports,
       outDir,
+      configPath,
     });
 
     if (dryRun) {
@@ -325,7 +489,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(__filename
     }
     process.exit(0);
   } catch (err) {
-    console.error(`[ERREUR] Échec de la sauvegarde :`, err);
+    console.error(`[ERREUR] Échec de la sauvegarde :`, err.message || err);
     process.exit(1);
   }
 }

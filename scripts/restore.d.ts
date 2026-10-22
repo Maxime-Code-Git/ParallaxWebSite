@@ -4,6 +4,7 @@ export interface RestoreOptions {
   dryRun?: boolean;
   verifyOnly?: boolean;
   force?: boolean;
+  serviceStopped?: boolean;
 }
 
 export interface RestoreVerificationResult {
@@ -35,4 +36,5 @@ export interface RestoreResult {
 }
 
 export function computeSha256(filePath: string): string;
+export function isSubPath(parentDir: string, childPath: string): boolean;
 export function performSiteRestore(options: RestoreOptions): RestoreResult;

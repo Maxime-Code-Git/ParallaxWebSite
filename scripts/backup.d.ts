@@ -12,7 +12,7 @@ export interface BackupManifest {
   backupId: string;
   createdAt: string;
   nodeVersion: string;
-  allowLive: boolean;
+  serviceStopped: boolean;
   includeImports: boolean;
   totalFiles: number;
   totalBytes: number;
@@ -21,10 +21,11 @@ export interface BackupManifest {
 
 export interface BackupOptions {
   dryRun?: boolean;
-  allowLive?: boolean;
+  serviceStopped?: boolean;
   includeImports?: boolean;
   outDir?: string;
   env?: Record<string, string | undefined>;
+  configPath?: string;
 }
 
 export interface BackupDryRunResult {
@@ -52,6 +53,7 @@ export interface BackupSuccessResult {
 export type BackupResult = BackupDryRunResult | BackupSuccessResult;
 
 export function computeSha256(filePath: string): string;
+export function isSubPath(parentDir: string, childPath: string): boolean;
 export function copyDirRecursive(
   srcDir: string,
   destDir: string,

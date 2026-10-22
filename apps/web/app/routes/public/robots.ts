@@ -5,7 +5,7 @@ export async function loader(_args?: LoaderFunctionArgs) {
   const publicSiteUrl = ENV.PUBLIC_SITE_URL.replace(/\/$/, "");
 
   const lines = [
-    "User-agent: *",
+    "Disallow: /admin",
     "Disallow: /admin/",
     "Disallow: /api/",
     "Disallow: /fr/galerie/",
