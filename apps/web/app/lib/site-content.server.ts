@@ -211,7 +211,11 @@ export function validateCommonContent(val: unknown): CommonContent {
   };
 }
 
-export function validateHomeContent(val: unknown): HomeContent {
+export interface ValidateHomeOptions {
+  isLegacy?: boolean;
+}
+
+export function validateHomeContent(val: unknown, options?: ValidateHomeOptions): HomeContent {
   const obj = assertObject(val, "home");
   assertExactKeys(obj, ["seo", "hero", "showreel", "duo", "savoirFaire", "contact", "sempra"], "home");
 
@@ -266,11 +270,43 @@ export function validateHomeContent(val: unknown): HomeContent {
   if (typeof contact.email !== "string") {
     throw new ValidationError("home.contact.email doit être une chaîne.");
   }
+  const emailTrim = contact.email.trim();
+  if (options?.isLegacy) {
+    if (emailTrim && emailTrim !== "#" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailTrim)) {
+      throw new ValidationError("home.contact.email doit être une adresse e-mail valide ou un placeholder historique ('#').");
+    }
+  } else {
+    if (emailTrim && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailTrim)) {
+      throw new ValidationError("home.contact.email doit être une adresse e-mail valide.");
+    }
+  }
+
   if (typeof contact.instagramUrl !== "string") {
     throw new ValidationError("home.contact.instagramUrl doit être une chaîne.");
   }
+  const igTrim = contact.instagramUrl.trim();
+  if (options?.isLegacy) {
+    if (igTrim && igTrim !== "#" && !/^https?:\/\//i.test(igTrim)) {
+      throw new ValidationError("home.contact.instagramUrl doit être une URL HTTP(S) valide ou un placeholder historique ('#').");
+    }
+  } else {
+    if (igTrim && !/^https?:\/\//i.test(igTrim)) {
+      throw new ValidationError("home.contact.instagramUrl doit être une URL HTTP(S) valide.");
+    }
+  }
+
   if (typeof contact.youtubeUrl !== "string") {
     throw new ValidationError("home.contact.youtubeUrl doit être une chaîne.");
+  }
+  const ytTrim = contact.youtubeUrl.trim();
+  if (options?.isLegacy) {
+    if (ytTrim && ytTrim !== "#" && !/^https?:\/\//i.test(ytTrim)) {
+      throw new ValidationError("home.contact.youtubeUrl doit être une URL HTTP(S) valide ou un placeholder historique ('#').");
+    }
+  } else {
+    if (ytTrim && !/^https?:\/\//i.test(ytTrim)) {
+      throw new ValidationError("home.contact.youtubeUrl doit être une URL HTTP(S) valide.");
+    }
   }
 
   const sempra = assertObject(obj.sempra, "home.sempra");
@@ -414,7 +450,14 @@ export function validateProjectTypeOption(val: unknown, context: string): Projec
   };
 }
 
-export function validateContactPageContent(val: unknown): ContactPageContent {
+export interface ValidateContactPageOptions {
+  isLegacy?: boolean;
+}
+
+export function validateContactPageContent(
+  val: unknown,
+  options?: ValidateContactPageOptions
+): ContactPageContent {
   const obj = assertObject(val, "contactPage");
   assertExactKeys(obj, ["seo", "hero", "form", "card", "messages"], "contactPage");
 
@@ -478,6 +521,21 @@ export function validateContactPageContent(val: unknown): ContactPageContent {
   );
   if (typeof card.phone !== "string") {
     throw new ValidationError("contactPage.card.phone doit être une chaîne.");
+  }
+  const phoneTrim = card.phone.trim();
+  if (phoneTrim) {
+    if (options?.isLegacy) {
+      if (phoneTrim.length > 50 || !/^[+]?[\d\s()./-]{1,50}$/.test(phoneTrim)) {
+        throw new ValidationError(
+          "contactPage.card.phone doit être un numéro de téléphone ou une valeur historique reconnue."
+        );
+      }
+    } else {
+      const digits = phoneTrim.replace(/\D/g, "");
+      if (phoneTrim.length > 50 || !/^[+]?[\d\s()./-]{6,50}$/.test(phoneTrim) || digits.length < 6) {
+        throw new ValidationError("contactPage.card.phone doit être un numéro de téléphone valide.");
+      }
+    }
   }
 
   const messages = assertObject(obj.messages, "contactPage.messages");
@@ -886,21 +944,58 @@ export function migrateSiteContentV1ToV2(v1: SiteContentV1): SiteContentV2 {
 
 export function migrateSiteContentV2ToV3(v2: SiteContentV2): SiteContent {
   const company = structuredClone(DEFAULT_COMPANY_CONTENT);
-  company.email = v2.home?.contact?.email ?? "";
-  company.phone = v2.contactPage?.card?.phone ?? "";
-  company.instagramUrl = v2.home?.contact?.instagramUrl ?? "";
-  company.youtubeUrl = v2.home?.contact?.youtubeUrl ?? "";
+  const emailTrim = (v2.home?.contact?.email ?? "").trim();
+  company.email = emailTrim && emailTrim !== "#" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailTrim) ? emailTrim : "";
+
+  const phoneTrim = (v2.contactPage?.card?.phone ?? "").trim();
+  const digits = phoneTrim.replace(/\D/g, "");
+  company.phone =
+    phoneTrim && phoneTrim.length <= 50 && /^[+]?[\d\s()./-]{6,50}$/.test(phoneTrim) && digits.length >= 6
+      ? phoneTrim
+      : "";
+
+  const igTrim = (v2.home?.contact?.instagramUrl ?? "").trim();
+  company.instagramUrl = igTrim && igTrim !== "#" && /^https?:\/\//i.test(igTrim) ? igTrim : "";
+
+  const ytTrim = (v2.home?.contact?.youtubeUrl ?? "").trim();
+  company.youtubeUrl = ytTrim && ytTrim !== "#" && /^https?:\/\//i.test(ytTrim) ? ytTrim : "";
+
   company.tradeName = v2.common?.brandName || "Parallax";
   company.isPublished = false;
+
+  const migratedHome = structuredClone(v2.home);
+  if (migratedHome?.contact) {
+    const hEmail = (migratedHome.contact.email || "").trim();
+    if (hEmail === "#" || (hEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(hEmail))) {
+      migratedHome.contact.email = "";
+    }
+    const hIg = (migratedHome.contact.instagramUrl || "").trim();
+    if (hIg === "#" || (hIg && !/^https?:\/\//i.test(hIg))) {
+      migratedHome.contact.instagramUrl = "";
+    }
+    const hYt = (migratedHome.contact.youtubeUrl || "").trim();
+    if (hYt === "#" || (hYt && !/^https?:\/\//i.test(hYt))) {
+      migratedHome.contact.youtubeUrl = "";
+    }
+  }
+
+  const migratedContact = structuredClone(v2.contactPage);
+  if (migratedContact?.card) {
+    const cPhone = (migratedContact.card.phone || "").trim();
+    const cDigits = cPhone.replace(/\D/g, "");
+    if (cPhone && (cPhone.length > 50 || !/^[+]?[\d\s()./-]{6,50}$/.test(cPhone) || cDigits.length < 6)) {
+      migratedContact.card.phone = "";
+    }
+  }
 
   return {
     schemaVersion: 3,
     revision: v2.revision,
     updatedAt: v2.updatedAt,
     common: structuredClone(v2.common),
-    home: structuredClone(v2.home),
+    home: migratedHome,
     studio: structuredClone(v2.studio),
-    contactPage: structuredClone(v2.contactPage),
+    contactPage: migratedContact,
     company,
     legalPages: structuredClone(DEFAULT_LEGAL_PAGES_CONTENT),
     media: v2.media ? structuredClone(v2.media) : {},
@@ -941,12 +1036,13 @@ export function validateSiteContent(val: unknown): SiteContent {
       revision: obj.revision.toLowerCase(),
       updatedAt: obj.updatedAt,
       common: validateCommonContent(obj.common),
-      home: validateHomeContent(obj.home),
+      home: validateHomeContent(obj.home, { isLegacy: true }),
       studio: validateStudioContent(obj.studio),
       media,
     };
     const v2Content = migrateSiteContentV1ToV2(v1Content);
-    return migrateSiteContentV2ToV3(v2Content);
+    const v3Content = migrateSiteContentV2ToV3(v2Content);
+    return validateSiteContent(v3Content);
   }
 
   if (obj.schemaVersion === 2) {
@@ -960,12 +1056,13 @@ export function validateSiteContent(val: unknown): SiteContent {
       revision: obj.revision.toLowerCase(),
       updatedAt: obj.updatedAt,
       common: validateCommonContent(obj.common),
-      home: validateHomeContent(obj.home),
+      home: validateHomeContent(obj.home, { isLegacy: true }),
       studio: validateStudioContent(obj.studio),
-      contactPage: validateContactPageContent(obj.contactPage),
+      contactPage: validateContactPageContent(obj.contactPage, { isLegacy: true }),
       media,
     };
-    return migrateSiteContentV2ToV3(v2Content);
+    const v3Content = migrateSiteContentV2ToV3(v2Content);
+    return validateSiteContent(v3Content);
   }
 
   if (obj.schemaVersion === 3) {
@@ -1000,13 +1097,14 @@ export function ensureSiteContentFileInitialized(): string {
   return filePath;
 }
 
-export function getRawSiteContent(): { content: SiteContent; isCorrupted: boolean } {
+export function getRawSiteContent(): { content: SiteContent; isCorrupted: boolean; corruptionError?: string } {
   try {
     const filePath = ensureSiteContentFileInitialized();
     const content = fs.readFileSync(filePath, "utf-8");
     const parsed = JSON.parse(content);
+    const rawVersion = parsed.schemaVersion === undefined ? 1 : parsed.schemaVersion;
     const validated = validateSiteContent(parsed);
-    if (parsed.schemaVersion === 1 || parsed.schemaVersion === 2) {
+    if (rawVersion === 1 || rawVersion === 2) {
       try {
         atomicWriteJson(filePath, validated);
       } catch (writeErr) {
@@ -1019,7 +1117,8 @@ export function getRawSiteContent(): { content: SiteContent; isCorrupted: boolea
       throw err;
     }
     console.error("Erreur de validation ou de lecture du contenu éditorial :", err);
-    return { content: validateSiteContent(defaultContent), isCorrupted: true };
+    const sanitizedError = err instanceof Error ? err.message : "Erreur de format ou de validation";
+    return { content: validateSiteContent(defaultContent), isCorrupted: true, corruptionError: sanitizedError };
   }
 }
 
@@ -1128,8 +1227,9 @@ export function saveHomeContent(newHome: HomeContent, previousRevision: string):
     media: prunedMedia,
   };
 
+  const fullyValidated = validateSiteContent(nextContent);
   const filePath = getSiteContentFilePath();
-  atomicWriteJson(filePath, nextContent);
+  atomicWriteJson(filePath, fullyValidated);
   return nextRevision;
 }
 
@@ -1187,8 +1287,9 @@ export function saveStudioContent(newStudio: StudioContent, previousRevision: st
     media: prunedMedia,
   };
 
+  const fullyValidated = validateSiteContent(nextContent);
   const filePath = getSiteContentFilePath();
-  atomicWriteJson(filePath, nextContent);
+  atomicWriteJson(filePath, fullyValidated);
   return nextRevision;
 }
 
@@ -1254,9 +1355,10 @@ export function saveSiteMediaUpdate(
   }
   nextContent.media = prunedMedia;
 
+  const fullyValidated = validateSiteContent(nextContent);
   const filePath = getSiteContentFilePath();
-  atomicWriteJson(filePath, nextContent);
-  return { newRevision: nextRevision, content: nextContent };
+  atomicWriteJson(filePath, fullyValidated);
+  return { newRevision: nextRevision, content: fullyValidated };
 }
 
 export function saveSiteMediaRevert(
@@ -1321,9 +1423,10 @@ export function saveSiteMediaRevert(
   }
   nextContent.media = prunedMedia;
 
+  const fullyValidated = validateSiteContent(nextContent);
   const filePath = getSiteContentFilePath();
-  atomicWriteJson(filePath, nextContent);
-  return { newRevision: nextRevision, content: nextContent, defaultImageId };
+  atomicWriteJson(filePath, fullyValidated);
+  return { newRevision: nextRevision, content: fullyValidated, defaultImageId };
 }
 
 export interface SaveContactCoordinates {
@@ -1420,8 +1523,9 @@ export function saveContactPageContent(
     media: prunedMedia,
   };
 
+  const fullyValidated = validateSiteContent(nextContent);
   const filePath = getSiteContentFilePath();
-  atomicWriteJson(filePath, nextContent);
+  atomicWriteJson(filePath, fullyValidated);
   return nextRevision;
 }
 
@@ -1488,8 +1592,9 @@ export function saveCompanyContent(
     media: prunedMedia,
   };
 
+  const fullyValidated = validateSiteContent(nextContent);
   const filePath = getSiteContentFilePath();
-  atomicWriteJson(filePath, nextContent);
+  atomicWriteJson(filePath, fullyValidated);
   return nextRevision;
 }
 
@@ -1529,8 +1634,9 @@ export function saveLegalPageDraft(
     legalPages: updatedLegalPages,
   };
 
+  const fullyValidated = validateSiteContent(nextContent);
   const filePath = getSiteContentFilePath();
-  atomicWriteJson(filePath, nextContent);
+  atomicWriteJson(filePath, fullyValidated);
   return nextRevision;
 }
 
@@ -1862,8 +1968,9 @@ export function publishLegalPage(
     legalPages: updatedLegalPages,
   };
 
+  const fullyValidated = validateSiteContent(nextContent);
   const filePath = getSiteContentFilePath();
-  atomicWriteJson(filePath, nextContent);
+  atomicWriteJson(filePath, fullyValidated);
   return nextRevision;
 }
 
@@ -1907,8 +2014,9 @@ export function unpublishLegalPage(
     legalPages: updatedLegalPages,
   };
 
+  const fullyValidated = validateSiteContent(nextContent);
   const filePath = getSiteContentFilePath();
-  atomicWriteJson(filePath, nextContent);
+  atomicWriteJson(filePath, fullyValidated);
   return nextRevision;
 }
 

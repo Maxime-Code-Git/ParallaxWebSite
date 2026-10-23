@@ -6,6 +6,7 @@ interface ScrollToTopProps {
   targetRef?: React.RefObject<HTMLElement | null>;
   className?: string;
   ariaLabel?: string;
+  hidden?: boolean;
 }
 
 export function ScrollToTop({
@@ -13,6 +14,7 @@ export function ScrollToTop({
   targetRef,
   className = "",
   ariaLabel = "Remonter en haut de la page",
+  hidden = false,
 }: ScrollToTopProps) {
   const [scrolled, setScrolled] = useState(false);
   const [overSempra, setOverSempra] = useState(false);
@@ -33,7 +35,11 @@ export function ScrollToTop({
 
   useEffect(() => {
     const handleScroll = () => {
-      const scrollY = targetRef?.current ? targetRef.current.scrollTop : (typeof window !== "undefined" ? window.scrollY : 0);
+      const scrollY = targetRef?.current
+        ? targetRef.current.scrollTop
+        : typeof window !== "undefined"
+        ? window.scrollY
+        : 0;
       setScrolled(scrollY > 60);
 
       if (checkSempra && !targetRef?.current && typeof document !== "undefined") {
@@ -55,7 +61,7 @@ export function ScrollToTop({
       handleScroll();
       return () => window.removeEventListener("scroll", handleScroll);
     }
-  }, [checkSempra, targetRef]);
+  }, [checkSempra, targetRef, targetRef?.current]);
 
   const scrollToTop = () => {
     const behavior = reducedMotion ? "auto" : "smooth";
@@ -72,15 +78,16 @@ export function ScrollToTop({
     }
   };
 
+  const isVisible = scrolled && !hidden;
   const arrowColor = overSempra ? "#FBF6F0" : "#F5F6F7";
 
   return (
     <button
       type="button"
       onClick={scrollToTop}
-      tabIndex={scrolled ? 0 : -1}
-      aria-hidden={!scrolled}
-      className={`${styles.btn} ${scrolled ? styles.visible : styles.hidden} ${overSempra ? styles.btnSempra : ""} ${className}`}
+      tabIndex={isVisible ? 0 : -1}
+      aria-hidden={!isVisible}
+      className={`${styles.btn} ${isVisible ? styles.visible : styles.hidden} ${overSempra ? styles.btnSempra : ""} ${className}`}
       aria-label={ariaLabel}
     >
       <svg

@@ -49,7 +49,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     throw new Response("Not Found", { status: 404 });
   }
 
-  const { content, isCorrupted } = getRawSiteContent();
+  const { content, isCorrupted, corruptionError } = getRawSiteContent();
   const csrfToken = session.get("csrfToken") || "";
   const pageRecord = content.legalPages[pageKey];
 
@@ -60,6 +60,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       pageRecord,
       revision: content.revision,
       isCorrupted,
+      corruptionError: isCorrupted ? (corruptionError || "Erreur de format ou de validation") : undefined,
     },
     { headers: createAdminHeaders() }
   );
@@ -217,13 +218,14 @@ interface ActionResponseData {
 }
 
 export default function AdminLegalEditPage() {
-  const { csrfToken, pageKey, pageRecord: initialRecord, revision: initialRevision } =
+  const { csrfToken, pageKey, pageRecord: initialRecord, revision: initialRevision, isCorrupted, corruptionError } =
     useLoaderData<{
       csrfToken: string;
       pageKey: LegalPageKey;
       pageRecord: LegalPageRecord;
       revision: string;
       isCorrupted: boolean;
+      corruptionError?: string;
     }>();
 
   const fetcher = useFetcher<ActionResponseData>();
@@ -526,7 +528,9 @@ export default function AdminLegalEditPage() {
       <main className={formStyles.mainContent}>
         <div className={formStyles.topBar}>
           <div className={formStyles.topBarLeft}>
-            <span className={formStyles.revisionTag}>Révision : {currentRevision}</span>
+            <span className={`${formStyles.revisionTag} ${isCorrupted ? formStyles.revisionTagCorrupted : ""}`}>
+              {isCorrupted ? "Révision : Indisponible (fichier non valide)" : `Révision : ${currentRevision}`}
+            </span>
             <span
               className={
                 isPublished
@@ -562,6 +566,22 @@ export default function AdminLegalEditPage() {
             </button>
           </div>
         </div>
+
+        {isCorrupted && (
+          <div className={formStyles.alertError} role="alert">
+            <p>
+              <strong>Attention — Contenu de secours actif en mémoire :</strong> Le fichier de configuration présente une anomalie de validation et les modifications sont bloquées pour protéger vos données.
+            </p>
+            {corruptionError && (
+              <p className={formStyles.alertSubText}>
+                Détail de la validation : <code className={formStyles.alertCode}>{corruptionError}</code>
+              </p>
+            )}
+            <p className={formStyles.alertSubText}>
+              Aucune restauration automatique n&apos;a été effectuée sur le disque afin de préserver votre fichier existant.
+            </p>
+          </div>
+        )}
 
         {feedback && (
           <div
@@ -830,7 +850,7 @@ export default function AdminLegalEditPage() {
 
             <button
               type="button"
-              disabled={isSubmitting}
+              disabled={isCorrupted || isSubmitting}
               onClick={() => executeAction("publish")}
               className={formStyles.submitButton}
             >
