@@ -6,6 +6,7 @@ import {
   type CommonContent,
   type CompanyContent,
   type LegalDocument,
+  resolveLegalDocument,
 } from "../../lib/site-content.shared";
 import {
   getSiteContent,
@@ -61,6 +62,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const publishedDoc = getPublicLegalDocument(pageKey);
   const publicCompany = getPublicCompanyContent();
+  const resolvedDoc = publishedDoc ? resolveLegalDocument(publishedDoc, publicCompany, "public") : null;
 
   let initialPreferences = { youtube: false, vimeo: false };
   if (pageKey === "cookies") {
@@ -83,7 +85,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       siteUrl: ENV.PUBLIC_SITE_URL,
       common: content.common,
       company: publicCompany,
-      document: publishedDoc,
+      document: resolvedDoc,
       initialPreferences,
     },
     { headers }

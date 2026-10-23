@@ -114,6 +114,11 @@
   text-decoration: underline;
 }
 
+.metaSubtext {
+  color: var(--px-text-3);
+  font-size: 14px;
+}
+
 /* Cookie Inventory Table */
 .tableWrapper {
   width: 100%;

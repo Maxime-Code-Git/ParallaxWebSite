@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import path from "node:path";
 import crypto from "node:crypto";
 import defaultContent from "../content/default-site-content.json";
 import { atomicWriteJson } from "./atomic-fs.server";
@@ -35,6 +36,14 @@ import {
   type LegalPageRecord,
   type LegalPagesContent,
   DEFAULT_LEGAL_PAGES_CONTENT,
+  resolveLegalDocument,
+  findDocumentUnresolvedCompanyTokens,
+  isRpmApplicable,
+  getLegalPersonalityType,
+  getVatRegimeType,
+  type LegalPersonalityType,
+  type VatRegimeType,
+  COMPANY_TOKEN_DETAILS,
 } from "./site-content.shared";
 
 export class RevisionConflictError extends Error {
@@ -644,14 +653,27 @@ export function validateCompanyContent(val: unknown): CompanyContent {
       "tradeName",
       "legalName",
       "legalForm",
+      "legalPersonality",
       "address",
       "enterpriseNumber",
       "vatNumber",
       "vatRegime",
+      "vatRegimeType",
+      "rpmJurisdiction",
       "publicationDirector",
       "privacyContact",
+      "privacyEmail",
+      "dpoDesignated",
+      "dpoContact",
       "hostingProvider",
       "hostingAddress",
+      "hostingCountry",
+      "emailService",
+      "galleryStorageService",
+      "retentionContactRequests",
+      "retentionClientRecords",
+      "retentionMediaGalleries",
+      "clientTypes",
       "phone",
       "email",
       "instagramUrl",
@@ -684,8 +706,70 @@ export function validateCompanyContent(val: unknown): CompanyContent {
     }
   }
 
-  if (obj.vatRegime !== undefined && typeof obj.vatRegime !== "string") {
-    throw new ValidationError("company.vatRegime doit être une chaîne de caractères.");
+  // Optional string fields
+  const optionalStringFields = [
+    "vatRegime",
+    "rpmJurisdiction",
+    "privacyEmail",
+    "dpoContact",
+    "hostingCountry",
+    "emailService",
+    "galleryStorageService",
+    "retentionContactRequests",
+    "retentionClientRecords",
+    "retentionMediaGalleries",
+  ] as const;
+
+  for (const field of optionalStringFields) {
+    if (obj[field] !== undefined && typeof obj[field] !== "string") {
+      throw new ValidationError(`company.${field} doit être une chaîne de caractères.`);
+    }
+  }
+
+  let legalPersonality: LegalPersonalityType = "";
+  if (obj.legalPersonality !== undefined) {
+    if (typeof obj.legalPersonality !== "string") {
+      throw new ValidationError("company.legalPersonality doit être une chaîne de caractères.");
+    }
+    const rawLp = (obj.legalPersonality as string).trim();
+    const allowedLp: LegalPersonalityType[] = ["", "natural_person", "legal_entity", "unincorporated_association"];
+    if (!allowedLp.includes(rawLp as LegalPersonalityType)) {
+      throw new ValidationError(
+        "company.legalPersonality doit être 'natural_person', 'legal_entity', 'unincorporated_association' ou vide."
+      );
+    }
+    legalPersonality = rawLp as LegalPersonalityType;
+  }
+
+  let vatRegimeType: VatRegimeType = "";
+  if (obj.vatRegimeType !== undefined) {
+    if (typeof obj.vatRegimeType !== "string") {
+      throw new ValidationError("company.vatRegimeType doit être une chaîne de caractères.");
+    }
+    const rawVrt = (obj.vatRegimeType as string).trim();
+    const allowedVrt: VatRegimeType[] = ["", "standard", "small_business_exemption", "non_subject", "other"];
+    if (!allowedVrt.includes(rawVrt as VatRegimeType)) {
+      throw new ValidationError(
+        "company.vatRegimeType doit être 'standard', 'small_business_exemption', 'non_subject', 'other' ou vide."
+      );
+    }
+    vatRegimeType = rawVrt as VatRegimeType;
+  }
+
+  let clientTypes: "b2b" | "b2c" | "both" | "" = "";
+  if (obj.clientTypes !== undefined) {
+    if (typeof obj.clientTypes !== "string") {
+      throw new ValidationError("company.clientTypes doit être une chaîne de caractères.");
+    }
+    const rawCt = (obj.clientTypes as string).trim();
+    if (rawCt && rawCt !== "b2b" && rawCt !== "b2c" && rawCt !== "both") {
+      throw new ValidationError("company.clientTypes doit être 'b2b', 'b2c', 'both' ou vide.");
+    }
+    clientTypes = rawCt as "b2b" | "b2c" | "both" | "";
+  }
+
+  if (obj.dpoDesignated !== undefined && typeof obj.dpoDesignated !== "boolean") {
+    throw new ValidationError("company.dpoDesignated doit être un booléen.");
   }
 
   if (obj.isPublished !== undefined && typeof obj.isPublished !== "boolean") {
@@ -695,6 +779,11 @@ export function validateCompanyContent(val: unknown): CompanyContent {
   const emailTrim = (obj.email as string).trim();
   if (emailTrim && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailTrim)) {
     throw new ValidationError("company.email doit être une adresse e-mail valide.");
+  }
+
+  const privacyEmailTrim = obj.privacyEmail !== undefined ? (obj.privacyEmail as string).trim() : "";
+  if (privacyEmailTrim && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(privacyEmailTrim)) {
+    throw new ValidationError("company.privacyEmail doit être une adresse e-mail valide.");
   }
 
   const phoneTrim = (obj.phone as string).trim();
@@ -721,14 +810,27 @@ export function validateCompanyContent(val: unknown): CompanyContent {
     tradeName: (obj.tradeName as string).trim(),
     legalName: (obj.legalName as string).trim(),
     legalForm: (obj.legalForm as string).trim(),
+    legalPersonality,
     address: (obj.address as string).trim(),
     enterpriseNumber: (obj.enterpriseNumber as string).trim(),
     vatNumber: (obj.vatNumber as string).trim(),
     vatRegime: obj.vatRegime !== undefined ? (obj.vatRegime as string).trim() : "",
+    vatRegimeType,
+    rpmJurisdiction: obj.rpmJurisdiction !== undefined ? (obj.rpmJurisdiction as string).trim() : "",
     publicationDirector: (obj.publicationDirector as string).trim(),
     privacyContact: (obj.privacyContact as string).trim(),
+    privacyEmail: privacyEmailTrim,
+    dpoDesignated: Boolean(obj.dpoDesignated),
+    dpoContact: obj.dpoContact !== undefined ? (obj.dpoContact as string).trim() : "",
     hostingProvider: (obj.hostingProvider as string).trim(),
     hostingAddress: (obj.hostingAddress as string).trim(),
+    hostingCountry: obj.hostingCountry !== undefined ? (obj.hostingCountry as string).trim() : "Belgique",
+    emailService: obj.emailService !== undefined ? (obj.emailService as string).trim() : "",
+    galleryStorageService: obj.galleryStorageService !== undefined ? (obj.galleryStorageService as string).trim() : "",
+    retentionContactRequests: obj.retentionContactRequests !== undefined ? (obj.retentionContactRequests as string).trim() : "",
+    retentionClientRecords: obj.retentionClientRecords !== undefined ? (obj.retentionClientRecords as string).trim() : "",
+    retentionMediaGalleries: obj.retentionMediaGalleries !== undefined ? (obj.retentionMediaGalleries as string).trim() : "",
+    clientTypes,
     phone: phoneTrim,
     email: emailTrim,
     instagramUrl: igTrim,
@@ -754,7 +856,17 @@ export function validateCompanyContent(val: unknown): CompanyContent {
           `La confirmation d'identité d'entreprise requiert de renseigner '${key}'.`
         );
       }
-      if (typeof val === "string" && containsUnresolvedPlaceholders(val)) {
+    }
+
+    if (normalizedCompany.dpoDesignated && !normalizedCompany.dpoContact) {
+      throw new ValidationError(
+        "Si un DPO est désigné, ses coordonnées de contact (dpoContact) doivent être renseignées."
+      );
+    }
+
+    // Check that none of the filled company fields contain unresolved placeholders
+    for (const [key, val] of Object.entries(normalizedCompany)) {
+      if (typeof val === "string" && val && containsUnresolvedPlaceholders(val)) {
         throw new ValidationError(
           `Le champ company.${key} contient des mentions non complétées (placeholders).`
         );
@@ -1907,13 +2019,81 @@ export function publishLegalPage(
     }
   }
 
-  if (pageKey === "mentions") {
-    const comp = current.content.company;
-    if (!comp.isPublished) {
-      throw new ValidationError(
-        "Les paramètres d'entreprise doivent être confirmés et publiés avant de publier les mentions légales."
-      );
+  const comp = current.content.company;
+
+  // Validate that all company tokens used in the document can be resolved
+  const unresolvedTokens = findDocumentUnresolvedCompanyTokens(draft, comp);
+  if (unresolvedTokens.length > 0) {
+    const formattedList = unresolvedTokens
+      .map((tok) => {
+        const details = COMPANY_TOKEN_DETAILS[tok];
+        if (details) {
+          return `${details.labelFr} (dans '${details.sectionFr}', /admin/company)`;
+        }
+        return tok;
+      })
+      .join(", ");
+    throw new ValidationError(
+      `Le document fait référence à des informations d'entreprise non renseignées ou incomplètes : ${formattedList}. Veuillez compléter ces champs dans 'Paramètres de l'entreprise' (/admin/company) avant de publier.`
+    );
+  }
+
+  // Check if document references company tokens
+  const hasCompanyTokens = (text?: string) => Boolean(text && /\{\{company\./.test(text));
+  const docUsesCompanyTokens =
+    hasCompanyTokens(draft.seoTitle.fr) ||
+    hasCompanyTokens(draft.seoTitle.en) ||
+    hasCompanyTokens(draft.seoDescription.fr) ||
+    hasCompanyTokens(draft.seoDescription.en) ||
+    hasCompanyTokens(draft.publicTitle.fr) ||
+    hasCompanyTokens(draft.publicTitle.en) ||
+    hasCompanyTokens(draft.intro.fr) ||
+    hasCompanyTokens(draft.intro.en) ||
+    draft.sections.some(
+      (s) =>
+        hasCompanyTokens(s.title.fr) ||
+        hasCompanyTokens(s.title.en) ||
+        s.paragraphs.some((p) => hasCompanyTokens(p.fr) || hasCompanyTokens(p.en)) ||
+        (s.listItems || []).some((li) => hasCompanyTokens(li.fr) || hasCompanyTokens(li.en))
+    );
+
+  if ((docUsesCompanyTokens || pageKey === "mentions") && !comp.isPublished) {
+    throw new ValidationError(
+      "Les paramètres d'entreprise doivent être confirmés et publiés dans 'Paramètres de l'entreprise' avant de publier ce document légal."
+    );
+  }
+
+  // Validate resolved text for any placeholders
+  const resolved = resolveLegalDocument(draft, comp, "public");
+  if (containsUnresolvedPlaceholders(resolved.seoTitle.fr) || containsUnresolvedPlaceholders(resolved.seoTitle.en)) {
+    throw new ValidationError("Le titre SEO résolu contient des mentions non complétées (placeholders).");
+  }
+  if (containsUnresolvedPlaceholders(resolved.seoDescription.fr) || containsUnresolvedPlaceholders(resolved.seoDescription.en)) {
+    throw new ValidationError("La description SEO résolue contient des mentions non complétées (placeholders).");
+  }
+  if (containsUnresolvedPlaceholders(resolved.publicTitle.fr) || containsUnresolvedPlaceholders(resolved.publicTitle.en)) {
+    throw new ValidationError("Le titre public résolu contient des mentions non complétées (placeholders).");
+  }
+  if (containsUnresolvedPlaceholders(resolved.intro.fr) || containsUnresolvedPlaceholders(resolved.intro.en)) {
+    throw new ValidationError("L'introduction résolue contient des mentions non complétées (placeholders).");
+  }
+  for (const s of resolved.sections) {
+    if (containsUnresolvedPlaceholders(s.title.fr) || containsUnresolvedPlaceholders(s.title.en)) {
+      throw new ValidationError(`La section '${s.id}' résolue contient des mentions non complétées.`);
     }
+    for (const p of s.paragraphs) {
+      if (containsUnresolvedPlaceholders(p.fr) || containsUnresolvedPlaceholders(p.en)) {
+        throw new ValidationError(`Un paragraphe de la section '${s.id}' résolue contient des mentions non complétées.`);
+      }
+    }
+    for (const li of s.listItems || []) {
+      if (containsUnresolvedPlaceholders(li.fr) || containsUnresolvedPlaceholders(li.en)) {
+        throw new ValidationError(`Un élément de liste de la section '${s.id}' résolue contient des mentions non complétées.`);
+      }
+    }
+  }
+
+  if (pageKey === "mentions") {
     if (
       !comp.legalName ||
       !comp.legalForm ||
@@ -1927,6 +2107,16 @@ export function publishLegalPage(
         "Les mentions d'entreprise indispensables (dénomination légale, forme, siège social, BCE, directeur de publication, hébergeur) doivent être renseignées avant de publier les mentions légales."
       );
     }
+    if (isRpmApplicable(comp) === true && !comp.rpmJurisdiction?.trim()) {
+      throw new ValidationError(
+        "Pour une personne morale, l'indication du Registre des Personnes Morales (RPM) compétent est obligatoire (art. 2:20 CSA). Veuillez renseigner 'RPM / Tribunal de l'entreprise compétent' dans 'Paramètres de l'entreprise' (/admin/company) avant de publier."
+      );
+    }
+    if (isRpmApplicable(comp) === undefined) {
+      throw new ValidationError(
+        "La situation juridique de l'entreprise doit être confirmée dans 'Paramètres de l'entreprise' (/admin/company) afin de déterminer si le Registre des Personnes Morales (RPM) s'applique aux mentions légales."
+      );
+    }
     if (
       containsUnresolvedPlaceholders(comp.legalName) ||
       containsUnresolvedPlaceholders(comp.address) ||
@@ -1937,6 +2127,14 @@ export function publishLegalPage(
     ) {
       throw new ValidationError(
         "Les paramètres d'entreprise contiennent des mentions non complétées (placeholders)."
+      );
+    }
+  }
+
+  if (pageKey === "terms") {
+    if (!comp.vatRegime?.trim()) {
+      throw new ValidationError(
+        "Le document fait référence à des informations d'entreprise non renseignées ou incomplètes : Régime TVA (dans 'Identité & Statut juridique', /admin/company). Veuillez renseigner votre régime TVA dans 'Paramètres de l'entreprise' (/admin/company) avant de publier les CGV."
       );
     }
   }
@@ -2032,7 +2230,37 @@ export function getPublicCompanyContent(): Partial<CompanyContent> {
   if (!c) return {};
 
   if (c.isPublished) {
-    return structuredClone(c);
+    // Explicit public projection allowlist: only expose public-facing and confirmed legal fields,
+    // never internal tokens, secrets or server-level fields.
+    return {
+      tradeName: c.tradeName || content.common?.brandName || "Parallax",
+      legalName: c.legalName,
+      legalForm: c.legalForm,
+      address: c.address,
+      enterpriseNumber: c.enterpriseNumber,
+      vatNumber: c.vatNumber,
+      vatRegime: c.vatRegime || "",
+      rpmJurisdiction: c.rpmJurisdiction || "",
+      publicationDirector: c.publicationDirector,
+      privacyContact: c.privacyContact || "",
+      privacyEmail: c.privacyEmail || "",
+      dpoDesignated: Boolean(c.dpoDesignated),
+      dpoContact: c.dpoContact || "",
+      hostingProvider: c.hostingProvider,
+      hostingAddress: c.hostingAddress,
+      hostingCountry: c.hostingCountry || "",
+      emailService: c.emailService || "",
+      galleryStorageService: c.galleryStorageService || "",
+      retentionContactRequests: c.retentionContactRequests || "",
+      retentionClientRecords: c.retentionClientRecords || "",
+      retentionMediaGalleries: c.retentionMediaGalleries || "",
+      clientTypes: c.clientTypes || "",
+      phone: c.phone || content.contactPage?.card?.phone || "",
+      email: c.email || content.home?.contact?.email || "",
+      instagramUrl: c.instagramUrl || content.home?.contact?.instagramUrl || "",
+      youtubeUrl: c.youtubeUrl || content.home?.contact?.youtubeUrl || "",
+      isPublished: true,
+    };
   }
 
   // If not confirmed for public publication, only return public-facing vitrine coordinates
@@ -2043,5 +2271,287 @@ export function getPublicCompanyContent(): Partial<CompanyContent> {
     instagramUrl: c.instagramUrl || content.home?.contact?.instagramUrl || "",
     youtubeUrl: c.youtubeUrl || content.home?.contact?.youtubeUrl || "",
     isPublished: false,
+  };
+}
+
+export interface ApplyDraftsResult {
+  changed: boolean;
+  message: string;
+  appliedKeys: LegalPageKey[];
+  backupPath: string | null;
+  newRevision: string | null;
+}
+
+/**
+ * Idempotently applies reference legal drafts to the installation's drafts on disk.
+ * Creates an out-of-rotation safety backup (.safety.bak) prior to writing.
+ * Preserves published documents, other sections, media, and draft versions.
+ */
+export function applyDefaultLegalDrafts(customFilePath?: string): ApplyDraftsResult {
+  const filePath = customFilePath || getSiteContentFilePath();
+  if (!fs.existsSync(filePath)) {
+    return {
+      changed: false,
+      message: "Fichier de configuration inexistant.",
+      appliedKeys: [],
+      backupPath: null,
+      newRevision: null,
+    };
+  }
+
+  const rawJson = fs.readFileSync(filePath, "utf-8");
+  let content: SiteContent;
+  try {
+    content = JSON.parse(rawJson);
+  } catch {
+    throw new CorruptedContentError();
+  }
+
+  if (!content.legalPages) {
+    throw new ValidationError("Le contenu ne contient pas de section legalPages.");
+  }
+
+  // Idempotency check: compare existing drafts against default reference drafts
+  let needsUpdate = false;
+  const targetKeys: LegalPageKey[] = ["mentions", "privacy", "terms", "cookies"];
+  for (const key of targetKeys) {
+    const existingDraft = content.legalPages[key]?.draft;
+    const refDraft = DEFAULT_LEGAL_PAGES_CONTENT[key].draft;
+    if (!existingDraft) {
+      needsUpdate = true;
+      break;
+    }
+    if (existingDraft.sections.length !== refDraft.sections.length) {
+      needsUpdate = true;
+      break;
+    }
+    if (existingDraft.intro.fr !== refDraft.intro.fr) {
+      needsUpdate = true;
+      break;
+    }
+    if (key === "cookies") {
+      if ((existingDraft.inventory?.length ?? 0) !== (refDraft.inventory?.length ?? 0)) {
+        needsUpdate = true;
+        break;
+      }
+    }
+    if (key === "terms") {
+      const disputesSec = existingDraft.sections.find((s) => s.id === "disputes_law");
+      const hasOutdatedDispute = disputesSec?.paragraphs.some(
+        (p) => p.fr.includes("{{company.rpmJurisdiction}}") || p.fr.includes("ou Bruxelles")
+      );
+      if (hasOutdatedDispute) {
+        needsUpdate = true;
+        break;
+      }
+    }
+  }
+
+  if (!needsUpdate) {
+    return {
+      changed: false,
+      message: "Les 4 brouillons légaux sont déjà à jour avec la rédaction de référence.",
+      appliedKeys: [],
+      backupPath: null,
+      newRevision: content.revision,
+    };
+  }
+
+  // Create an explicit private safety backup out of rotation (0o600 permissions)
+  const dir = path.dirname(filePath);
+  const baseName = path.basename(filePath, ".json");
+  const timestamp = Date.now();
+  const randomSuffix = crypto.randomBytes(4).toString("hex");
+  const safetyBackupPath = path.join(dir, `${baseName}.pre-legal-drafts-${timestamp}-${randomSuffix}.safety.bak`);
+  fs.copyFileSync(filePath, safetyBackupPath, fs.constants.COPYFILE_EXCL);
+  fs.chmodSync(safetyBackupPath, 0o600);
+
+  // Apply reference drafts, preserving existing published versions and any draft version counters
+  const updatedLegalPages = structuredClone(content.legalPages);
+  const now = new Date().toISOString();
+  const appliedKeys: LegalPageKey[] = [];
+
+  for (const key of targetKeys) {
+    const existingRecord = updatedLegalPages[key];
+    const refDraft = structuredClone(DEFAULT_LEGAL_PAGES_CONTENT[key].draft);
+    const existingVersion = existingRecord?.draft?.version ?? 0;
+    const existingEffective = existingRecord?.draft?.effectiveDate || "";
+
+    updatedLegalPages[key] = {
+      draft: {
+        ...refDraft,
+        version: existingVersion,
+        effectiveDate: existingEffective,
+      },
+      published: existingRecord?.published ?? null,
+      lastUpdated: now,
+    };
+    appliedKeys.push(key);
+  }
+
+  const nextRevision = crypto.randomBytes(16).toString("hex");
+  const nextContent: SiteContent = {
+    ...content,
+    schemaVersion: 3,
+    revision: nextRevision,
+    updatedAt: now,
+    legalPages: updatedLegalPages,
+  };
+
+  const fullyValidated = validateSiteContent(nextContent);
+  atomicWriteJson(filePath, fullyValidated);
+
+  return {
+    changed: true,
+    message: "Les 4 brouillons légaux ont été mis à jour avec succès.",
+    appliedKeys,
+    backupPath: safetyBackupPath,
+    newRevision: nextRevision,
+  };
+}
+
+export interface AdaptDraftsResult {
+  changed: boolean;
+  message: string;
+  adaptedKeys: LegalPageKey[];
+  backupPath: string | null;
+  newRevision: string | null;
+}
+
+/**
+ * Targeted and idempotent adaptation of existing legal drafts and company status.
+ * Replaces the outdated dispute clause in terms.draft with the neutral Belgian jurisdiction clause.
+ * Preserves all published pages, coordinates, custom sections, and draft versions.
+ * Normalizes legalPersonality and vatRegimeType if detectable and empty.
+ * Creates an out-of-rotation safety backup (.safety.bak) prior to writing if changes are needed.
+ */
+export function adaptExistingLegalDrafts(customFilePath?: string): AdaptDraftsResult {
+  const filePath = customFilePath || getSiteContentFilePath();
+  if (!fs.existsSync(filePath)) {
+    return {
+      changed: false,
+      message: "Fichier de configuration inexistant.",
+      adaptedKeys: [],
+      backupPath: null,
+      newRevision: null,
+    };
+  }
+
+  const rawJson = fs.readFileSync(filePath, "utf-8");
+  let content: SiteContent;
+  try {
+    content = JSON.parse(rawJson);
+  } catch {
+    throw new CorruptedContentError();
+  }
+
+  if (!content.legalPages) {
+    throw new ValidationError("Le contenu ne contient pas de section legalPages.");
+  }
+
+  let needsUpdate = false;
+  const updatedLegalPages = structuredClone(content.legalPages);
+  const adaptedKeys: LegalPageKey[] = [];
+
+  // Check and adapt terms draft dispute clause
+  const termsRecord = updatedLegalPages.terms;
+  if (termsRecord?.draft?.sections) {
+    const disputesSec = termsRecord.draft.sections.find((s) => s.id === "disputes_law");
+    if (disputesSec) {
+      let sectionUpdated = false;
+      const neutralDisputeFr =
+        DEFAULT_LEGAL_PAGES_CONTENT.terms.draft.sections.find((s) => s.id === "disputes_law")?.paragraphs[3]?.fr ||
+        DEFAULT_LEGAL_PAGES_CONTENT.terms.draft.sections.find((s) => s.id === "disputes_law")?.paragraphs[2]?.fr ||
+        "Compétence juridictionnelle : À défaut de résolution amiable, tout litige relatif à la formation, l'exécution ou l'interprétation des présentes conditions générales sera soumis aux juridictions compétentes selon les règles du droit commun belge, sous réserve des dispositions légales impératives protectrices des consommateurs.";
+      const neutralDisputeEn =
+        DEFAULT_LEGAL_PAGES_CONTENT.terms.draft.sections.find((s) => s.id === "disputes_law")?.paragraphs[3]?.en ||
+        DEFAULT_LEGAL_PAGES_CONTENT.terms.draft.sections.find((s) => s.id === "disputes_law")?.paragraphs[2]?.en ||
+        "Jurisdiction: Failing amicable settlement, any dispute concerning the formation, performance, or interpretation of these terms and conditions shall be brought before the competent courts in accordance with the ordinary rules of Belgian law, subject to mandatory statutory consumer protection provisions.";
+
+      const updatedParagraphs = disputesSec.paragraphs.map((p) => {
+        if (
+          p.fr.includes("{{company.rpmJurisdiction}}") ||
+          p.fr.includes("ou Bruxelles") ||
+          p.fr.includes("compétence exclusive est attribuée aux tribunaux")
+        ) {
+          sectionUpdated = true;
+          return {
+            fr: neutralDisputeFr,
+            en: neutralDisputeEn,
+          };
+        }
+        return p;
+      });
+
+      if (sectionUpdated) {
+        disputesSec.paragraphs = updatedParagraphs;
+        needsUpdate = true;
+        adaptedKeys.push("terms");
+      }
+    }
+  }
+
+  // Check company legalPersonality and vatRegimeType normalization
+  let companyUpdated = false;
+  const updatedCompany = structuredClone(content.company);
+  if (!updatedCompany.legalPersonality) {
+    const inferred = getLegalPersonalityType(updatedCompany);
+    if (inferred) {
+      updatedCompany.legalPersonality = inferred;
+      companyUpdated = true;
+      needsUpdate = true;
+    }
+  }
+  if (!updatedCompany.vatRegimeType) {
+    const inferredVat = getVatRegimeType(updatedCompany);
+    if (inferredVat) {
+      updatedCompany.vatRegimeType = inferredVat;
+      companyUpdated = true;
+      needsUpdate = true;
+    }
+  }
+
+  if (!needsUpdate) {
+    return {
+      changed: false,
+      message: "Aucune adaptation requise, les brouillons et paramètres sont déjà conformes.",
+      adaptedKeys: [],
+      backupPath: null,
+      newRevision: content.revision,
+    };
+  }
+
+  // Create an explicit private safety backup out of rotation (0o600 permissions)
+  const dir = path.dirname(filePath);
+  const baseName = path.basename(filePath, ".json");
+  const timestamp = Date.now();
+  const randomSuffix = crypto.randomBytes(4).toString("hex");
+  const safetyBackupPath = path.join(
+    dir,
+    `${baseName}.pre-legal-adaptation-${timestamp}-${randomSuffix}.safety.bak`
+  );
+  fs.copyFileSync(filePath, safetyBackupPath, fs.constants.COPYFILE_EXCL);
+  fs.chmodSync(safetyBackupPath, 0o600);
+
+  const nextRevision = crypto.randomBytes(16).toString("hex");
+  const now = new Date().toISOString();
+
+  const nextContent: SiteContent = {
+    ...content,
+    revision: nextRevision,
+    updatedAt: now,
+    company: companyUpdated ? updatedCompany : content.company,
+    legalPages: updatedLegalPages,
+  };
+
+  const fullyValidated = validateSiteContent(nextContent);
+  atomicWriteJson(filePath, fullyValidated);
+
+  return {
+    changed: true,
+    message: "Adaptation ciblée des brouillons et paramètres effectuée avec succès.",
+    adaptedKeys,
+    backupPath: safetyBackupPath,
+    newRevision: nextRevision,
   };
 }

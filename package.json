@@ -25,7 +25,9 @@
     "preview:local": "npm run preview:local --workspace=apps/web",
     "admin:hash": "npm run admin:hash --workspace=apps/web",
     "gallery:setup": "node scripts/gallery-setup.js",
-    "smtp:verify": "npm run smtp:verify --workspace=apps/web"
+    "smtp:verify": "npm run smtp:verify --workspace=apps/web",
+    "legal:apply-drafts": "node scripts/apply-legal-drafts.js",
+    "legal:adapt-drafts": "node scripts/adapt-legal-drafts.js"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

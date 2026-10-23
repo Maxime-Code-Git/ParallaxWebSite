@@ -3,11 +3,13 @@ import type { FormEvent } from "react";
 import { Header } from "./Header";
 import { Footer } from "./Footer";
 import { ScrollToTop } from "./ScrollToTop";
-import type {
-  CommonContent,
-  CompanyContent,
-  LegalDocument,
-  LegalPageKey,
+import {
+  type CommonContent,
+  type CompanyContent,
+  type LegalDocument,
+  type LegalPageKey,
+  resolveCompanyTokens,
+  isRpmApplicable,
 } from "../../lib/site-content.shared";
 import {
   setClientValidatedPreferences,
@@ -256,7 +258,9 @@ export function LegalPageView({
         ) : (
           <>
             <section className={styles.titleSection}>
-              <h1 className={styles.pageTitle}>{document.publicTitle[lang]}</h1>
+              <h1 className={styles.pageTitle}>
+                {resolveCompanyTokens(document.publicTitle[lang], company, mode, lang)}
+              </h1>
               {document.effectiveDate ? (
                 <p className={styles.metaNotice}>
                   {lang === "fr"
@@ -273,19 +277,41 @@ export function LegalPageView({
             <section className={styles.contentSection}>
               <div className={styles.contentWrapper}>
                 {document.intro[lang] && (
-                  <p className={styles.introText}>{document.intro[lang]}</p>
+                  <p className={styles.introText}>
+                    {resolveCompanyTokens(document.intro[lang], company, mode, lang)}
+                  </p>
                 )}
 
                 {/* Mentions légales: Identity Grid */}
                 {pageKey === "mentions" && company && (
                   <div className={styles.identityGrid}>
-                    <div className={styles.identityLabel}>
-                      {lang === "fr" ? "Éditeur du site" : "Site publisher"}
-                    </div>
-                    <div className={styles.identityValue}>
-                      {company.tradeName || company.legalName || common.brandName}
-                      {company.legalForm && ` (${company.legalForm})`}
-                    </div>
+                    {/* Distinct Trade Name vs Legal Operator Name */}
+                    {company.legalName && company.tradeName && company.legalName.trim() !== company.tradeName.trim() ? (
+                      <>
+                        <div className={styles.identityLabel}>
+                          {lang === "fr" ? "Nom commercial" : "Commercial brand"}
+                        </div>
+                        <div className={styles.identityValue}>{company.tradeName.trim()}</div>
+
+                        <div className={styles.identityLabel}>
+                          {lang === "fr" ? "Exploitant / Raison sociale" : "Legal entity / Operator"}
+                        </div>
+                        <div className={styles.identityValue}>
+                          {company.legalName.trim()}
+                          {company.legalForm && ` (${company.legalForm.trim()})`}
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className={styles.identityLabel}>
+                          {lang === "fr" ? "Éditeur du site" : "Site publisher"}
+                        </div>
+                        <div className={styles.identityValue}>
+                          {company.legalName || company.tradeName || common.brandName}
+                          {company.legalForm && ` (${company.legalForm.trim()})`}
+                        </div>
+                      </>
+                    )}
 
                     {company.address && (
                       <>
@@ -301,18 +327,42 @@ export function LegalPageView({
                         <div className={styles.identityLabel}>
                           {lang === "fr" ? "N° d'entreprise (BCE)" : "Company number (BCE)"}
                         </div>
-                        <div className={styles.identityValue}>{company.enterpriseNumber}</div>
+                        <div className={styles.identityValue}>
+                          {company.enterpriseNumber}
+                          {isRpmApplicable(company) !== false && company.rpmJurisdiction && (
+                            <span className={styles.metaSubtext}>
+                              {" — "}
+                              {lang === "fr"
+                                ? `RPM : ${company.rpmJurisdiction}`
+                                : `RPR: ${company.rpmJurisdiction}`}
+                            </span>
+                          )}
+                        </div>
                       </>
                     )}
 
-                    {company.vatNumber && (
+                    {company.vatNumber ? (
                       <>
                         <div className={styles.identityLabel}>
                           {lang === "fr" ? "N° de TVA" : "VAT number"}
                         </div>
-                        <div className={styles.identityValue}>{company.vatNumber}</div>
+                        <div className={styles.identityValue}>
+                          {company.vatNumber}
+                          {company.vatRegime && (
+                            <span className={styles.metaSubtext}> ({company.vatRegime})</span>
+                          )}
+                        </div>
                       </>
-                    )}
+                    ) : company.vatRegime ? (
+                      <>
+                        <div className={styles.identityLabel}>
+                          {lang === "fr" ? "Régime TVA" : "VAT regime"}
+                        </div>
+                        <div className={styles.identityValue}>
+                          {company.vatRegime}
+                        </div>
+                      </>
+                    ) : null}
 
                     {company.publicationDirector && (
                       <>
@@ -337,6 +387,27 @@ export function LegalPageView({
                       )}
                     </div>
 
+                    {(company.privacyContact || company.privacyEmail || company.dpoContact) && (
+                      <>
+                        <div className={styles.identityLabel}>
+                          {lang === "fr" ? "Contact vie privée / RGPD" : "Privacy / GDPR contact"}
+                        </div>
+                        <div className={styles.identityValue}>
+                          {company.privacyContact && <div>{company.privacyContact}</div>}
+                          {company.privacyEmail && (
+                            <div>
+                              <a href={`mailto:${company.privacyEmail}`}>{company.privacyEmail}</a>
+                            </div>
+                          )}
+                          {company.dpoDesignated && company.dpoContact && (
+                            <div className={styles.metaSubtext}>
+                              {lang === "fr" ? `DPO : ${company.dpoContact}` : `DPO: ${company.dpoContact}`}
+                            </div>
+                          )}
+                        </div>
+                      </>
+                    )}
+
                     {company.hostingProvider && (
                       <>
                         <div className={styles.identityLabel}>
@@ -345,6 +416,7 @@ export function LegalPageView({
                         <div className={styles.identityValue}>
                           {company.hostingProvider}
                           {company.hostingAddress && ` — ${company.hostingAddress}`}
+                          {company.hostingCountry && ` (${company.hostingCountry})`}
                         </div>
                       </>
                     )}
@@ -354,19 +426,29 @@ export function LegalPageView({
                 {/* Sections */}
                 {document.sections.map((section) => (
                   <article key={section.id} className={styles.sectionBlock}>
-                    <h2 className={styles.sectionTitle}>{section.title[lang]}</h2>
-                    {section.paragraphs.map((p, pIdx) => (
-                      <p key={pIdx} className={styles.paragraph}>
-                        {p[lang]}
-                      </p>
-                    ))}
+                    <h2 className={styles.sectionTitle}>
+                      {resolveCompanyTokens(section.title[lang], company, mode, lang)}
+                    </h2>
+                    {section.paragraphs.map((p, pIdx) => {
+                      const text = resolveCompanyTokens(p[lang], company, mode, lang);
+                      if (!text.trim()) return null;
+                      return (
+                        <p key={pIdx} className={styles.paragraph}>
+                          {text}
+                        </p>
+                      );
+                    })}
                     {section.listItems && section.listItems.length > 0 && (
                       <ul className={styles.list}>
-                        {section.listItems.map((li, lIdx) => (
-                          <li key={lIdx} className={styles.listItem}>
-                            {li[lang]}
-                          </li>
-                        ))}
+                        {section.listItems.map((li, lIdx) => {
+                          const text = resolveCompanyTokens(li[lang], company, mode, lang);
+                          if (!text.trim()) return null;
+                          return (
+                            <li key={lIdx} className={styles.listItem}>
+                              {text}
+                            </li>
+                          );
+                        })}
                       </ul>
                     )}
                   </article>
@@ -394,13 +476,15 @@ export function LegalPageView({
                             <tbody>
                               {document.inventory.map((item) => (
                                 <tr key={item.id}>
-                                  <td className={styles.cookieName}>{item.name[lang]}</td>
-                                  <td>{item.provider[lang]}</td>
+                                  <td className={styles.cookieName}>
+                                    {resolveCompanyTokens(item.name[lang], company, mode, lang)}
+                                  </td>
+                                  <td>{resolveCompanyTokens(item.provider[lang], company, mode, lang)}</td>
                                   <td>
                                     <span className={styles.categoryBadge}>{item.category}</span>
                                   </td>
-                                  <td>{item.purpose[lang]}</td>
-                                  <td>{item.duration[lang]}</td>
+                                  <td>{resolveCompanyTokens(item.purpose[lang], company, mode, lang)}</td>
+                                  <td>{resolveCompanyTokens(item.duration[lang], company, mode, lang)}</td>
                                 </tr>
                               ))}
                             </tbody>

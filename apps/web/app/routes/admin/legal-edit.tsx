@@ -27,6 +27,11 @@ import {
   type LegalPageRecord,
   type LegalSection,
   type LocalizedString,
+  type CompanyContent,
+  DEFAULT_COMPANY_CONTENT,
+  resolveCompanyTokens,
+  isRpmApplicable,
+  isRpmOnlyParagraph,
 } from "../../lib/site-content.shared";
 import formStyles from "./adminForms.module.css";
 
@@ -58,6 +63,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       csrfToken,
       pageKey,
       pageRecord,
+      company: content.company,
       revision: content.revision,
       isCorrupted,
       corruptionError: isCorrupted ? (corruptionError || "Erreur de format ou de validation") : undefined,
@@ -218,20 +224,23 @@ interface ActionResponseData {
 }
 
 export default function AdminLegalEditPage() {
-  const { csrfToken, pageKey, pageRecord: initialRecord, revision: initialRevision, isCorrupted, corruptionError } =
-    useLoaderData<{
-      csrfToken: string;
-      pageKey: LegalPageKey;
-      pageRecord: LegalPageRecord;
-      revision: string;
-      isCorrupted: boolean;
-      corruptionError?: string;
-    }>();
+  const loaderData = useLoaderData<{
+    csrfToken: string;
+    pageKey: LegalPageKey;
+    pageRecord: LegalPageRecord;
+    company?: CompanyContent;
+    revision: string;
+    isCorrupted: boolean;
+    corruptionError?: string;
+  }>();
+  const { csrfToken, pageKey, pageRecord: initialRecord, revision: initialRevision, isCorrupted, corruptionError } = loaderData;
+  const company = loaderData.company || DEFAULT_COMPANY_CONTENT;
 
   const fetcher = useFetcher<ActionResponseData>();
   const isSubmitting = fetcher.state === "submitting" || fetcher.state === "loading";
 
   const [activeLang, setActiveLang] = useState<"fr" | "en">("fr");
+  const [showResolvedPreview, setShowResolvedPreview] = useState(false);
   const [pageRecord, setPageRecord] = useState<LegalPageRecord>(initialRecord);
   const [draft, setDraft] = useState<LegalDocument>(initialRecord.draft);
   const [currentRevision, setCurrentRevision] = useState<string>(initialRevision);
@@ -516,11 +525,18 @@ export default function AdminLegalEditPage() {
         </div>
         <div className={formStyles.headerActions}>
           <Link
-            to={`/admin/legal/${pageKey}/preview`}
+            to={`/admin/legal/${pageKey}/preview?lang=fr`}
             target="_blank"
             className={formStyles.previewButton}
           >
-            Aperçu privé ↗
+            Aperçu FR ↗
+          </Link>
+          <Link
+            to={`/admin/legal/${pageKey}/preview?lang=en`}
+            target="_blank"
+            className={formStyles.previewButton}
+          >
+            Aperçu EN ↗
           </Link>
         </div>
       </header>
@@ -612,6 +628,90 @@ export default function AdminLegalEditPage() {
           </div>
         )}
 
+        {/* Connected Company Facts Info Box */}
+        <div className={formStyles.companyTokensBox}>
+          <div className={formStyles.cardTitleRow}>
+            <h2 className={formStyles.cardTitleHeading}>
+              Champs d'entreprise reliés (Paramètres de l'entreprise)
+            </h2>
+            <Link to="/admin/company" className={formStyles.readinessLink}>
+              Modifier dans Paramètres de l'entreprise →
+            </Link>
+          </div>
+          <p className={formStyles.helper}>
+            Ce document intègre automatiquement les coordonnées et choix de politique de votre entreprise. Vous n'avez pas besoin de manipuler de syntaxe technique dans le texte : les valeurs sont résolues en direct.
+          </p>
+          <div className={formStyles.companyTokensGrid}>
+            <div className={formStyles.companyTokenItem}>
+              <span className={formStyles.companyTokenKey}>Nom commercial</span>
+              <span className={company.tradeName ? formStyles.companyTokenValue : formStyles.companyTokenMissing}>
+                {company.tradeName || "Non renseigné"}
+              </span>
+            </div>
+            <div className={formStyles.companyTokenItem}>
+              <span className={formStyles.companyTokenKey}>Dénomination légale & Forme</span>
+              <span className={company.legalName ? formStyles.companyTokenValue : formStyles.companyTokenMissing}>
+                {company.legalName ? `${company.legalName}${company.legalForm ? ` (${company.legalForm})` : ""}` : "Non renseigné"}
+              </span>
+            </div>
+            <div className={formStyles.companyTokenItem}>
+              <span className={formStyles.companyTokenKey}>Adresse du siège</span>
+              <span className={company.address ? formStyles.companyTokenValue : formStyles.companyTokenMissing}>
+                {company.address || "Non renseigné"}
+              </span>
+            </div>
+            <div className={formStyles.companyTokenItem}>
+              <span className={formStyles.companyTokenKey}>N° d'entreprise (BCE)</span>
+              <span className={company.enterpriseNumber ? formStyles.companyTokenValue : formStyles.companyTokenMissing}>
+                {company.enterpriseNumber || "Non renseigné"}
+              </span>
+            </div>
+            <div className={formStyles.companyTokenItem}>
+              <span className={formStyles.companyTokenKey}>Régime TVA</span>
+              <span className={company.vatRegime ? formStyles.companyTokenValue : formStyles.companyTokenMissing}>
+                {company.vatRegime || "Non renseigné"}
+              </span>
+            </div>
+            <div className={formStyles.companyTokenItem}>
+              <span className={formStyles.companyTokenKey}>RPM / Tribunal compétent</span>
+              {isRpmApplicable(company) === false ? (
+                <span className={formStyles.companyTokenValue}>Non applicable (personne physique / association de fait)</span>
+              ) : isRpmApplicable(company) === true ? (
+                <span className={company.rpmJurisdiction ? formStyles.companyTokenValue : formStyles.companyTokenMissing}>
+                  {company.rpmJurisdiction || "Non renseigné (requis pour personne morale)"}
+                </span>
+              ) : (
+                <span className={formStyles.companyTokenMissing}>Statut à confirmer dans Entreprise</span>
+              )}
+            </div>
+            <div className={formStyles.companyTokenItem}>
+              <span className={formStyles.companyTokenKey}>Hébergeur web</span>
+              <span className={company.hostingProvider ? formStyles.companyTokenValue : formStyles.companyTokenMissing}>
+                {company.hostingProvider ? `${company.hostingProvider}${company.hostingCountry ? ` (${company.hostingCountry})` : ""}` : "Non renseigné"}
+              </span>
+            </div>
+            <div className={formStyles.companyTokenItem}>
+              <span className={formStyles.companyTokenKey}>Contact vie privée</span>
+              <span className={(company.privacyEmail || company.email) ? formStyles.companyTokenValue : formStyles.companyTokenMissing}>
+                {company.privacyEmail || company.email || "Non renseigné"}
+              </span>
+            </div>
+          </div>
+          <div className={formStyles.previewToggleRow}>
+            <label className={formStyles.checkboxLabel}>
+              <input
+                type="checkbox"
+                checked={showResolvedPreview}
+                onChange={(e) => setShowResolvedPreview(e.target.checked)}
+                className={formStyles.checkboxInput}
+              />
+              <span className={formStyles.checkboxText}>
+                Afficher le texte avec les valeurs d'entreprise résolues (aperçu dynamique)
+              </span>
+            </label>
+          </div>
+        </div>
+
         {/* Global Page Information */}
         <div className={formStyles.card}>
           <h2 className={formStyles.cardTitle}>En-tête & Métadonnées SEO ({activeLang.toUpperCase()})</h2>
@@ -694,7 +794,14 @@ export default function AdminLegalEditPage() {
                 </div>
 
                 <div className={formStyles.field}>
-                  <label className={formStyles.label}>Paragraphes ({activeLang.toUpperCase()})</label>
+                  <label className={formStyles.label}>
+                    <span>Paragraphes ({activeLang.toUpperCase()})</span>
+                    {rawText.includes("company.rpmJurisdiction") && (
+                      <span className={formStyles.conditionalBadge}>
+                        Conditionnel : RPM (omis automatiquement si personne physique)
+                      </span>
+                    )}
+                  </label>
                   <textarea
                     className={formStyles.textarea}
                     rows={5}
@@ -702,6 +809,22 @@ export default function AdminLegalEditPage() {
                     onChange={(e) => handleSectionParagraphsChange(section.id, e.target.value)}
                     placeholder="Saisissez le texte des paragraphes, séparés par une ligne vide..."
                   />
+                  {showResolvedPreview && (
+                    <div className={formStyles.resolvedPreviewBox}>
+                      <span className={formStyles.labelHint}>Aperçu résolu :</span>
+                      <div>
+                        {(() => {
+                          const resolved = resolveCompanyTokens(rawText, company, "preview", activeLang);
+                          if (!resolved.trim() && isRpmApplicable(company) === false && isRpmOnlyParagraph(rawText)) {
+                            return (
+                              <em>(Ce paragraphe RPM est automatiquement omis car le Registre des Personnes Morales ne s&apos;applique pas aux personnes physiques / associations sans personnalité juridique)</em>
+                            );
+                          }
+                          return resolved;
+                        })()}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             );
