@@ -745,6 +745,10 @@ describe("Complete Site Backup and Restoration Suite", () => {
 
       // Isolated test environment config
       const startupConfigFile = path.join(tempFixtureDir, "test-startup.env.local");
+      const validGallerySecret = "ba9876543210fedcba9876543210fedcba9876543210fedcba9876543210fedc";
+      const validGalleryKey = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+      const validAdminHash = "$argon2id$v=19$m=65536,t=3,p=4$c29tZXNhbHQ$abcdefghijklmnopqrstuvwxyz0123456789/+";
+
       fs.writeFileSync(
         startupConfigFile,
         `
@@ -752,11 +756,11 @@ NODE_ENV=production
 PORT=${testPort}
 HOST=127.0.0.1
 PUBLIC_SITE_URL=https://127.0.0.1:${testPort}
-ADMIN_PASSWORD_HASH=$argon2id$v=19$m=65536,t=3,p=4$c29tZXNhbHQ$abcdefghijklmnopqrstuvwxyz0123456789/+
+ADMIN_PASSWORD_HASH=${validAdminHash}
 ADMIN_SESSION_SECRET=admin-session-secret-at-least-32-chars-long!
 RATE_LIMIT_SECRET=rate-limit-secret-at-least-32-chars-long!
-GALLERY_SECRET=gallery-secret-at-least-32-chars-long!
-GALLERY_CODE_ENCRYPTION_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+GALLERY_SECRET=${validGallerySecret}
+GALLERY_CODE_ENCRYPTION_KEY=${validGalleryKey}
 SITE_CONTENT_PATH=${fixtureSiteContent}
 PORTFOLIO_CONTENT_PATH=${fixturePortfolioContent}
 SITE_MEDIA_PATH=${fixtureSiteMedia}
@@ -780,6 +784,19 @@ GALLERY_IMPORT_PATH=${fixtureGalleryImport}
             PORT: String(testPort),
             HOST: "127.0.0.1",
             PUBLIC_SITE_URL: `https://127.0.0.1:${testPort}`,
+            ADMIN_PASSWORD_HASH: validAdminHash,
+            ADMIN_SESSION_SECRET: "admin-session-secret-at-least-32-chars-long!",
+            RATE_LIMIT_SECRET: "rate-limit-secret-at-least-32-chars-long!",
+            GALLERY_SECRET: validGallerySecret,
+            GALLERY_CODE_ENCRYPTION_KEY: validGalleryKey,
+            SITE_CONTENT_PATH: fixtureSiteContent,
+            PORTFOLIO_CONTENT_PATH: fixturePortfolioContent,
+            SITE_MEDIA_PATH: fixtureSiteMedia,
+            PORTFOLIO_MEDIA_PATH: fixturePortfolioMedia,
+            GALLERY_DB_PATH: fixtureGalleryDb,
+            RATE_LIMIT_DB_PATH: fixtureRateLimitDb,
+            GALLERY_MEDIA_PATH: fixtureGalleryMedia,
+            GALLERY_IMPORT_PATH: fixtureGalleryImport,
             STARTUP_CONFIG_PATH: startupConfigFile,
           },
         }
