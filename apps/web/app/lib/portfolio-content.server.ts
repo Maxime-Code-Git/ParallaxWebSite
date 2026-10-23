@@ -86,6 +86,21 @@ export function createDefaultPortfolioContent(): PortfolioContent {
           fr: "Bannière documentaire",
           en: "Documentary banner",
         },
+        entryImageId: null,
+        entryAlt: {
+          fr: "Visuel documentaire",
+          en: "Documentary visual",
+        },
+        entrySummary: {
+          fr: "Un court documentaire sur une boulangerie artisanale, du fournil à la vitrine.",
+          en: "A short documentary on an artisan bakery, from oven to storefront.",
+        },
+        entrySide: "left",
+        bannerImageId: null,
+        bannerAlt: {
+          fr: "Bannière documentaire",
+          en: "Documentary banner",
+        },
         showreelTitle: {
           fr: "Showreel documentaire",
           en: "Documentary showreel",
@@ -127,6 +142,21 @@ export function createDefaultPortfolioContent(): PortfolioContent {
         },
         coverImageId: null,
         coverAlt: {
+          fr: "Bannière publicité",
+          en: "Advertising banner",
+        },
+        entryImageId: null,
+        entryAlt: {
+          fr: "Visuel publicité",
+          en: "Advertising visual",
+        },
+        entrySummary: {
+          fr: "Film publicitaire pour une marque de vélo, entre studio et grand air.",
+          en: "Commercial for a bike brand, between studio and open air.",
+        },
+        entrySide: "right",
+        bannerImageId: null,
+        bannerAlt: {
           fr: "Bannière publicité",
           en: "Advertising banner",
         },
@@ -352,17 +382,12 @@ export function getPublicPortfolioContent(customPath?: string): {
 
   // Collect ONLY media IDs referenced by public sections and published projects
   const publicMediaIds = new Set<string>();
-  if (content.sections?.documentary?.coverImageId) {
-    publicMediaIds.add(content.sections.documentary.coverImageId);
-  }
-  if (content.sections?.documentary?.showreelCoverImageId) {
-    publicMediaIds.add(content.sections.documentary.showreelCoverImageId);
-  }
-  if (content.sections?.advertising?.coverImageId) {
-    publicMediaIds.add(content.sections.advertising.coverImageId);
-  }
-  if (content.sections?.advertising?.showreelCoverImageId) {
-    publicMediaIds.add(content.sections.advertising.showreelCoverImageId);
+  for (const cat of ["documentary", "advertising"] as const) {
+    const sec = content.sections?.[cat];
+    if (sec?.coverImageId) publicMediaIds.add(sec.coverImageId);
+    if (sec?.showreelCoverImageId) publicMediaIds.add(sec.showreelCoverImageId);
+    if (sec?.entryImageId) publicMediaIds.add(sec.entryImageId);
+    if (sec?.bannerImageId) publicMediaIds.add(sec.bannerImageId);
   }
 
   for (const p of publicProjects) {
@@ -409,17 +434,12 @@ export function prunePortfolioMediaRegistry(
 ): Record<string, PortfolioMediaItem> {
   const activeIds = new Set<string>();
 
-  if (content.sections.documentary.coverImageId) {
-    activeIds.add(content.sections.documentary.coverImageId);
-  }
-  if (content.sections.documentary.showreelCoverImageId) {
-    activeIds.add(content.sections.documentary.showreelCoverImageId);
-  }
-  if (content.sections.advertising.coverImageId) {
-    activeIds.add(content.sections.advertising.coverImageId);
-  }
-  if (content.sections.advertising.showreelCoverImageId) {
-    activeIds.add(content.sections.advertising.showreelCoverImageId);
+  for (const cat of ["documentary", "advertising"] as const) {
+    const sec = content.sections?.[cat];
+    if (sec?.coverImageId) activeIds.add(sec.coverImageId);
+    if (sec?.showreelCoverImageId) activeIds.add(sec.showreelCoverImageId);
+    if (sec?.entryImageId) activeIds.add(sec.entryImageId);
+    if (sec?.bannerImageId) activeIds.add(sec.bannerImageId);
   }
 
   for (const project of content.projects) {
@@ -496,8 +516,12 @@ export function getReferencedPortfolioMediaIds(
   const collectFromContent = (c: PortfolioContent) => {
     if (c.sections?.documentary?.coverImageId) referencedIds.add(c.sections.documentary.coverImageId);
     if (c.sections?.documentary?.showreelCoverImageId) referencedIds.add(c.sections.documentary.showreelCoverImageId);
+    if (c.sections?.documentary?.entryImageId) referencedIds.add(c.sections.documentary.entryImageId);
+    if (c.sections?.documentary?.bannerImageId) referencedIds.add(c.sections.documentary.bannerImageId);
     if (c.sections?.advertising?.coverImageId) referencedIds.add(c.sections.advertising.coverImageId);
     if (c.sections?.advertising?.showreelCoverImageId) referencedIds.add(c.sections.advertising.showreelCoverImageId);
+    if (c.sections?.advertising?.entryImageId) referencedIds.add(c.sections.advertising.entryImageId);
+    if (c.sections?.advertising?.bannerImageId) referencedIds.add(c.sections.advertising.bannerImageId);
 
     if (Array.isArray(c.projects)) {
       for (const p of c.projects) {

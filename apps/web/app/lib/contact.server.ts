@@ -248,6 +248,32 @@ export function getContactMessage(
   return text;
 }
 
+export function isValidCalendarDate(year: number, month: number, day: number): boolean {
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+    return false;
+  }
+  if (year < 1900 || year > 2100) return false;
+  if (month < 1 || month > 12) return false;
+  if (day < 1 || day > 31) return false;
+  const d = new Date(Date.UTC(year, month - 1, day));
+  return (
+    d.getUTCFullYear() === year &&
+    d.getUTCMonth() === month - 1 &&
+    d.getUTCDate() === day
+  );
+}
+
+export function validateContactTimeline(timelineStr: string): boolean {
+  const trimmed = timelineStr.trim();
+  if (!trimmed) return true;
+  const match = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return false;
+  const year = parseInt(match[1], 10);
+  const month = parseInt(match[2], 10);
+  const day = parseInt(match[3], 10);
+  return isValidCalendarDate(year, month, day);
+}
+
 export function computeFormContentHash(
   params: {
     lang: string;
@@ -507,12 +533,12 @@ export async function handleContactAction(args: ActionFunctionArgs, forcedLang?:
     }
   }
 
-  // Validate Timeline (optional)
+  // Validate Timeline (optional calendar date: YYYY-MM-DD)
   if (rawTimeline) {
-    if (rawTimeline.length > 120) {
-      fieldErrors.timeline = getContactMessage(siteContent, "timelineInvalid", lang);
-    } else if (/[\r\n]/.test(rawTimeline)) {
+    if (/[\r\n]/.test(rawTimeline)) {
       fieldErrors.timeline = isFr ? "Caractères invalides." : "Invalid characters.";
+    } else if (!validateContactTimeline(rawTimeline)) {
+      fieldErrors.timeline = getContactMessage(siteContent, "timelineInvalid", lang);
     }
   }
 

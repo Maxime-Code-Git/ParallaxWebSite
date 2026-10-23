@@ -47,19 +47,13 @@ export async function loader({ params }: LoaderFunctionArgs) {
     let isPubliclyReferenced = false;
 
     if (ownerType === "section") {
-      if (ownerId === "documentary") {
-        const sec = content.sections.documentary;
+      if (ownerId === "documentary" || ownerId === "advertising") {
+        const sec = content.sections[ownerId];
         if (
-          sec.coverImageId === imageId ||
-          sec.showreelCoverImageId === imageId
-        ) {
-          isPubliclyReferenced = true;
-        }
-      } else if (ownerId === "advertising") {
-        const sec = content.sections.advertising;
-        if (
-          sec.coverImageId === imageId ||
-          sec.showreelCoverImageId === imageId
+          (slot === "cover" && sec.coverImageId === imageId) ||
+          (slot === "showreel_cover" && sec.showreelCoverImageId === imageId) ||
+          (slot === "category_entry" && sec.entryImageId === imageId) ||
+          (slot === "category_banner" && sec.bannerImageId === imageId)
         ) {
           isPubliclyReferenced = true;
         }

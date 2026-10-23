@@ -7,6 +7,7 @@ import { Footer } from "../../components/public/Footer";
 import { ScrollToTop } from "../../components/public/ScrollToTop";
 import { VideoModal } from "../../components/public/VideoModal";
 import { ResponsiveSiteImage } from "../../components/public/ResponsiveSiteImage";
+import { resolveSempraButtonUrl } from "../../lib/site-content.shared";
 import styles from "./home.module.css";
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -115,19 +116,27 @@ export default function HomePage() {
         <div className={styles.savoirFaireGrid}>
           <div>
             <div className={styles.categoryTitle}>{home.savoirFaire.photoTitle[lang]}</div>
-            <ul className={styles.categoryList}>
-              {home.savoirFaire.photoItems.map((item, idx) => (
-                <li key={idx}>{item[lang]}</li>
-              ))}
-            </ul>
+            {home.savoirFaire.photoItems?.filter((item) => item && typeof item[lang] === "string" && item[lang].trim()).length > 0 && (
+              <ul className={styles.categoryList}>
+                {home.savoirFaire.photoItems
+                  .filter((item) => item && typeof item[lang] === "string" && item[lang].trim())
+                  .map((item, idx) => (
+                    <li key={idx}>{item[lang].trim()}</li>
+                  ))}
+              </ul>
+            )}
           </div>
           <div>
             <div className={styles.categoryTitle}>{home.savoirFaire.videoTitle[lang]}</div>
-            <ul className={styles.categoryList}>
-              {home.savoirFaire.videoItems.map((item, idx) => (
-                <li key={idx}>{item[lang]}</li>
-              ))}
-            </ul>
+            {home.savoirFaire.videoItems?.filter((item) => item && typeof item[lang] === "string" && item[lang].trim()).length > 0 && (
+              <ul className={styles.categoryList}>
+                {home.savoirFaire.videoItems
+                  .filter((item) => item && typeof item[lang] === "string" && item[lang].trim())
+                  .map((item, idx) => (
+                    <li key={idx}>{item[lang].trim()}</li>
+                  ))}
+              </ul>
+            )}
           </div>
         </div>
       </section>
@@ -183,7 +192,7 @@ export default function HomePage() {
           className={styles.sempraLogo}
         />
         <p className={styles.sempraTitle}>{home.sempra.title[lang]}</p>
-        <a href={home.sempra.buttonUrl || "#"} className={styles.sempraButton}>
+        <a href={resolveSempraButtonUrl(home.sempra.buttonUrl)} rel="noopener noreferrer" className={styles.sempraButton}>
           <span>{home.sempra.buttonText[lang]}</span>
           <span className={styles.sempraButtonIcon}>
             <svg

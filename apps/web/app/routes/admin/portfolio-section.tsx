@@ -53,10 +53,15 @@ const ALLOWED_SECTION_FIELDS = [
   "revision",
   "coverImageId",
   "showreelCoverImageId",
+  "entryImageId",
+  "bannerImageId",
   "title_fr",
   "title_en",
   "intro_fr",
   "intro_en",
+  "entrySummary_fr",
+  "entrySummary_en",
+  "entrySide",
   "showreelTitle_fr",
   "showreelTitle_en",
   "showreelUrl",
@@ -72,6 +77,10 @@ const ALLOWED_SECTION_FIELDS = [
   "seo_desc_en",
   "coverAlt_fr",
   "coverAlt_en",
+  "entryAlt_fr",
+  "entryAlt_en",
+  "bannerAlt_fr",
+  "bannerAlt_en",
 ] as const;
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
@@ -160,6 +169,15 @@ export async function action({ request, params }: ActionFunctionArgs) {
     en: String(formData.get("intro_en") || "").trim(),
   };
 
+  const entrySummaryFr = String(formData.get("entrySummary_fr") || "").trim();
+  const entrySummaryEn = String(formData.get("entrySummary_en") || "").trim();
+  section.entrySummary = {
+    fr: entrySummaryFr || section.intro.fr,
+    en: entrySummaryEn || section.intro.en,
+  };
+  const entrySideRaw = String(formData.get("entrySide") || "").trim();
+  section.entrySide = entrySideRaw === "left" || entrySideRaw === "right" ? entrySideRaw : (category === "documentary" ? "left" : "right");
+
   // 2. SEO
   section.seo = {
     title: {
@@ -172,12 +190,28 @@ export async function action({ request, params }: ActionFunctionArgs) {
     },
   };
 
-  // 3. Couverture
+  // 3. Visuel de catégorie sur le Portfolio
+  const entryImageId = String(formData.get("entryImageId") || "").trim();
+  section.entryImageId = entryImageId ? entryImageId : null;
+  section.entryAlt = {
+    fr: String(formData.get("entryAlt_fr") || "").trim(),
+    en: String(formData.get("entryAlt_en") || "").trim(),
+  };
+
+  // 4. Bannière d'en-tête de la catégorie
+  const bannerImageId = String(formData.get("bannerImageId") || "").trim();
+  section.bannerImageId = bannerImageId ? bannerImageId : null;
+  section.bannerAlt = {
+    fr: String(formData.get("bannerAlt_fr") || "").trim(),
+    en: String(formData.get("bannerAlt_en") || "").trim(),
+  };
+
+  // 5. Couverture (compatibilité historique - préservée indépendamment)
   const coverImageId = String(formData.get("coverImageId") || "").trim();
-  section.coverImageId = coverImageId ? coverImageId : null;
+  section.coverImageId = coverImageId ? coverImageId : (section.coverImageId || null);
   section.coverAlt = {
-    fr: String(formData.get("coverAlt_fr") || "").trim(),
-    en: String(formData.get("coverAlt_en") || "").trim(),
+    fr: String(formData.get("coverAlt_fr") || "").trim() || section.coverAlt?.fr || section.bannerAlt.fr,
+    en: String(formData.get("coverAlt_en") || "").trim() || section.coverAlt?.en || section.bannerAlt.en,
   };
 
   // 4. Showreel
@@ -305,28 +339,41 @@ export default function AdminPortfolioSectionPage() {
   const [seoTitleEn, setSeoTitleEn] = useState(section.seo.title.en);
   const [seoDescFr, setSeoDescFr] = useState(section.seo.description.fr);
   const [seoDescEn, setSeoDescEn] = useState(section.seo.description.en);
-  const [coverAltFr, setCoverAltFr] = useState(section.coverAlt.fr);
-  const [coverAltEn, setCoverAltEn] = useState(section.coverAlt.en);
 
   const [mediaMap, setMediaMap] = useState<Record<string, PortfolioMediaItem>>(initialMedia);
-  const [coverImageId, setCoverImageId] = useState<string | null>(section.coverImageId);
+  const coverImageId = section.coverImageId;
+  const [entryImageId, setEntryImageId] = useState<string | null>(section.entryImageId || null);
+  const [entryAltFr, setEntryAltFr] = useState(section.entryAlt?.fr || "");
+  const [entryAltEn, setEntryAltEn] = useState(section.entryAlt?.en || "");
+  const [entrySummaryFr, setEntrySummaryFr] = useState(section.entrySummary?.fr || section.intro.fr);
+  const [entrySummaryEn, setEntrySummaryEn] = useState(section.entrySummary?.en || section.intro.en);
+  const [entrySide, setEntrySide] = useState<"left" | "right">(section.entrySide || (category === "documentary" ? "left" : "right"));
+
+  const [bannerImageId, setBannerImageId] = useState<string | null>(
+    section.bannerImageId !== undefined ? section.bannerImageId : (section.coverImageId || null)
+  );
+  const [bannerAltFr, setBannerAltFr] = useState(section.bannerAlt?.fr || section.coverAlt?.fr || "");
+  const [bannerAltEn, setBannerAltEn] = useState(section.bannerAlt?.en || section.coverAlt?.en || "");
+
   const [showreelCoverImageId, setShowreelCoverImageId] = useState<string | null>(
     section.showreelCoverImageId
   );
 
-  const [uploadingCover, setUploadingCover] = useState(false);
+  const [uploadingEntry, setUploadingEntry] = useState(false);
+  const [uploadingBanner, setUploadingBanner] = useState(false);
   const [uploadingShowreel, setUploadingShowreel] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadNotice, setUploadNotice] = useState<string | null>(null);
 
-  const coverInputRef = useRef<HTMLInputElement>(null);
+  const entryInputRef = useRef<HTMLInputElement>(null);
+  const bannerInputRef = useRef<HTMLInputElement>(null);
   const showreelCoverInputRef = useRef<HTMLInputElement>(null);
 
   const categoryName = category === "documentary" ? "Documentaire" : "Publicité";
 
   const handleUploadImage = async (
     file: File,
-    slot: "cover" | "showreel_cover",
+    slot: "cover" | "showreel_cover" | "category_entry" | "category_banner",
     setUploading: (val: boolean) => void,
     onSuccessId: (id: string) => void
   ) => {
@@ -442,6 +489,8 @@ export default function AdminPortfolioSectionPage() {
       <Form method="post">
         <input type="hidden" name="csrfToken" value={csrfToken} />
         <input type="hidden" name="revision" value={currentRevision} />
+        <input type="hidden" name="entryImageId" value={entryImageId || ""} />
+        <input type="hidden" name="bannerImageId" value={bannerImageId || ""} />
         <input type="hidden" name="coverImageId" value={coverImageId || ""} />
         <input type="hidden" name="showreelCoverImageId" value={showreelCoverImageId || ""} />
 
@@ -484,6 +533,39 @@ export default function AdminPortfolioSectionPage() {
                     Texte affiché en en-tête du panneau déroulant de la rubrique.
                   </div>
                 </div>
+
+                <div className={styles.formGroup}>
+                  <label htmlFor="entrySummary_fr" className={styles.label}>
+                    Résumé sur la page d'accueil Portfolio (FR)
+                  </label>
+                  <input
+                    id="entrySummary_fr"
+                    name="entrySummary_fr"
+                    type="text"
+                    value={entrySummaryFr}
+                    onChange={(e) => setEntrySummaryFr(e.target.value)}
+                    className={styles.input}
+                  />
+                  <div className={styles.helperText}>
+                    Phrase d'accroche accompagnant le visuel biseauté sur la page principale du portfolio.
+                  </div>
+                </div>
+
+                <div className={styles.formGroup}>
+                  <label htmlFor="entrySide" className={styles.label}>
+                    Côté du visuel sur la page Portfolio (Desktop)
+                  </label>
+                  <select
+                    id="entrySide"
+                    name="entrySide"
+                    value={entrySide}
+                    onChange={(e) => setEntrySide(e.target.value as "left" | "right")}
+                    className={styles.input}
+                  >
+                    <option value="left">Image à gauche (texte à droite)</option>
+                    <option value="right">Image à droite (texte à gauche)</option>
+                  </select>
+                </div>
               </div>
 
               <div className={activeLang === "en" ? styles.tabContentVisible : styles.tabContentHidden}>
@@ -513,6 +595,20 @@ export default function AdminPortfolioSectionPage() {
                     value={introEn}
                     onChange={(e) => setIntroEn(e.target.value)}
                     className={styles.textarea}
+                  />
+                </div>
+
+                <div className={styles.formGroup}>
+                  <label htmlFor="entrySummary_en" className={styles.label}>
+                    Portfolio Overview Summary (EN)
+                  </label>
+                  <input
+                    id="entrySummary_en"
+                    name="entrySummary_en"
+                    type="text"
+                    value={entrySummaryEn}
+                    onChange={(e) => setEntrySummaryEn(e.target.value)}
+                    className={styles.input}
                   />
                 </div>
               </div>
@@ -802,21 +898,24 @@ export default function AdminPortfolioSectionPage() {
 
           {/* Sidebar Column */}
           <div>
-            {/* Banner Cover Image */}
+            {/* Category Entry Visual Card (Portfolio Overview) */}
             <div className={styles.card}>
-              <h2 className={styles.cardTitle}>Bannière / Couverture</h2>
+              <h2 className={styles.cardTitle}>Visuel de catégorie (Page Portfolio)</h2>
+              <p className={styles.helperText} style={{ marginBottom: 16 }}>
+                Visuel affiché sur la page d'accueil du Portfolio avec découpe biseautée sur grand écran.
+              </p>
 
               <div className={styles.uploaderBox}>
-                {coverImageId && mediaMap[coverImageId] ? (
+                {entryImageId && mediaMap[entryImageId] ? (
                   <div>
                     <div className={styles.previewImageWrap}>
                       <ResponsivePortfolioImage
-                        imageId={coverImageId}
+                        imageId={entryImageId}
                         ownerType="section"
                         ownerId={category}
-                        mediaSlot="cover"
-                        mediaMetadata={mediaMap[coverImageId]}
-                        alt={coverAltFr}
+                        mediaSlot="category_entry"
+                        mediaMetadata={mediaMap[entryImageId]}
+                        alt={entryAltFr || "Visuel de catégorie"}
                         isAdminPreview
                       />
                     </div>
@@ -824,15 +923,15 @@ export default function AdminPortfolioSectionPage() {
                       <button
                         type="button"
                         className={styles.uploadBtn}
-                        disabled={uploadingCover}
-                        onClick={() => coverInputRef.current?.click()}
+                        disabled={uploadingEntry}
+                        onClick={() => entryInputRef.current?.click()}
                       >
-                        {uploadingCover ? "Import en cours..." : "Remplacer l'image"}
+                        {uploadingEntry ? "Import en cours..." : "Remplacer l'image"}
                       </button>
                       <button
                         type="button"
                         className={styles.removeBtn}
-                        onClick={() => setCoverImageId(null)}
+                        onClick={() => setEntryImageId(null)}
                       >
                         Retirer
                       </button>
@@ -841,46 +940,46 @@ export default function AdminPortfolioSectionPage() {
                 ) : (
                   <div>
                     <p className={styles.emptyNotice}>
-                      Aucune bannière configurée.
+                      Aucun visuel d'entrée configuré.
                     </p>
                     <button
                       type="button"
                       className={styles.uploadBtn}
-                      disabled={uploadingCover}
-                      onClick={() => coverInputRef.current?.click()}
+                      disabled={uploadingEntry}
+                      onClick={() => entryInputRef.current?.click()}
                     >
-                      {uploadingCover ? "Import en cours..." : "Importer une bannière"}
+                      {uploadingEntry ? "Import en cours..." : "Importer le visuel d'entrée"}
                     </button>
                   </div>
                 )}
 
                 <input
-                  ref={coverInputRef}
+                  ref={entryInputRef}
                   type="file"
                   accept="image/jpeg,image/png,image/webp"
                   className={styles.hiddenFileInput}
                   onChange={(e) => {
                     const file = e.target.files?.[0];
                     if (file) {
-                      void handleUploadImage(file, "cover", setUploadingCover, (id) => setCoverImageId(id));
+                      void handleUploadImage(file, "category_entry", setUploadingEntry, (id) => setEntryImageId(id));
                     }
                     e.target.value = "";
                   }}
                 />
               </div>
 
-              {/* Alt texts */}
+              {/* Entry Alt texts */}
               <div className={activeLang === "fr" ? styles.tabContentVisible : styles.tabContentHidden}>
                 <div className={styles.formGroup}>
-                  <label htmlFor="coverAlt_fr" className={styles.label}>
-                    Texte alternatif (Alt FR)
+                  <label htmlFor="entryAlt_fr" className={styles.label}>
+                    Texte alternatif du visuel (FR)
                   </label>
                   <input
-                    id="coverAlt_fr"
-                    name="coverAlt_fr"
+                    id="entryAlt_fr"
+                    name="entryAlt_fr"
                     type="text"
-                    value={coverAltFr}
-                    onChange={(e) => setCoverAltFr(e.target.value)}
+                    value={entryAltFr}
+                    onChange={(e) => setEntryAltFr(e.target.value)}
                     className={styles.input}
                   />
                 </div>
@@ -888,15 +987,119 @@ export default function AdminPortfolioSectionPage() {
 
               <div className={activeLang === "en" ? styles.tabContentVisible : styles.tabContentHidden}>
                 <div className={styles.formGroup}>
-                  <label htmlFor="coverAlt_en" className={styles.label}>
-                    Texte alternatif (Alt EN)
+                  <label htmlFor="entryAlt_en" className={styles.label}>
+                    Texte alternatif du visuel (EN)
                   </label>
                   <input
-                    id="coverAlt_en"
-                    name="coverAlt_en"
+                    id="entryAlt_en"
+                    name="entryAlt_en"
                     type="text"
-                    value={coverAltEn}
-                    onChange={(e) => setCoverAltEn(e.target.value)}
+                    value={entryAltEn}
+                    onChange={(e) => setEntryAltEn(e.target.value)}
+                    className={styles.input}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Category Banner Header Card */}
+            <div className={styles.card}>
+              <h2 className={styles.cardTitle}>Bannière d'en-tête de la catégorie</h2>
+              <p className={styles.helperText} style={{ marginBottom: 16 }}>
+                Image d'en-tête (480px) affichée au sommet du panneau coulissant lorsque la catégorie est ouverte.
+              </p>
+
+              <div className={styles.uploaderBox}>
+                {bannerImageId && mediaMap[bannerImageId] ? (
+                  <div>
+                    <div className={styles.previewImageWrap}>
+                      <ResponsivePortfolioImage
+                        imageId={bannerImageId}
+                        ownerType="section"
+                        ownerId={category}
+                        mediaSlot="category_banner"
+                        mediaMetadata={mediaMap[bannerImageId]}
+                        alt={bannerAltFr || "Bannière d'en-tête"}
+                        isAdminPreview
+                      />
+                    </div>
+                    <div className={styles.uploadActions}>
+                      <button
+                        type="button"
+                        className={styles.uploadBtn}
+                        disabled={uploadingBanner}
+                        onClick={() => bannerInputRef.current?.click()}
+                      >
+                        {uploadingBanner ? "Import en cours..." : "Remplacer la bannière"}
+                      </button>
+                      <button
+                        type="button"
+                        className={styles.removeBtn}
+                        onClick={() => setBannerImageId(null)}
+                      >
+                        Retirer
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <p className={styles.emptyNotice}>
+                      Aucune bannière d'en-tête configurée.
+                    </p>
+                    <button
+                      type="button"
+                      className={styles.uploadBtn}
+                      disabled={uploadingBanner}
+                      onClick={() => bannerInputRef.current?.click()}
+                    >
+                      {uploadingBanner ? "Import en cours..." : "Importer une bannière"}
+                    </button>
+                  </div>
+                )}
+
+                <input
+                  ref={bannerInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  className={styles.hiddenFileInput}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      void handleUploadImage(file, "category_banner", setUploadingBanner, (id) => setBannerImageId(id));
+                    }
+                    e.target.value = "";
+                  }}
+                />
+              </div>
+
+              {/* Banner Alt texts */}
+              <div className={activeLang === "fr" ? styles.tabContentVisible : styles.tabContentHidden}>
+                <div className={styles.formGroup}>
+                  <label htmlFor="bannerAlt_fr" className={styles.label}>
+                    Texte alternatif de la bannière (FR)
+                  </label>
+                  <input
+                    id="bannerAlt_fr"
+                    name="bannerAlt_fr"
+                    type="text"
+                    value={bannerAltFr}
+                    onChange={(e) => setBannerAltFr(e.target.value)}
+                    className={styles.input}
+                  />
+                </div>
+              </div>
+
+              <div className={activeLang === "en" ? styles.tabContentVisible : styles.tabContentHidden}>
+                <div className={styles.formGroup}>
+                  <label htmlFor="bannerAlt_en" className={styles.label}>
+                    Texte alternatif de la bannière (EN)
+                  </label>
+                  <input
+                    id="bannerAlt_en"
+                    name="bannerAlt_en"
+                    type="text"
+                    value={bannerAltEn}
+                    onChange={(e) => setBannerAltEn(e.target.value)}
                     className={styles.input}
                   />
                 </div>
@@ -910,7 +1113,7 @@ export default function AdminPortfolioSectionPage() {
               </div>
               <button
                 type="submit"
-                disabled={isSubmitting || uploadingCover || uploadingShowreel}
+                disabled={isSubmitting || uploadingEntry || uploadingBanner || uploadingShowreel}
                 className={styles.primarySaveBtn}
               >
                 {isSubmitting ? "Enregistrement..." : "Enregistrer la rubrique"}

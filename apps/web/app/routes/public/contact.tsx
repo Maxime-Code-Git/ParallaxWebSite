@@ -56,6 +56,7 @@ export default function ContactPage() {
   const navigation = useNavigation();
   const errorSummaryRef = useRef<HTMLDivElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
+  const dateInputRef = useRef<HTMLInputElement>(null);
   const lastHandledSuccessIdRef = useRef<string | null>(null);
 
   // Reset form inputs upon confirmed success (distinct submission identity)
@@ -67,6 +68,9 @@ export default function ContactPage() {
         const typeSelect = formRef.current.querySelector<HTMLSelectElement>('select[name="type"]');
         if (typeSelect) {
           typeSelect.value = "";
+        }
+        if (dateInputRef.current) {
+          dateInputRef.current.value = "";
         }
       }
       lastHandledSuccessIdRef.current = successKey;
@@ -238,22 +242,58 @@ export default function ContactPage() {
                 </div>
               </div>
 
-              {/* Preferred Timeline Field */}
+              {/* Preferred Timeline Field (Native Date Picker with Calendar Button) */}
               <div className={styles.formGroup}>
                 <label htmlFor="c-date" className={styles.label}>
                   {formContent.timelineLabel[lang]}
                 </label>
-                <input
-                  id="c-date"
-                  name="timeline"
-                  type="text"
-                  maxLength={120}
-                  placeholder={formContent.timelinePlaceholder[lang]}
-                  defaultValue={values?.timeline ?? ""}
-                  className={`${styles.input} ${fieldErrors?.timeline ? styles.inputError : ""}`}
-                  aria-invalid={fieldErrors?.timeline ? "true" : undefined}
-                  aria-describedby={fieldErrors?.timeline ? "c-date-error" : undefined}
-                />
+                <div className={styles.datePickerWrapper}>
+                  <input
+                    ref={dateInputRef}
+                    id="c-date"
+                    name="timeline"
+                    type="date"
+                    placeholder={formContent.timelinePlaceholder[lang]}
+                    defaultValue={values?.timeline ?? ""}
+                    className={`${styles.input} ${styles.dateInput} ${fieldErrors?.timeline ? styles.inputError : ""}`}
+                    aria-invalid={fieldErrors?.timeline ? "true" : undefined}
+                    aria-describedby={fieldErrors?.timeline ? "c-date-error" : undefined}
+                  />
+                  <button
+                    type="button"
+                    className={styles.calendarButton}
+                    aria-label={lang === "fr" ? "Ouvrir le calendrier" : "Open calendar"}
+                    onClick={() => {
+                      try {
+                        const inputEl = dateInputRef.current;
+                        if (inputEl && "showPicker" in inputEl && typeof (inputEl as { showPicker?: () => void }).showPicker === "function") {
+                          (inputEl as { showPicker: () => void }).showPicker();
+                        } else {
+                          dateInputRef.current?.focus();
+                        }
+                      } catch {
+                        dateInputRef.current?.focus();
+                      }
+                    }}
+                  >
+                    <svg
+                      aria-hidden="true"
+                      width="18"
+                      height="18"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+                      <line x1="16" y1="2" x2="16" y2="6" />
+                      <line x1="8" y1="2" x2="8" y2="6" />
+                      <line x1="3" y1="10" x2="21" y2="10" />
+                    </svg>
+                  </button>
+                </div>
                 {fieldErrors?.timeline && (
                   <div id="c-date-error" role="alert" className={styles.fieldError}>
                     {fieldErrors.timeline}

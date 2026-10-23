@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import type { FormEvent } from "react";
 import { Header } from "./Header";
 import { Footer } from "./Footer";
+import { ScrollToTop } from "./ScrollToTop";
 import type {
   CommonContent,
   CompanyContent,
@@ -418,6 +419,7 @@ export function LegalPageView({
       </main>
 
       <Footer common={common} lang={lang} />
+      <ScrollToTop />
     </div>
   );
 }

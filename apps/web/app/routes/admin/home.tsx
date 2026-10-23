@@ -175,6 +175,82 @@ export default function AdminHomePage() {
     });
   };
 
+  const handleAddPhotoItem = () => {
+    setFormData((prev) => ({
+      ...prev,
+      savoirFaire: {
+        ...prev.savoirFaire,
+        photoItems: [...(prev.savoirFaire.photoItems || []), { fr: "", en: "" }],
+      },
+    }));
+  };
+
+  const handleRemovePhotoItem = (index: number) => {
+    setFormData((prev) => ({
+      ...prev,
+      savoirFaire: {
+        ...prev.savoirFaire,
+        photoItems: prev.savoirFaire.photoItems.filter((_, idx) => idx !== index),
+      },
+    }));
+  };
+
+  const handleMovePhotoItem = (index: number, direction: -1 | 1) => {
+    setFormData((prev) => {
+      const items = [...prev.savoirFaire.photoItems];
+      const targetIdx = index + direction;
+      if (targetIdx < 0 || targetIdx >= items.length) return prev;
+      const temp = items[index];
+      items[index] = items[targetIdx];
+      items[targetIdx] = temp;
+      return {
+        ...prev,
+        savoirFaire: {
+          ...prev.savoirFaire,
+          photoItems: items,
+        },
+      };
+    });
+  };
+
+  const handleAddVideoItem = () => {
+    setFormData((prev) => ({
+      ...prev,
+      savoirFaire: {
+        ...prev.savoirFaire,
+        videoItems: [...(prev.savoirFaire.videoItems || []), { fr: "", en: "" }],
+      },
+    }));
+  };
+
+  const handleRemoveVideoItem = (index: number) => {
+    setFormData((prev) => ({
+      ...prev,
+      savoirFaire: {
+        ...prev.savoirFaire,
+        videoItems: prev.savoirFaire.videoItems.filter((_, idx) => idx !== index),
+      },
+    }));
+  };
+
+  const handleMoveVideoItem = (index: number, direction: -1 | 1) => {
+    setFormData((prev) => {
+      const items = [...prev.savoirFaire.videoItems];
+      const targetIdx = index + direction;
+      if (targetIdx < 0 || targetIdx >= items.length) return prev;
+      const temp = items[index];
+      items[index] = items[targetIdx];
+      items[targetIdx] = temp;
+      return {
+        ...prev,
+        savoirFaire: {
+          ...prev.savoirFaire,
+          videoItems: items,
+        },
+      };
+    });
+  };
+
   return (
     <div className={styles.container}>
       <header className={styles.header}>
@@ -516,27 +592,72 @@ export default function AdminHomePage() {
                     onChange={(e) => updateLocalized(["savoirFaire", "photoTitle"], e.target.value)}
                   />
                 </div>
-                {formData.savoirFaire.photoItems.map((item, idx) => (
-                  <div key={idx} className={styles.fieldGroup}>
-                    <label className={styles.label} htmlFor={`sf-photo-${idx}`}>
-                      Élément photo {idx + 1}
-                    </label>
-                    <input
-                      id={`sf-photo-${idx}`}
-                      type="text"
-                      className={styles.input}
-                      value={item[activeTab]}
-                      onChange={(e) => {
-                        const newItems = [...formData.savoirFaire.photoItems];
-                        newItems[idx] = { ...newItems[idx], [activeTab]: e.target.value };
-                        setFormData({
-                          ...formData,
-                          savoirFaire: { ...formData.savoirFaire, photoItems: newItems },
-                        });
-                      }}
-                    />
+                {formData.savoirFaire.photoItems.length === 0 ? (
+                  <div className={styles.emptyListNotice}>
+                    Aucun élément photo pour le moment.
                   </div>
-                ))}
+                ) : (
+                  formData.savoirFaire.photoItems.map((item, idx) => (
+                    <div key={idx} className={styles.fieldGroup}>
+                      <label className={styles.label} htmlFor={`sf-photo-${idx}`}>
+                        Élément photo {idx + 1}
+                      </label>
+                      <div className={styles.listItemRow}>
+                        <input
+                          id={`sf-photo-${idx}`}
+                          type="text"
+                          className={styles.input}
+                          value={item[activeTab]}
+                          placeholder={`Texte (${activeTab.toUpperCase()})`}
+                          onChange={(e) => {
+                            const newItems = [...formData.savoirFaire.photoItems];
+                            newItems[idx] = { ...newItems[idx], [activeTab]: e.target.value };
+                            setFormData({
+                              ...formData,
+                              savoirFaire: { ...formData.savoirFaire, photoItems: newItems },
+                            });
+                          }}
+                        />
+                        <button
+                          type="button"
+                          className={styles.itemMoveButton}
+                          disabled={idx === 0}
+                          onClick={() => handleMovePhotoItem(idx, -1)}
+                          aria-label={`Monter élément photo ${idx + 1}`}
+                          title="Monter"
+                        >
+                          ▲
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.itemMoveButton}
+                          disabled={idx === formData.savoirFaire.photoItems.length - 1}
+                          onClick={() => handleMovePhotoItem(idx, 1)}
+                          aria-label={`Descendre élément photo ${idx + 1}`}
+                          title="Descendre"
+                        >
+                          ▼
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.deleteRowButton}
+                          onClick={() => handleRemovePhotoItem(idx)}
+                          aria-label={`Supprimer élément photo ${idx + 1}`}
+                          title="Supprimer"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+                <button
+                  type="button"
+                  className={styles.addRowButton}
+                  onClick={handleAddPhotoItem}
+                >
+                  + Ajouter un élément photo
+                </button>
               </div>
               <div>
                 <div className={styles.fieldGroup}>
@@ -551,27 +672,72 @@ export default function AdminHomePage() {
                     onChange={(e) => updateLocalized(["savoirFaire", "videoTitle"], e.target.value)}
                   />
                 </div>
-                {formData.savoirFaire.videoItems.map((item, idx) => (
-                  <div key={idx} className={styles.fieldGroup}>
-                    <label className={styles.label} htmlFor={`sf-video-${idx}`}>
-                      Élément vidéo {idx + 1}
-                    </label>
-                    <input
-                      id={`sf-video-${idx}`}
-                      type="text"
-                      className={styles.input}
-                      value={item[activeTab]}
-                      onChange={(e) => {
-                        const newItems = [...formData.savoirFaire.videoItems];
-                        newItems[idx] = { ...newItems[idx], [activeTab]: e.target.value };
-                        setFormData({
-                          ...formData,
-                          savoirFaire: { ...formData.savoirFaire, videoItems: newItems },
-                        });
-                      }}
-                    />
+                {formData.savoirFaire.videoItems.length === 0 ? (
+                  <div className={styles.emptyListNotice}>
+                    Aucun élément vidéo pour le moment.
                   </div>
-                ))}
+                ) : (
+                  formData.savoirFaire.videoItems.map((item, idx) => (
+                    <div key={idx} className={styles.fieldGroup}>
+                      <label className={styles.label} htmlFor={`sf-video-${idx}`}>
+                        Élément vidéo {idx + 1}
+                      </label>
+                      <div className={styles.listItemRow}>
+                        <input
+                          id={`sf-video-${idx}`}
+                          type="text"
+                          className={styles.input}
+                          value={item[activeTab]}
+                          placeholder={`Texte (${activeTab.toUpperCase()})`}
+                          onChange={(e) => {
+                            const newItems = [...formData.savoirFaire.videoItems];
+                            newItems[idx] = { ...newItems[idx], [activeTab]: e.target.value };
+                            setFormData({
+                              ...formData,
+                              savoirFaire: { ...formData.savoirFaire, videoItems: newItems },
+                            });
+                          }}
+                        />
+                        <button
+                          type="button"
+                          className={styles.itemMoveButton}
+                          disabled={idx === 0}
+                          onClick={() => handleMoveVideoItem(idx, -1)}
+                          aria-label={`Monter élément vidéo ${idx + 1}`}
+                          title="Monter"
+                        >
+                          ▲
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.itemMoveButton}
+                          disabled={idx === formData.savoirFaire.videoItems.length - 1}
+                          onClick={() => handleMoveVideoItem(idx, 1)}
+                          aria-label={`Descendre élément vidéo ${idx + 1}`}
+                          title="Descendre"
+                        >
+                          ▼
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.deleteRowButton}
+                          onClick={() => handleRemoveVideoItem(idx)}
+                          aria-label={`Supprimer élément vidéo ${idx + 1}`}
+                          title="Supprimer"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+                <button
+                  type="button"
+                  className={styles.addRowButton}
+                  onClick={handleAddVideoItem}
+                >
+                  + Ajouter un élément vidéo
+                </button>
               </div>
             </div>
           </section>
@@ -695,11 +861,12 @@ export default function AdminHomePage() {
               </div>
               <div className={styles.fieldGroup}>
                 <label className={styles.label} htmlFor="sp-btn-url">
-                  Lien de redirection CTA
+                  Lien de redirection CTA (SEMPRA)
                 </label>
                 <input
                   id="sp-btn-url"
-                  type="text"
+                  type="url"
+                  placeholder="https://sempra.be/"
                   className={styles.input}
                   value={formData.sempra.buttonUrl}
                   onChange={(e) =>
@@ -709,6 +876,9 @@ export default function AdminHomePage() {
                     })
                   }
                 />
+                <span className={styles.labelHint}>
+                  URL externe vers le site SEMPRA (ex: https://sempra.be/). Protocole http ou https requis.
+                </span>
               </div>
             </div>
           </section>

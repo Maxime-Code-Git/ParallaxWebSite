@@ -8,13 +8,14 @@ import {
 } from "react-router";
 import { Header } from "../../components/public/Header";
 import { Footer } from "../../components/public/Footer";
+import { ScrollToTop } from "../../components/public/ScrollToTop";
 import { VideoModal } from "../../components/public/VideoModal";
 import { ResponsivePortfolioImage } from "../../components/public/ResponsivePortfolioImage";
 import {
   type PortfolioContent,
   type PortfolioProject,
   type PortfolioCategory,
-  calculateEffectiveSide,
+  resolveProjectPresentationMode,
 } from "../../lib/portfolio-content.shared";
 import { getPublicPortfolioContent } from "../../lib/portfolio-content.server";
 import { getSiteContent, type CommonContent } from "../../lib/site-content.server";
@@ -160,7 +161,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 }
 
 export default function PortfolioPage() {
-  const { lang, common, content, showcaseProjects, panelState, alternateUrls } =
+  const { lang, common, content, panelState, alternateUrls } =
     useLoaderData<LoaderData>();
   const navigate = useNavigate();
   const location = useLocation();
@@ -176,12 +177,16 @@ export default function PortfolioPage() {
   const [isReducedMotion, setIsReducedMotion] = useState(false);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
-    setIsReducedMotion(mq.matches);
-    const handler = (e: MediaQueryListEvent) => setIsReducedMotion(e.matches);
-    mq.addEventListener("change", handler);
-    return () => mq.removeEventListener("change", handler);
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    try {
+      const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+      setIsReducedMotion(Boolean(mq?.matches));
+      const handler = (e: MediaQueryListEvent) => setIsReducedMotion(e.matches);
+      mq.addEventListener?.("change", handler);
+      return () => mq.removeEventListener?.("change", handler);
+    } catch {
+      // safe fallback
+    }
   }, []);
 
   // Cached content ref to keep content rendered during closing animation
@@ -352,22 +357,35 @@ export default function PortfolioPage() {
   const effectiveProject = panelState.isOpen
     ? panelState.activeProject
     : cachedContentRef.current.activeProject;
+  const effectiveProjectPresentationMode = effectiveProject
+    ? resolveProjectPresentationMode(effectiveProject)
+    : "photo";
 
   const activeSec = effectiveCategory ? content.sections[effectiveCategory] : null;
 
-  // Build showcase presentation rows from published projects
-  const rowsToRender = showcaseProjects.map((p, idx) => {
-    const effectiveSide = calculateEffectiveSide(p.side, idx);
+  // Category Entries for Portfolio Overview (Documentaire & Publicité)
+  // Each category has its own diagonal-clipped visual, entry summary, and triggers panel opening
+  const categoriesList: PortfolioCategory[] = ["documentary", "advertising"];
+  const rowsToRender = categoriesList.map((cat) => {
+    const sec = content.sections[cat];
+    const defaultSide = cat === "documentary" ? "left" : "right";
+    const effectiveSide = sec.entrySide || defaultSide;
     const openDirection = effectiveSide === "left" ? ("right" as const) : ("left" as const);
+    const imageId = sec.entryImageId || sec.coverImageId;
+    const isEntrySlot = Boolean(sec.entryImageId);
+    const alt = sec.entryAlt?.[lang] || sec.coverAlt[lang] || sec.title[lang];
+    const summary = sec.entrySummary?.[lang] || sec.intro[lang];
+
     return {
-      category: p.category,
-      categoryTitle: content.sections[p.category].title[lang],
-      summary: p.summary[lang],
-      project: p,
-      alt: p.coverAlt[lang] || p.title[lang],
+      category: cat,
+      categoryTitle: sec.title[lang],
+      summary,
+      imageId,
+      isEntrySlot,
+      alt,
       side: effectiveSide,
       openDirection,
-      sectionUrl: `${getPortfolioSectionUrl(p.category, lang)}?dir=${openDirection}`,
+      sectionUrl: `${getPortfolioSectionUrl(cat, lang)}?dir=${openDirection}`,
     };
   });
 
@@ -434,14 +452,14 @@ export default function PortfolioPage() {
                         }}
                         aria-label={`Ouvrir la rubrique ${row.categoryTitle}`}
                       >
-                        <div className={styles.imageWrapper}>
-                          {row.project.coverImageId && (
+                        <div className={`${styles.imageWrapper} ${styles.imageWrapperDiagonalLeft}`}>
+                          {row.imageId && (
                             <ResponsivePortfolioImage
-                              imageId={row.project.coverImageId}
-                              ownerType="project"
-                              ownerId={row.project.id}
-                              mediaSlot="cover"
-                              mediaMetadata={content.media[row.project.coverImageId]}
+                              imageId={row.imageId}
+                              ownerType="section"
+                              ownerId={row.category}
+                              mediaSlot={row.isEntrySlot ? "category_entry" : "cover"}
+                              mediaMetadata={content.media[row.imageId]}
                               alt={row.alt}
                               className={styles.showcaseImg}
                               loading={idx === 0 ? "eager" : "lazy"}
@@ -526,14 +544,14 @@ export default function PortfolioPage() {
                         }}
                         aria-label={`Ouvrir la rubrique ${row.categoryTitle}`}
                       >
-                        <div className={styles.imageWrapper}>
-                          {row.project.coverImageId && (
+                        <div className={`${styles.imageWrapper} ${styles.imageWrapperDiagonalRight}`}>
+                          {row.imageId && (
                             <ResponsivePortfolioImage
-                              imageId={row.project.coverImageId}
-                              ownerType="project"
-                              ownerId={row.project.id}
-                              mediaSlot="cover"
-                              mediaMetadata={content.media[row.project.coverImageId]}
+                              imageId={row.imageId}
+                              ownerType="section"
+                              ownerId={row.category}
+                              mediaSlot={row.isEntrySlot ? "category_entry" : "cover"}
+                              mediaMetadata={content.media[row.imageId]}
                               alt={row.alt}
                               className={styles.showcaseImg}
                               loading="lazy"
@@ -560,6 +578,7 @@ export default function PortfolioPage() {
 
       <div inert={phase !== "closed" ? true : undefined}>
         <Footer common={common} lang={lang} />
+        <ScrollToTop />
       </div>
       </div>
 
@@ -581,6 +600,7 @@ export default function PortfolioPage() {
         hidden={phase === "closed"}
       >
         <div className={styles.panelContent}>
+          <ScrollToTop targetRef={panelRef} />
           {/* Top navigation buttons */}
           <div className={styles.panelNavButtons}>
             {effectiveProject ? (
@@ -667,7 +687,44 @@ export default function PortfolioPage() {
               <h1 className={styles.detailTitle}>{effectiveProject.title[lang]}</h1>
               <p className={styles.detailSummary}>{effectiveProject.summary[lang]}</p>
 
-              {effectiveProject.coverImageId && (
+              {/* Hero Media according to Presentation Mode */}
+              {effectiveProjectPresentationMode === "video" && effectiveProject.video?.url ? (
+                <div className={styles.detailCoverWrap}>
+                  <div className={styles.showreelCard}>
+                    {effectiveProject.video.coverImageId ? (
+                      <ResponsivePortfolioImage
+                        imageId={effectiveProject.video.coverImageId}
+                        ownerType="project"
+                        ownerId={effectiveProject.id}
+                        mediaSlot="video_cover"
+                        mediaMetadata={content.media[effectiveProject.video.coverImageId]}
+                        alt={effectiveProject.title[lang]}
+                        loading="eager"
+                      />
+                    ) : effectiveProject.coverImageId ? (
+                      <ResponsivePortfolioImage
+                        imageId={effectiveProject.coverImageId}
+                        ownerType="project"
+                        ownerId={effectiveProject.id}
+                        mediaSlot="cover"
+                        mediaMetadata={content.media[effectiveProject.coverImageId]}
+                        alt={effectiveProject.title[lang]}
+                        loading="eager"
+                      />
+                    ) : null}
+                    <button
+                      type="button"
+                      className={styles.playBtn}
+                      onClick={() => setActiveVideoUrl(effectiveProject.video!.url)}
+                      aria-label="Lire la vidéo"
+                    >
+                      <svg width="26" height="28" viewBox="0 0 26 28" fill="none">
+                        <path d="M4 3 L23 14 L4 25 Z" fill="#F5F6F7" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              ) : effectiveProject.coverImageId ? (
                 <div className={styles.detailCoverWrap}>
                   <ResponsivePortfolioImage
                     imageId={effectiveProject.coverImageId}
@@ -680,7 +737,7 @@ export default function PortfolioPage() {
                     loading="eager"
                   />
                 </div>
-              )}
+              ) : null}
 
               {/* Typed Editorial Paragraphs */}
               <div className={styles.detailBody}>
@@ -691,8 +748,8 @@ export default function PortfolioPage() {
                 ))}
               </div>
 
-              {/* Video Player Section */}
-              {effectiveProject.video?.url && (
+              {/* Video Player Section (for photo projects that include a secondary video) */}
+              {effectiveProjectPresentationMode === "photo" && effectiveProject.video?.url && (
                 <div className={styles.detailVideoSection}>
                   <div className={styles.showreelCard}>
                     {effectiveProject.video.coverImageId ? (
@@ -757,19 +814,19 @@ export default function PortfolioPage() {
               {/* Category Header Hero */}
               <div
                 className={`${styles.sectionHero} ${
-                  activeSec.category === "documentary" && !activeSec.coverImageId
+                  activeSec.category === "documentary" && !activeSec.bannerImageId && !activeSec.coverImageId
                     ? styles.sectionHeroDocu
                     : styles.sectionHeroPub
                 }`}
               >
-                {activeSec.coverImageId && (
+                {(activeSec.bannerImageId || activeSec.coverImageId) && (
                   <ResponsivePortfolioImage
-                    imageId={activeSec.coverImageId}
+                    imageId={activeSec.bannerImageId || activeSec.coverImageId!}
                     ownerType="section"
                     ownerId={activeSec.category}
-                    mediaSlot="cover"
-                    mediaMetadata={content.media[activeSec.coverImageId]}
-                    alt={activeSec.coverAlt[lang]}
+                    mediaSlot={activeSec.bannerImageId ? "category_banner" : "cover"}
+                    mediaMetadata={content.media[activeSec.bannerImageId || activeSec.coverImageId!]}
+                    alt={activeSec.bannerAlt?.[lang] || activeSec.coverAlt[lang] || activeSec.title[lang]}
                     className={styles.showcaseImg}
                   />
                 )}
@@ -784,53 +841,97 @@ export default function PortfolioPage() {
                 <p className={styles.sectionIntro}>{activeSec.intro[lang]}</p>
               </div>
 
-              {/* Category switch tabs */}
-              <div className={styles.filterTabs}>
-                <Link
-                  to={`${getPortfolioSectionUrl("documentary", lang)}${dirParam}`}
-                  preventScrollReset
-                  className={`${styles.filterTab} ${
-                    activeSec.category === "documentary" ? styles.filterTabActive : ""
-                  }`}
-                >
-                  {content.sections.documentary.title[lang]}
-                </Link>
-                <Link
-                  to={`${getPortfolioSectionUrl("advertising", lang)}${dirParam}`}
-                  preventScrollReset
-                  className={`${styles.filterTab} ${
-                    activeSec.category === "advertising" ? styles.filterTabActive : ""
-                  }`}
-                >
-                  {content.sections.advertising.title[lang]}
-                </Link>
-              </div>
-
               {/* Projects in this section */}
               <div className={styles.projectsList}>
                 {categoryProjects.length > 0 ? (
                   categoryProjects.map((p, pIdx) => {
+                    const isVideoMode = resolveProjectPresentationMode(p) === "video";
                     const isEven = pIdx % 2 === 0;
-                    return (
-                      <Link
-                        to={`${getPortfolioProjectUrl(p, lang)}${dirParam}`}
-                        preventScrollReset
-                        key={p.id}
-                        className={styles.projectCardLink}
-                      >
-                        <div
-                          className={`${styles.projectRow} ${
-                            isEven ? styles.projectRowEven : styles.projectRowOdd
-                          }`}
-                        >
-                          <div
-                            className={isEven ? styles.projectBoxEven : styles.projectBoxOdd}
-                          >
-                            <div
-                              className={`${styles.imageBox} ${
-                                isEven ? styles.aspect32 : styles.aspect45
-                              }`}
+
+                    if (isVideoMode && p.video?.url) {
+                      // VIDEO PRESENTATION MODE (16:9 centered card with play button, separate meta below)
+                      const posterImageId =
+                        p.video.coverImageId || p.draftVideoCoverImageId || p.coverImageId;
+
+                      return (
+                        <div key={p.id} className={styles.videoProjectRow}>
+                          <div className={styles.videoCardWrapper}>
+                            <div className={styles.videoCard169}>
+                              {posterImageId ? (
+                                <ResponsivePortfolioImage
+                                  imageId={posterImageId}
+                                  ownerType="project"
+                                  ownerId={p.id}
+                                  mediaSlot={p.video.coverImageId ? "video_cover" : "cover"}
+                                  mediaMetadata={content.media[posterImageId]}
+                                  alt={p.coverAlt[lang] || p.title[lang]}
+                                  className={styles.videoPosterImg}
+                                />
+                              ) : (
+                                <div className={styles.videoPosterPlaceholder} />
+                              )}
+                              <div className={styles.videoOverlay}>
+                                <button
+                                  type="button"
+                                  className={styles.videoPlayBtn}
+                                  onClick={() => setActiveVideoUrl(p.video!.url)}
+                                  aria-label={`Lire la vidéo : ${p.title[lang]}`}
+                                >
+                                  <svg width="22" height="24" viewBox="0 0 26 28" fill="none">
+                                    <path d="M4 3 L23 14 L4 25 Z" fill="#F5F6F7" />
+                                  </svg>
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className={styles.videoProjectMeta}>
+                            <Link
+                              to={`${getPortfolioProjectUrl(p, lang)}${dirParam}`}
+                              preventScrollReset
+                              className={styles.videoProjectTitleLink}
                             >
+                              <h3 className={styles.projectInfoTitle}>{p.title[lang]}</h3>
+                            </Link>
+                            <p className={styles.projectVideoDesc}>{p.summary[lang]}</p>
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    // PHOTO PRESENTATION MODE (Alternating sides, customizable aspect ratio, text alongside)
+                    const isLeft = p.side === "left" || (p.side === "auto" && isEven);
+                    const isPortrait = p.aspectRatio === "4:5";
+                    const isSquare = p.aspectRatio === "1:1";
+                    const photoBoxClass = isPortrait
+                      ? styles.photoBoxPortrait
+                      : isSquare
+                      ? styles.photoBoxSquare
+                      : styles.photoBoxLandscape;
+                    const ratioClass =
+                      p.aspectRatio === "4:5"
+                        ? styles.aspect45
+                        : p.aspectRatio === "1:1"
+                        ? styles.aspect11
+                        : p.aspectRatio === "16:9"
+                        ? styles.aspect169
+                        : styles.aspect32;
+
+                    return (
+                      <div
+                        key={p.id}
+                        className={`${styles.projectRow} ${
+                          isLeft ? styles.projectRowEven : styles.projectRowOdd
+                        }`}
+                      >
+                        <div className={photoBoxClass}>
+                          <Link
+                            to={`${getPortfolioProjectUrl(p, lang)}${dirParam}`}
+                            preventScrollReset
+                            className={styles.projectImageLink}
+                            aria-label={`Voir le projet ${p.title[lang]}`}
+                          >
+                            <div className={`${styles.imageBox} ${ratioClass}`}>
                               {p.coverImageId && (
                                 <ResponsivePortfolioImage
                                   imageId={p.coverImageId}
@@ -842,24 +943,26 @@ export default function PortfolioPage() {
                                 />
                               )}
                             </div>
-                          </div>
-
-                          <div
-                            className={isEven ? styles.projectTextEven : styles.projectTextOdd}
-                          >
-                            <div className={styles.projectInfoTitle}>
-                              {p.title[lang]}
-                            </div>
-                            <p
-                              className={`${styles.projectInfoDesc} ${
-                                isEven ? styles.projectDescEven : styles.projectDescOdd
-                              }`}
-                            >
-                              {p.summary[lang]}
-                            </p>
-                          </div>
+                          </Link>
                         </div>
-                      </Link>
+
+                        <div className={isLeft ? styles.projectTextEven : styles.projectTextOdd}>
+                          <Link
+                            to={`${getPortfolioProjectUrl(p, lang)}${dirParam}`}
+                            preventScrollReset
+                            className={styles.projectTitleLink}
+                          >
+                            <h3 className={styles.projectInfoTitle}>{p.title[lang]}</h3>
+                          </Link>
+                          <p
+                            className={`${styles.projectInfoDesc} ${
+                              isLeft ? styles.projectDescEven : styles.projectDescOdd
+                            }`}
+                          >
+                            {p.summary[lang]}
+                          </p>
+                        </div>
+                      </div>
                     );
                   })
                 ) : (

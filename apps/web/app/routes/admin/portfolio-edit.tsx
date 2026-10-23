@@ -17,6 +17,7 @@ import {
   type PortfolioMediaItem,
   PORTFOLIO_CATEGORIES,
   slugify,
+  resolveProjectPresentationMode,
 } from "../../lib/portfolio-content.shared";
 import {
   getRawPortfolioContent,
@@ -78,6 +79,8 @@ const ALLOWED_PROJECT_FIELDS = [
   "coverAltEn",
   "showcase",
   "side",
+  "presentationMode",
+  "aspectRatio",
   "status",
   "coverImageId",
   "videoCoverImageId",
@@ -212,6 +215,47 @@ export async function action({ request, params }: ActionFunctionArgs) {
   proj.galleryImageIds = galleryImageIds;
   proj.video = videoObj;
   proj.draftVideoCoverImageId = videoCoverImageId;
+  const presentationMode = (String(formData.get("presentationMode") || "photo") as "photo" | "video");
+  const ALLOWED_ASPECT_RATIOS = ["3:2", "4:5", "16:9", "1:1"] as const;
+  type AllowedAspectRatio = (typeof ALLOWED_ASPECT_RATIOS)[number];
+
+  const submittedAspectRatio = formData.get("aspectRatio");
+  let aspectRatio: AllowedAspectRatio;
+  if (submittedAspectRatio && ALLOWED_ASPECT_RATIOS.includes(submittedAspectRatio as AllowedAspectRatio)) {
+    aspectRatio = submittedAspectRatio as AllowedAspectRatio;
+  } else {
+    aspectRatio = (proj.aspectRatio && ALLOWED_ASPECT_RATIOS.includes(proj.aspectRatio as AllowedAspectRatio))
+      ? (proj.aspectRatio as AllowedAspectRatio)
+      : "3:2";
+  }
+
+  // Pre-validate publication constraints before mutating
+  if (status === "published") {
+    if (presentationMode === "video") {
+      if (!rawVideoUrl) {
+        return Response.json(
+          { error: "Un projet publié en mode Vidéo doit comporter une URL vidéo valide (YouTube ou Vimeo)." },
+          { status: 422, headers: createAdminHeaders() }
+        );
+      }
+      if (!videoCoverImageId && !coverImageId) {
+        return Response.json(
+          { error: "Un projet publié en mode Vidéo doit posséder une affiche vidéo ou une image de couverture." },
+          { status: 422, headers: createAdminHeaders() }
+        );
+      }
+    } else {
+      if (!coverImageId) {
+        return Response.json(
+          { error: "Un projet publié en mode Photo doit posséder une image de couverture." },
+          { status: 422, headers: createAdminHeaders() }
+        );
+      }
+    }
+  }
+
+  proj.presentationMode = presentationMode;
+  proj.aspectRatio = aspectRatio;
   proj.showcase = showcase;
   proj.side = side;
   proj.status = status;
@@ -303,6 +347,12 @@ export default function AdminPortfolioEditPage() {
   const [category, setCategory] = useState(project.category);
   const [showcase, setShowcase] = useState(project.showcase);
   const [side, setSide] = useState(project.side);
+  const [presentationMode, setPresentationMode] = useState<"photo" | "video">(
+    resolveProjectPresentationMode(project)
+  );
+  const [aspectRatio, setAspectRatio] = useState<"3:2" | "4:5" | "16:9" | "1:1">(
+    project.aspectRatio || "3:2"
+  );
   const [status, setStatus] = useState(project.status);
   const [videoUrl, setVideoUrl] = useState(project.video?.url || "");
 
@@ -1003,6 +1053,47 @@ export default function AdminPortfolioEditPage() {
                   <option value="true">Oui (mis en avant sur la page portfolio)</option>
                 </select>
               </div>
+
+              <div className={styles.formGroup}>
+                <label className={styles.label} htmlFor="presentationMode">
+                  Mode de présentation
+                </label>
+                <select
+                  id="presentationMode"
+                  name="presentationMode"
+                  value={presentationMode}
+                  onChange={(e) => setPresentationMode(e.target.value as "photo" | "video")}
+                  className={styles.select}
+                >
+                  <option value="photo">Mode Photo (ratio classique, texte à côté)</option>
+                  <option value="video">Mode Vidéo (carte 16:9 avec lecture, texte dessous)</option>
+                </select>
+                <div className={styles.helperText}>
+                  Le basculement de mode n'efface ni vos images ni vos liens vidéos.
+                </div>
+              </div>
+
+              {presentationMode === "photo" ? (
+                <div className={styles.formGroup}>
+                  <label className={styles.label} htmlFor="aspectRatio">
+                    Format d'image (mode Photo)
+                  </label>
+                  <select
+                    id="aspectRatio"
+                    name="aspectRatio"
+                    value={aspectRatio}
+                    onChange={(e) => setAspectRatio(e.target.value as "3:2" | "4:5" | "16:9" | "1:1")}
+                    className={styles.select}
+                  >
+                    <option value="3:2">Paysage 3:2 (~600px)</option>
+                    <option value="4:5">Portrait 4:5 (~440px)</option>
+                    <option value="1:1">Carré 1:1 (~480px)</option>
+                    <option value="16:9">Panoramique 16:9</option>
+                  </select>
+                </div>
+              ) : (
+                <input type="hidden" name="aspectRatio" value={aspectRatio} />
+              )}
 
               <div className={styles.formGroup}>
                 <label className={styles.label} htmlFor="side">

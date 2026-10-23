@@ -282,7 +282,12 @@ export async function action({ request }: ActionFunctionArgs) {
   const { content: currentContent } = getRawPortfolioContent();
 
   if (ownerType === "section") {
-    if (mediaSlot !== "cover" && mediaSlot !== "showreel_cover") {
+    if (
+      mediaSlot !== "cover" &&
+      mediaSlot !== "showreel_cover" &&
+      mediaSlot !== "category_entry" &&
+      mediaSlot !== "category_banner"
+    ) {
       return jsonError("Emplacement de média non autorisé pour une rubrique.", 400);
     }
     if (!PORTFOLIO_CATEGORIES.includes(ownerId as PortfolioCategory)) {
@@ -409,6 +414,10 @@ export async function action({ request }: ActionFunctionArgs) {
           sec.coverImageId = processedResult.imageId;
         } else if (mediaSlot === "showreel_cover") {
           sec.showreelCoverImageId = processedResult.imageId;
+        } else if (mediaSlot === "category_entry") {
+          sec.entryImageId = processedResult.imageId;
+        } else if (mediaSlot === "category_banner") {
+          sec.bannerImageId = processedResult.imageId;
         }
       }
     } else if (ownerType === "project") {
