@@ -77,9 +77,10 @@ const MODULES: DashboardModule[] = [
   {
     id: "contact",
     title: "Contact",
-    description: "Coordonnées professionnelles, réseaux sociaux et paramètres de messagerie.",
-    status: "Lot suivant",
-    isActive: false,
+    description: "Coordonnées professionnelles, formulaire, types de projet et statut SMTP.",
+    status: "Actif",
+    isActive: true,
+    href: "/admin/contact",
   },
   {
     id: "company",

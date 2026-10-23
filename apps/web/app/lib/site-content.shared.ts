@@ -172,12 +172,253 @@ export interface StudioContent {
   };
 }
 
-export interface SiteContent {
+export interface ProjectTypeOption {
+  id: string;
+  enabled: boolean;
+  label: LocalizedString;
+}
+
+export interface ContactPageContent {
+  seo: {
+    title: LocalizedString;
+    description: LocalizedString;
+  };
+  hero: {
+    title: LocalizedString;
+    subtitle?: LocalizedString;
+  };
+  form: {
+    nameLabel: LocalizedString;
+    namePlaceholder: LocalizedString;
+    emailLabel: LocalizedString;
+    emailPlaceholder: LocalizedString;
+    phoneLabel: LocalizedString;
+    phonePlaceholder: LocalizedString;
+    timelineLabel: LocalizedString;
+    timelinePlaceholder: LocalizedString;
+    typeLabel: LocalizedString;
+    typePlaceholder: LocalizedString;
+    projectTypes: ProjectTypeOption[];
+    messageLabel: LocalizedString;
+    messagePlaceholder: LocalizedString;
+    submitButton: LocalizedString;
+    noticeText: LocalizedString;
+    privacyPolicyText: LocalizedString;
+    privacyPolicyUrl: string;
+  };
+  card: {
+    title: LocalizedString;
+    emailLabel: LocalizedString;
+    phoneLabel: LocalizedString;
+    phone: string;
+    socialLabel: LocalizedString;
+    responseTimeNotice: LocalizedString;
+  };
+  messages: {
+    successTitle: LocalizedString;
+    successMessage: LocalizedString;
+    unavailableMessage: LocalizedString;
+    genericError: LocalizedString;
+    errorSummary?: LocalizedString;
+    nameRequired?: LocalizedString;
+    nameTooLong?: LocalizedString;
+    emailRequired?: LocalizedString;
+    emailInvalid?: LocalizedString;
+    phoneInvalid?: LocalizedString;
+    timelineInvalid?: LocalizedString;
+    typeRequired?: LocalizedString;
+    messageRequired?: LocalizedString;
+    messageTooLong?: LocalizedString;
+    sessionExpired?: LocalizedString;
+    rateLimit?: LocalizedString;
+    inProgress?: LocalizedString;
+    uncertain?: LocalizedString;
+    conflict?: LocalizedString;
+  };
+}
+
+export const DEFAULT_PROJECT_TYPES: readonly ProjectTypeOption[] = [
+  {
+    id: "music-video",
+    enabled: true,
+    label: { fr: "Clip musical", en: "Music video" },
+  },
+  {
+    id: "advertising",
+    enabled: true,
+    label: { fr: "Publicité", en: "Advertising" },
+  },
+  {
+    id: "portrait",
+    enabled: true,
+    label: { fr: "Portrait", en: "Portrait" },
+  },
+  {
+    id: "documentary",
+    enabled: true,
+    label: { fr: "Documentaire", en: "Documentary" },
+  },
+  {
+    id: "other",
+    enabled: true,
+    label: { fr: "Autre", en: "Other" },
+  },
+] as const;
+
+export const DEFAULT_CONTACT_PAGE_MESSAGES = {
+  successTitle: {
+    fr: "Message envoyé avec succès",
+    en: "Message sent successfully",
+  },
+  successMessage: {
+    fr: "Merci pour votre message. Nous reviendrons vers vous dans les meilleurs délais.",
+    en: "Thank you for your message. We will get back to you as soon as possible.",
+  },
+  unavailableMessage: {
+    fr: "Le formulaire de contact est temporairement indisponible. Veuillez nous écrire directement par e-mail.",
+    en: "The contact form is temporarily unavailable. Please write to us directly by email.",
+  },
+  genericError: {
+    fr: "Une erreur est survenue lors de l'envoi de votre message. Veuillez vérifier vos informations et réessayer.",
+    en: "An error occurred while sending your message. Please check your information and try again.",
+  },
+  errorSummary: {
+    fr: "Veuillez corriger les erreurs ci-dessous.",
+    en: "Please correct the errors below.",
+  },
+  nameRequired: {
+    fr: "Le nom ou la raison sociale est obligatoire.",
+    en: "Name or company is required.",
+  },
+  nameTooLong: {
+    fr: "Le nom ne doit pas dépasser 100 caractères.",
+    en: "Name cannot exceed 100 characters.",
+  },
+  emailRequired: {
+    fr: "L'adresse email est obligatoire.",
+    en: "Email address is required.",
+  },
+  emailInvalid: {
+    fr: "L'adresse email est invalide.",
+    en: "Email address is invalid.",
+  },
+  phoneInvalid: {
+    fr: "Le format du numéro de téléphone est invalide.",
+    en: "Phone number format is invalid.",
+  },
+  timelineInvalid: {
+    fr: "L'échéance ne doit pas dépasser 120 caractères.",
+    en: "Timeline cannot exceed 120 characters.",
+  },
+  typeRequired: {
+    fr: "Veuillez sélectionner un type de projet valide.",
+    en: "Please select a valid project type.",
+  },
+  messageRequired: {
+    fr: "Le message est obligatoire.",
+    en: "Message is required.",
+  },
+  messageTooLong: {
+    fr: "Le message ne doit pas dépasser 5 000 caractères.",
+    en: "Message cannot exceed 5,000 characters.",
+  },
+  sessionExpired: {
+    fr: "Votre session de formulaire a expiré ou n'est plus valide. Veuillez recharger la page.",
+    en: "Your form session has expired or is invalid. Please reload the page.",
+  },
+  rateLimit: {
+    fr: "Trop de tentatives. Veuillez réessayer dans {seconds} secondes.",
+    en: "Too many attempts. Please try again in {seconds} seconds.",
+  },
+  inProgress: {
+    fr: "Un envoi identique est déjà en cours de traitement. Veuillez patienter.",
+    en: "A matching submission is already being processed. Please wait.",
+  },
+  uncertain: {
+    fr: "Le statut de transmission de votre message n'a pas pu être confirmé en raison d'un délai de communication. Pour éviter tout doublon, veuillez patienter quelques instants avant de renouveler votre demande.",
+    en: "The transmission status of your message could not be confirmed due to a connection timeout. To prevent duplicates, please wait a moment before trying again.",
+  },
+  conflict: {
+    fr: "Ce jeton de formulaire a déjà été utilisé avec un contenu différent. Veuillez rafraîchir la page pour une nouvelle soumission.",
+    en: "This form session was already submitted with different content. Please refresh the page to submit a new message.",
+  },
+} as const;
+
+export const DEFAULT_CONTACT_PAGE_CONTENT: ContactPageContent = {
+  seo: {
+    title: {
+      fr: "Contact | Parallax - Studio photo & vidéo",
+      en: "Contact | Parallax - Photo & video studio",
+    },
+    description: {
+      fr: "Contactez le studio Parallax pour vos projets photo et vidéo. Clips musicaux, publicités, portraits et documentaires.",
+      en: "Contact Parallax studio for your photo and video projects. Music videos, commercials, portraits and documentaries.",
+    },
+  },
+  hero: {
+    title: {
+      fr: "Vous préférez écrire ? Remplissez le formulaire ci-dessous.",
+      en: "Prefer to write? Fill in the form below.",
+    },
+  },
+  form: {
+    nameLabel: { fr: "Nom / société", en: "Name / company" },
+    namePlaceholder: { fr: "Studio, marque, artiste…", en: "Studio, brand, artist…" },
+    emailLabel: { fr: "Email", en: "Email" },
+    emailPlaceholder: { fr: "vous@exemple.com", en: "you@example.com" },
+    phoneLabel: { fr: "Téléphone (optionnel)", en: "Phone (optional)" },
+    phonePlaceholder: { fr: "04XX XX XX XX", en: "04XX XX XX XX" },
+    timelineLabel: { fr: "Échéance souhaitée", en: "Preferred timeline" },
+    timelinePlaceholder: { fr: "JJ / MM / AAAA", en: "DD / MM / YYYY" },
+    typeLabel: { fr: "Type de projet", en: "Project type" },
+    typePlaceholder: { fr: "Sélectionner…", en: "Select…" },
+    projectTypes: [...DEFAULT_PROJECT_TYPES],
+    messageLabel: { fr: "Votre message", en: "Your message" },
+    messagePlaceholder: { fr: "Racontez-nous votre projet…", en: "Tell us about your project…" },
+    submitButton: { fr: "Envoyer", en: "Send" },
+    noticeText: {
+      fr: "Les informations transmises servent uniquement à répondre à votre demande et préparer une éventuelle prestation.",
+      en: "The information you provide is used only to answer your request and prepare a possible project.",
+    },
+    privacyPolicyText: {
+      fr: "Politique de confidentialité",
+      en: "Privacy policy",
+    },
+    privacyPolicyUrl: "",
+  },
+  card: {
+    title: { fr: "Coordonnées", en: "Details" },
+    emailLabel: { fr: "Email", en: "Email" },
+    phoneLabel: { fr: "Téléphone", en: "Phone" },
+    phone: "",
+    socialLabel: { fr: "Réseaux", en: "Social" },
+    responseTimeNotice: {
+      fr: "Nous répondons sous 48h.",
+      en: "We reply within 48h.",
+    },
+  },
+  messages: {
+    ...DEFAULT_CONTACT_PAGE_MESSAGES,
+  },
+};
+
+export interface SiteContentV1 {
   schemaVersion: 1;
   revision: string;
   updatedAt: string;
   common: CommonContent;
   home: HomeContent;
   studio: StudioContent;
+  media?: Record<string, UploadedMediaMetadata>;
+}
+
+export interface SiteContent {
+  schemaVersion: 2;
+  revision: string;
+  updatedAt: string;
+  common: CommonContent;
+  home: HomeContent;
+  studio: StudioContent;
+  contactPage: ContactPageContent;
   media?: Record<string, UploadedMediaMetadata>;
 }

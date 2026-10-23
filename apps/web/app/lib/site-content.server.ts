@@ -12,8 +12,13 @@ import {
   type HomeContent,
   type LocalizedString,
   type SiteContent,
+  type SiteContentV1,
   type StudioContent,
   type StudioMember,
+  type ContactPageContent,
+  type ProjectTypeOption,
+  DEFAULT_CONTACT_PAGE_CONTENT,
+  DEFAULT_CONTACT_PAGE_MESSAGES,
   type AdminUploadLocation,
   ADMIN_UPLOAD_LOCATIONS,
   DEFAULT_LOCATION_IMAGES,
@@ -351,13 +356,196 @@ export function validateStudioContent(val: unknown): StudioContent {
   };
 }
 
+export function validateProjectTypeOption(val: unknown, context: string): ProjectTypeOption {
+  const obj = assertObject(val, context);
+  assertExactKeys(obj, ["id", "enabled", "label"], context);
+  if (typeof obj.id !== "string" || !/^[a-z0-9_-]+$/i.test(obj.id)) {
+    throw new ValidationError(`${context}.id doit être un identifiant valide (alphanumérique, tirets).`);
+  }
+  if (typeof obj.enabled !== "boolean") {
+    throw new ValidationError(`${context}.enabled doit être un booléen.`);
+  }
+  return {
+    id: obj.id,
+    enabled: obj.enabled,
+    label: validateLocalizedString(obj.label, `${context}.label`),
+  };
+}
+
+export function validateContactPageContent(val: unknown): ContactPageContent {
+  const obj = assertObject(val, "contactPage");
+  assertExactKeys(obj, ["seo", "hero", "form", "card", "messages"], "contactPage");
+
+  const seo = assertObject(obj.seo, "contactPage.seo");
+  assertExactKeys(seo, ["title", "description"], "contactPage.seo");
+
+  const hero = assertObject(obj.hero, "contactPage.hero");
+  if ("subtitle" in hero && hero.subtitle !== undefined) {
+    assertExactKeys(hero, ["title", "subtitle"], "contactPage.hero");
+  } else {
+    assertExactKeys(hero, ["title"], "contactPage.hero");
+  }
+
+  const form = assertObject(obj.form, "contactPage.form");
+  assertExactKeys(
+    form,
+    [
+      "nameLabel",
+      "namePlaceholder",
+      "emailLabel",
+      "emailPlaceholder",
+      "phoneLabel",
+      "phonePlaceholder",
+      "timelineLabel",
+      "timelinePlaceholder",
+      "typeLabel",
+      "typePlaceholder",
+      "projectTypes",
+      "messageLabel",
+      "messagePlaceholder",
+      "submitButton",
+      "noticeText",
+      "privacyPolicyText",
+      "privacyPolicyUrl",
+    ],
+    "contactPage.form"
+  );
+
+  if (!Array.isArray(form.projectTypes) || form.projectTypes.length === 0) {
+    throw new ValidationError("contactPage.form.projectTypes doit être une liste non vide.");
+  }
+  const projectTypes = form.projectTypes.map((pt, idx) =>
+    validateProjectTypeOption(pt, `contactPage.form.projectTypes[${idx}]`)
+  );
+
+  if (typeof form.privacyPolicyUrl !== "string") {
+    throw new ValidationError("contactPage.form.privacyPolicyUrl doit être une chaîne.");
+  }
+  const cleanPrivacyUrl = form.privacyPolicyUrl.trim();
+  if (cleanPrivacyUrl && !/^(https?:\/\/|\/)/i.test(cleanPrivacyUrl)) {
+    throw new ValidationError(
+      "contactPage.form.privacyPolicyUrl doit être une URL absolue ou un chemin relatif valide."
+    );
+  }
+
+  const card = assertObject(obj.card, "contactPage.card");
+  assertExactKeys(
+    card,
+    ["title", "emailLabel", "phoneLabel", "phone", "socialLabel", "responseTimeNotice"],
+    "contactPage.card"
+  );
+  if (typeof card.phone !== "string") {
+    throw new ValidationError("contactPage.card.phone doit être une chaîne.");
+  }
+
+  const messages = assertObject(obj.messages, "contactPage.messages");
+  const knownMessageKeys = [
+    "successTitle",
+    "successMessage",
+    "unavailableMessage",
+    "genericError",
+    "errorSummary",
+    "nameRequired",
+    "nameTooLong",
+    "emailRequired",
+    "emailInvalid",
+    "phoneInvalid",
+    "timelineInvalid",
+    "typeRequired",
+    "messageRequired",
+    "messageTooLong",
+    "sessionExpired",
+    "rateLimit",
+    "inProgress",
+    "uncertain",
+    "conflict",
+  ];
+  for (const k of Object.keys(messages)) {
+    if (!knownMessageKeys.includes(k)) {
+      throw new ValidationError(`contactPage.messages contient une clé inattendue : "${k}".`);
+    }
+  }
+
+  // Required base messages
+  const baseMessages = {
+    successTitle: validateLocalizedString(messages.successTitle, "contactPage.messages.successTitle"),
+    successMessage: validateLocalizedString(messages.successMessage, "contactPage.messages.successMessage"),
+    unavailableMessage: validateLocalizedString(messages.unavailableMessage, "contactPage.messages.unavailableMessage"),
+    genericError: validateLocalizedString(messages.genericError, "contactPage.messages.genericError"),
+  };
+
+  // Optional customized messages
+  const optionalMessages: Record<string, LocalizedString> = {};
+  for (const k of knownMessageKeys) {
+    if (k in messages && !Object.prototype.hasOwnProperty.call(baseMessages, k)) {
+      optionalMessages[k] = validateLocalizedString(messages[k], `contactPage.messages.${k}`);
+    }
+  }
+
+  const mergedMessages = {
+    ...DEFAULT_CONTACT_PAGE_MESSAGES,
+    ...baseMessages,
+    ...optionalMessages,
+  };
+
+  return {
+    seo: {
+      title: validateLocalizedString(seo.title, "contactPage.seo.title"),
+      description: validateLocalizedString(seo.description, "contactPage.seo.description"),
+    },
+    hero: {
+      title: validateLocalizedString(hero.title, "contactPage.hero.title"),
+      ...(hero.subtitle !== undefined
+        ? { subtitle: validateLocalizedString(hero.subtitle, "contactPage.hero.subtitle") }
+        : {}),
+    },
+    form: {
+      nameLabel: validateLocalizedString(form.nameLabel, "contactPage.form.nameLabel"),
+      namePlaceholder: validateLocalizedString(form.namePlaceholder, "contactPage.form.namePlaceholder"),
+      emailLabel: validateLocalizedString(form.emailLabel, "contactPage.form.emailLabel"),
+      emailPlaceholder: validateLocalizedString(form.emailPlaceholder, "contactPage.form.emailPlaceholder"),
+      phoneLabel: validateLocalizedString(form.phoneLabel, "contactPage.form.phoneLabel"),
+      phonePlaceholder: validateLocalizedString(form.phonePlaceholder, "contactPage.form.phonePlaceholder"),
+      timelineLabel: validateLocalizedString(form.timelineLabel, "contactPage.form.timelineLabel"),
+      timelinePlaceholder: validateLocalizedString(form.timelinePlaceholder, "contactPage.form.timelinePlaceholder"),
+      typeLabel: validateLocalizedString(form.typeLabel, "contactPage.form.typeLabel"),
+      typePlaceholder: validateLocalizedString(form.typePlaceholder, "contactPage.form.typePlaceholder"),
+      projectTypes,
+      messageLabel: validateLocalizedString(form.messageLabel, "contactPage.form.messageLabel"),
+      messagePlaceholder: validateLocalizedString(form.messagePlaceholder, "contactPage.form.messagePlaceholder"),
+      submitButton: validateLocalizedString(form.submitButton, "contactPage.form.submitButton"),
+      noticeText: validateLocalizedString(form.noticeText, "contactPage.form.noticeText"),
+      privacyPolicyText: validateLocalizedString(form.privacyPolicyText, "contactPage.form.privacyPolicyText"),
+      privacyPolicyUrl: cleanPrivacyUrl,
+    },
+    card: {
+      title: validateLocalizedString(card.title, "contactPage.card.title"),
+      emailLabel: validateLocalizedString(card.emailLabel, "contactPage.card.emailLabel"),
+      phoneLabel: validateLocalizedString(card.phoneLabel, "contactPage.card.phoneLabel"),
+      phone: card.phone.trim(),
+      socialLabel: validateLocalizedString(card.socialLabel, "contactPage.card.socialLabel"),
+      responseTimeNotice: validateLocalizedString(card.responseTimeNotice, "contactPage.card.responseTimeNotice"),
+    },
+    messages: mergedMessages,
+  };
+}
+
+export function migrateSiteContentV1ToV2(v1: SiteContentV1): SiteContent {
+  return {
+    schemaVersion: 2,
+    revision: v1.revision,
+    updatedAt: v1.updatedAt,
+    common: structuredClone(v1.common),
+    home: structuredClone(v1.home),
+    studio: structuredClone(v1.studio),
+    contactPage: structuredClone(DEFAULT_CONTACT_PAGE_CONTENT),
+    media: v1.media ? structuredClone(v1.media) : {},
+  };
+}
+
 export function validateSiteContent(val: unknown): SiteContent {
   const obj = assertObject(val, "siteContent");
-  assertExactKeys(obj, ["schemaVersion", "revision", "updatedAt", "common", "home", "studio", "media"], "siteContent");
 
-  if (obj.schemaVersion !== 1) {
-    throw new ValidationError(`schemaVersion non supporté: ${String(obj.schemaVersion)}. Attendu: 1`);
-  }
   if (typeof obj.revision !== "string" || !/^[0-9a-f]{32}$/i.test(obj.revision)) {
     throw new ValidationError("revision doit être une chaîne hexadécimale de 32 caractères.");
   }
@@ -376,15 +564,43 @@ export function validateSiteContent(val: unknown): SiteContent {
     }
   }
 
-  return {
-    schemaVersion: 1,
-    revision: obj.revision.toLowerCase(),
-    updatedAt: obj.updatedAt,
-    common: validateCommonContent(obj.common),
-    home: validateHomeContent(obj.home),
-    studio: validateStudioContent(obj.studio),
-    media,
-  };
+  if (obj.schemaVersion === 1) {
+    assertExactKeys(
+      obj,
+      ["schemaVersion", "revision", "updatedAt", "common", "home", "studio", "media"],
+      "siteContent"
+    );
+    const v1Content: SiteContentV1 = {
+      schemaVersion: 1,
+      revision: obj.revision.toLowerCase(),
+      updatedAt: obj.updatedAt,
+      common: validateCommonContent(obj.common),
+      home: validateHomeContent(obj.home),
+      studio: validateStudioContent(obj.studio),
+      media,
+    };
+    return migrateSiteContentV1ToV2(v1Content);
+  }
+
+  if (obj.schemaVersion === 2) {
+    assertExactKeys(
+      obj,
+      ["schemaVersion", "revision", "updatedAt", "common", "home", "studio", "contactPage", "media"],
+      "siteContent"
+    );
+    return {
+      schemaVersion: 2,
+      revision: obj.revision.toLowerCase(),
+      updatedAt: obj.updatedAt,
+      common: validateCommonContent(obj.common),
+      home: validateHomeContent(obj.home),
+      studio: validateStudioContent(obj.studio),
+      contactPage: validateContactPageContent(obj.contactPage),
+      media,
+    };
+  }
+
+  throw new ValidationError(`schemaVersion non supporté: ${String(obj.schemaVersion)}. Attendu: 1 ou 2`);
 }
 
 export function ensureSiteContentFileInitialized(): string {
@@ -401,7 +617,15 @@ export function getRawSiteContent(): { content: SiteContent; isCorrupted: boolea
     const filePath = ensureSiteContentFileInitialized();
     const content = fs.readFileSync(filePath, "utf-8");
     const parsed = JSON.parse(content);
-    return { content: validateSiteContent(parsed), isCorrupted: false };
+    const validated = validateSiteContent(parsed);
+    if (parsed.schemaVersion === 1) {
+      try {
+        atomicWriteJson(filePath, validated);
+      } catch (writeErr) {
+        console.warn("Notice: Impossible d'écrire la migration V2 sur le disque:", writeErr);
+      }
+    }
+    return { content: validated, isCorrupted: false };
   } catch (err) {
     if (err instanceof Error && err.message.startsWith("CRITICAL:")) {
       throw err;
@@ -706,4 +930,88 @@ export function saveSiteMediaRevert(
   const filePath = getSiteContentFilePath();
   atomicWriteJson(filePath, nextContent);
   return { newRevision: nextRevision, content: nextContent, defaultImageId };
+}
+
+export interface SaveContactCoordinates {
+  email?: string;
+  instagramUrl?: string;
+  youtubeUrl?: string;
+}
+
+export function saveContactPageContent(
+  newContactPage: ContactPageContent,
+  previousRevision: string,
+  canonicalCoordinates?: SaveContactCoordinates
+): string {
+  const current = getRawSiteContent();
+  if (current.isCorrupted) {
+    throw new CorruptedContentError();
+  }
+  if (current.content.revision !== previousRevision) {
+    throw new RevisionConflictError();
+  }
+
+  const validatedContact = validateContactPageContent(newContactPage);
+
+  const updatedHome = structuredClone(current.content.home);
+  if (canonicalCoordinates) {
+    if (typeof canonicalCoordinates.email === "string") {
+      const emailTrim = canonicalCoordinates.email.trim();
+      if (emailTrim && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailTrim)) {
+        throw new ValidationError("L'adresse e-mail canonique est invalide.");
+      }
+      updatedHome.contact.email = emailTrim;
+    }
+    if (typeof canonicalCoordinates.instagramUrl === "string") {
+      const igTrim = canonicalCoordinates.instagramUrl.trim();
+      if (igTrim && !/^https?:\/\//i.test(igTrim)) {
+        throw new ValidationError("L'URL Instagram canonique doit être une URL HTTP(S) valide.");
+      }
+      updatedHome.contact.instagramUrl = igTrim;
+    }
+    if (typeof canonicalCoordinates.youtubeUrl === "string") {
+      const ytTrim = canonicalCoordinates.youtubeUrl.trim();
+      if (ytTrim && !/^https?:\/\//i.test(ytTrim)) {
+        throw new ValidationError("L'URL YouTube canonique doit être une URL HTTP(S) valide.");
+      }
+      updatedHome.contact.youtubeUrl = ytTrim;
+    }
+  }
+
+  const nextRevision = crypto.randomBytes(16).toString("hex");
+
+  // Prune media registry to retain only currently active locations
+  const activeMediaIds = new Set<string>();
+  if (isUuid(updatedHome.showreel.coverImageId)) {
+    activeMediaIds.add(updatedHome.showreel.coverImageId.toLowerCase());
+  }
+  if (isUuid(updatedHome.duo.imageId)) {
+    activeMediaIds.add(updatedHome.duo.imageId.toLowerCase());
+  }
+  for (const member of current.content.studio.team.members) {
+    if (isUuid(member.imageId)) {
+      activeMediaIds.add(member.imageId.toLowerCase());
+    }
+  }
+
+  const prunedMedia: Record<string, UploadedMediaMetadata> = {};
+  for (const id of activeMediaIds) {
+    if (current.content.media?.[id]) {
+      prunedMedia[id] = current.content.media[id];
+    }
+  }
+
+  const nextContent: SiteContent = {
+    ...current.content,
+    schemaVersion: 2,
+    revision: nextRevision,
+    updatedAt: new Date().toISOString(),
+    home: updatedHome,
+    contactPage: validatedContact,
+    media: prunedMedia,
+  };
+
+  const filePath = getSiteContentFilePath();
+  atomicWriteJson(filePath, nextContent);
+  return nextRevision;
 }

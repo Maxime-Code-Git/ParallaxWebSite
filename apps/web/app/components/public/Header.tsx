@@ -6,7 +6,7 @@ import styles from "./header.module.css";
 interface HeaderProps {
   common: CommonContent;
   lang: "fr" | "en";
-  currentRoute: "home" | "studio" | "portfolio" | "client-area" | "gallery";
+  currentRoute: "home" | "studio" | "portfolio" | "contact" | "client-area" | "gallery";
   alternateUrls?: { fr: string; en: string };
 }
 
@@ -15,7 +15,7 @@ export function Header({ common, lang, currentRoute, alternateUrls }: HeaderProp
 
   const homeHref = `/${lang}`;
   const studioHref = `/${lang}/studio`;
-  const contactHref = currentRoute === "home" ? "#contact" : `/${lang}#contact`;
+  const contactHref = `/${lang}/contact`;
   const sempraHref = currentRoute === "home" ? "#sempra" : `/${lang}#sempra`;
   const portfolioHref = lang === "fr" ? "/fr/projets" : "/en/projects";
   const clientAreaHref = lang === "fr" ? "/fr/espace-client" : "/en/client-area";
@@ -25,6 +25,8 @@ export function Header({ common, lang, currentRoute, alternateUrls }: HeaderProp
     alternateUrls?.fr ||
     (currentRoute === "studio"
       ? "/fr/studio"
+      : currentRoute === "contact"
+      ? "/fr/contact"
       : currentRoute === "portfolio"
       ? "/fr/projets"
       : currentRoute === "client-area"
@@ -34,6 +36,8 @@ export function Header({ common, lang, currentRoute, alternateUrls }: HeaderProp
     alternateUrls?.en ||
     (currentRoute === "studio"
       ? "/en/studio"
+      : currentRoute === "contact"
+      ? "/en/contact"
       : currentRoute === "portfolio"
       ? "/en/projects"
       : currentRoute === "client-area"
@@ -66,9 +70,13 @@ export function Header({ common, lang, currentRoute, alternateUrls }: HeaderProp
             >
               {common.navigation.studio[lang]}
             </Link>
-            <a href={contactHref} className={styles.navLink}>
+            <Link
+              to={contactHref}
+              className={`${styles.navLink} ${currentRoute === "contact" ? styles.navLinkActive : ""}`}
+              aria-current={currentRoute === "contact" ? "page" : undefined}
+            >
               {common.navigation.contact[lang]}
-            </a>
+            </Link>
             <a href={sempraHref} className={styles.navLink}>
               {common.navigation.sempra[lang]}
             </a>
@@ -161,13 +169,14 @@ export function Header({ common, lang, currentRoute, alternateUrls }: HeaderProp
           >
             {common.navigation.studio[lang]}
           </Link>
-          <a
-            href={contactHref}
-            className={styles.mobileNavLink}
+          <Link
+            to={contactHref}
+            className={`${styles.mobileNavLink} ${currentRoute === "contact" ? styles.navLinkActive : ""}`}
             onClick={() => setMobileMenuOpen(false)}
+            aria-current={currentRoute === "contact" ? "page" : undefined}
           >
             {common.navigation.contact[lang]}
-          </a>
+          </Link>
           <a
             href={sempraHref}
             className={styles.mobileNavLink}

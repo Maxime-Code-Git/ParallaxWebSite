@@ -9,6 +9,8 @@ export default [
   route("en", "routes/public/home.tsx", { id: "en-home" }),
   route("fr/studio", "routes/public/studio.tsx", { id: "fr-studio" }),
   route("en/studio", "routes/public/studio.tsx", { id: "en-studio" }),
+  route("fr/contact", "routes/public/contact.tsx", { id: "fr-contact" }),
+  route("en/contact", "routes/public/contact.tsx", { id: "en-contact" }),
 
   // Public portfolio FR (Persistent single route container)
   route("fr/projets/:rubrique?/:slugFr?", "routes/public/portfolio.tsx", { id: "fr-portfolio" }),
@@ -21,6 +23,7 @@ export default [
   route("admin/dashboard", "routes/admin/dashboard.tsx"),
   route("admin/home", "routes/admin/home.tsx"),
   route("admin/studio", "routes/admin/studio.tsx"),
+  route("admin/contact", "routes/admin/contact.tsx"),
   route("admin/portfolio", "routes/admin/portfolio.tsx"),
   route("admin/portfolio/:id", "routes/admin/portfolio-edit.tsx"),
   route("admin/portfolio/section/:category", "routes/admin/portfolio-section.tsx"),
