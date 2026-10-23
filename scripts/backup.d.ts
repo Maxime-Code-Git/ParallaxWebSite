@@ -9,6 +9,7 @@ export interface BackupManifestFile {
 }
 
 export interface BackupManifest {
+  manifestVersion?: number;
   backupId: string;
   createdAt: string;
   nodeVersion: string;

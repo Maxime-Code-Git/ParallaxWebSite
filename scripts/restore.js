@@ -5,6 +5,14 @@ import crypto from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { validateSiteContentDocument, validatePortfolioContentDocument } from "@parallax/shared";
+import {
+  assertNoUserSymlinks,
+  assertPathConfined,
+  getCanonicalPath,
+  isSubPath,
+  isSymlink,
+  pathExists,
+} from "./path-safety.js";
 
 /**
  * Computes SHA-256 of a file using a bounded-memory buffer (64 KB).
@@ -25,25 +33,51 @@ export function computeSha256(filePath) {
 }
 
 /**
- * Checks if childPath is strictly a subpath of parentDir (preventing traversal).
+ * Strict component-to-path association rules.
+ * Prevents bypassing schema validation through component renaming or arbitrary placement.
  */
-export function isSubPath(parentDir, childPath) {
-  const rel = path.relative(path.resolve(parentDir), path.resolve(childPath));
-  return Boolean(rel && !rel.startsWith("..") && !path.isAbsolute(rel));
-}
+export const COMPONENT_RULES = {
+  SITE_CONTENT: { exact: "content/site-content.json" },
+  PORTFOLIO_CONTENT: { exact: "content/portfolio-content.json" },
+  GALLERY_DB: { exact: "db/galleries.sqlite" },
+  RATE_LIMIT_DB: { exact: "db/rate-limit.sqlite" },
+  ENV_CONFIG: { exact: "config/env.local" },
+  SITE_MEDIA: { prefix: "media/site/" },
+  PORTFOLIO_MEDIA: { prefix: "media/portfolio/" },
+  GALLERY_MEDIA: { prefix: "media/gallery/" },
+  GALLERY_IMPORT: { prefix: "imports/gallery-import/" },
+};
 
 /**
  * Verifies and restores a Parallax backup.
- * Enforces strict manifest validation, path confinement, and application schema validation.
+ * Restores strictly to a fresh, non-existing isolated target directory.
+ * Pre-validates all hashes, sizes, and application schemas before copying any files.
  */
 export function performSiteRestore(options = {}) {
-  const { backupDir, targetDir, dryRun = false, verifyOnly = false, force = false, serviceStopped = false } = options;
+  const { backupDir, targetDir, dryRun = false, verifyOnly = false, force } = options;
+
+  // 1. Refuse in-place restore and --force explicitly
+  if (force) {
+    throw new Error(
+      "L'option --force est interdite : la restauration automatisée refuse l'écrasement ou le mélange d'un dossier existant. La cible doit être un dossier neuf non existant."
+    );
+  }
+
+  if (!verifyOnly) {
+    if (!targetDir || typeof targetDir !== "string" || !targetDir.trim()) {
+      throw new Error(
+        "Restauration automatisée refusée : le paramètre targetDir est obligatoire. La restauration s'effectue exclusivement vers un répertoire cible isolé neuf pour prévenir tout écrasement accidentel."
+      );
+    }
+  }
 
   if (!backupDir || !fs.existsSync(backupDir)) {
     throw new Error(`Le dossier de sauvegarde spécifié est introuvable : ${backupDir}`);
   }
 
   const resolvedBackupDir = path.resolve(backupDir);
+  assertNoUserSymlinks(resolvedBackupDir, "Dossier de sauvegarde");
+
   const manifestPath = path.join(resolvedBackupDir, "manifest.json");
   if (!fs.existsSync(manifestPath)) {
     throw new Error(`manifest.json absent dans le dossier de sauvegarde : ${resolvedBackupDir}`);
@@ -53,10 +87,12 @@ export function performSiteRestore(options = {}) {
   try {
     manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
   } catch (err) {
-    throw new Error(`manifest.json invalide (JSON corrompu) : ${err instanceof Error ? err.message : String(err)}`, { cause: err });
+    throw new Error(`manifest.json invalide (JSON corrompu) : ${err instanceof Error ? err.message : String(err)}`, {
+      cause: err,
+    });
   }
 
-  // 1. Strict Manifest Structure Validation
+  // 2. Strict Manifest Structure & Version Validation
   if (
     !manifest ||
     typeof manifest !== "object" ||
@@ -70,17 +106,37 @@ export function performSiteRestore(options = {}) {
     throw new Error(`Structure de manifeste invalide ou sauvegarde vide (totalFiles: ${manifest?.totalFiles})`);
   }
 
-  // Ensure mandatory core components are present
-  const components = new Set(manifest.files.map((f) => f.component));
-  if (!components.has("SITE_CONTENT") || !components.has("PORTFOLIO_CONTENT")) {
+  if (manifest.manifestVersion !== 1) {
+    throw new Error(`Version de manifeste non supportée ou inconnue : ${manifest.manifestVersion}`);
+  }
+
+  // Check mandatory components
+  const presentComponents = new Set(manifest.files.map((f) => f.component));
+  if (!presentComponents.has("SITE_CONTENT") || !presentComponents.has("PORTFOLIO_CONTENT")) {
     throw new Error("Manifeste incomplet : composants indispensables SITE_CONTENT ou PORTFOLIO_CONTENT absents.");
   }
 
-  // Check duplicate paths and validate relative paths
+  // Validate component rules, paths, checksums, and duplicate detection
   const relPaths = new Set();
   for (const item of manifest.files) {
+    if (!item.component || typeof item.component !== "string" || !(item.component in COMPONENT_RULES)) {
+      throw new Error(`Composant inconnu ou non autorisé dans le manifeste : ${item.component}`);
+    }
+
     if (!item.backupRelPath || typeof item.backupRelPath !== "string") {
-      throw new Error(`Fichier avec backupRelPath manquant ou invalide dans le manifeste.`);
+      throw new Error(`Fichier avec backupRelPath manquant dans le manifeste pour ${item.component}`);
+    }
+
+    const rule = COMPONENT_RULES[item.component];
+    if (rule.exact && item.backupRelPath !== rule.exact) {
+      throw new Error(
+        `Association composant/chemin incohérente pour ${item.component} : attendu ${rule.exact}, obtenu ${item.backupRelPath}`
+      );
+    }
+    if (rule.prefix && !item.backupRelPath.startsWith(rule.prefix)) {
+      throw new Error(
+        `Association composant/chemin incohérente pour ${item.component} : attendu préfixe ${rule.prefix}, obtenu ${item.backupRelPath}`
+      );
     }
 
     const normalizedRel = path.normalize(item.backupRelPath);
@@ -108,17 +164,23 @@ export function performSiteRestore(options = {}) {
     }
 
     const resolvedInBackup = path.resolve(resolvedBackupDir, normalizedRel);
-    if (!isSubPath(resolvedBackupDir, resolvedInBackup)) {
-      throw new Error(`Tentative d'évasion de la sauvegarde détectée : ${item.backupRelPath}`);
-    }
+    assertPathConfined(resolvedBackupDir, resolvedInBackup, `Fichier de sauvegarde (${item.backupRelPath})`);
   }
 
-  // 2. Verify backup integrity against SHA-256 checksums and sizes
+  // 3. Pre-Restore Validation: Check integrity and deep application schemas on backup files BEFORE any copy
   const integrityErrors = [];
+  const verificationResults = [];
+
   for (const item of manifest.files) {
     const backupFilePath = path.join(resolvedBackupDir, item.backupRelPath);
+
     if (!fs.existsSync(backupFilePath)) {
       integrityErrors.push(`Fichier manquant dans la sauvegarde : ${item.backupRelPath}`);
+      continue;
+    }
+
+    if (isSymlink(backupFilePath)) {
+      integrityErrors.push(`Lien symbolique interdit détecté dans la sauvegarde : ${item.backupRelPath}`);
       continue;
     }
 
@@ -127,6 +189,7 @@ export function performSiteRestore(options = {}) {
       integrityErrors.push(
         `Taille de fichier divergente pour ${item.backupRelPath} (attendu: ${item.sizeBytes}, constaté: ${stat.size})`
       );
+      continue;
     }
 
     const currentSha = computeSha256(backupFilePath);
@@ -134,219 +197,144 @@ export function performSiteRestore(options = {}) {
       integrityErrors.push(
         `Checksum SHA-256 invalide pour ${item.backupRelPath} (attendu: ${item.sha256}, obtenu: ${currentSha})`
       );
+      continue;
     }
-  }
 
-  if (integrityErrors.length > 0) {
-    return {
-      success: false,
-      reason: "INTEGRITY_CHECK_FAILED",
-      errors: integrityErrors,
-    };
-  }
-
-  // Helper to validate application schemas on files
-  const validateApplicationSchemas = (fileEntries) => {
-    const results = [];
-    let hasFailure = false;
-
-    for (const entry of fileEntries) {
-      const { filePath, component } = entry;
-
-      if (component === "SITE_CONTENT" || filePath.endsWith("site-content.json")) {
-        try {
-          const raw = fs.readFileSync(filePath, "utf-8");
-          const parsed = JSON.parse(raw);
-          const valResult = validateSiteContentDocument(parsed);
-          if (!valResult.success) {
-            hasFailure = true;
-            results.push({
-              path: filePath,
-              type: "site_content",
-              valid: false,
-              error: valResult.error || valResult.reason,
-            });
-          } else {
-            results.push({
-              path: filePath,
-              type: "site_content",
-              valid: true,
-              schemaVersion: parsed.schemaVersion,
-            });
-          }
-        } catch (err) {
-          hasFailure = true;
-          results.push({ path: filePath, type: "site_content", valid: false, error: err.message });
+    // Deep Schema and Content Verification
+    if (item.component === "SITE_CONTENT") {
+      try {
+        const raw = fs.readFileSync(backupFilePath, "utf-8");
+        const parsed = JSON.parse(raw);
+        const valResult = validateSiteContentDocument(parsed);
+        if (!valResult.success) {
+          integrityErrors.push(`Schéma SITE_CONTENT invalide : ${valResult.error || valResult.reason}`);
+          verificationResults.push({ path: backupFilePath, type: "site_content", valid: false, error: valResult.error });
+        } else {
+          verificationResults.push({ path: backupFilePath, type: "site_content", valid: true, schemaVersion: parsed.schemaVersion });
         }
-      } else if (component === "PORTFOLIO_CONTENT" || filePath.endsWith("portfolio-content.json")) {
-        try {
-          const raw = fs.readFileSync(filePath, "utf-8");
-          const parsed = JSON.parse(raw);
-          const valResult = validatePortfolioContentDocument(parsed);
-          if (!valResult.success) {
-            hasFailure = true;
-            results.push({
-              path: filePath,
-              type: "portfolio_content",
-              valid: false,
-              error: valResult.error || valResult.reason,
-            });
-          } else {
-            results.push({
-              path: filePath,
-              type: "portfolio_content",
-              valid: true,
-              schemaVersion: parsed.schemaVersion,
-            });
-          }
-        } catch (err) {
-          hasFailure = true;
-          results.push({ path: filePath, type: "portfolio_content", valid: false, error: err.message });
+      } catch (err) {
+        integrityErrors.push(`Fichier SITE_CONTENT JSON corrompu : ${err.message}`);
+        verificationResults.push({ path: backupFilePath, type: "site_content", valid: false, error: err.message });
+      }
+    } else if (item.component === "PORTFOLIO_CONTENT") {
+      try {
+        const raw = fs.readFileSync(backupFilePath, "utf-8");
+        const parsed = JSON.parse(raw);
+        const valResult = validatePortfolioContentDocument(parsed);
+        if (!valResult.success) {
+          integrityErrors.push(`Schéma PORTFOLIO_CONTENT invalide : ${valResult.error || valResult.reason}`);
+          verificationResults.push({ path: backupFilePath, type: "portfolio_content", valid: false, error: valResult.error });
+        } else {
+          verificationResults.push({ path: backupFilePath, type: "portfolio_content", valid: true, schemaVersion: parsed.schemaVersion });
         }
-      } else if (filePath.endsWith(".sqlite")) {
-        let db;
-        try {
-          db = new DatabaseSync(filePath, { readOnly: true });
-          const integrityCheck = db.prepare("PRAGMA integrity_check").get();
-          if (!integrityCheck || integrityCheck.integrity_check !== "ok") {
-            hasFailure = true;
-            results.push({
-              path: filePath,
-              type: "sqlite",
-              valid: false,
-              error: `PRAGMA integrity_check échoué : ${JSON.stringify(integrityCheck)}`,
-            });
+      } catch (err) {
+        integrityErrors.push(`Fichier PORTFOLIO_CONTENT JSON corrompu : ${err.message}`);
+        verificationResults.push({ path: backupFilePath, type: "portfolio_content", valid: false, error: err.message });
+      }
+    } else if (item.component === "GALLERY_DB") {
+      let db;
+      try {
+        db = new DatabaseSync(backupFilePath, { readOnly: true });
+        const check = db.prepare("PRAGMA integrity_check").get();
+        if (!check || check.integrity_check !== "ok") {
+          integrityErrors.push(`GALLERY_DB a échoué au PRAGMA integrity_check`);
+          verificationResults.push({ path: backupFilePath, type: "sqlite", valid: false, error: "integrity_check failed" });
+        } else {
+          const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name);
+          if (!tables.includes("galleries") || !tables.includes("gallery_schema")) {
+            integrityErrors.push(`GALLERY_DB tables requises manquantes (trouvé : ${tables.join(", ")})`);
+            verificationResults.push({ path: backupFilePath, type: "sqlite", valid: false, error: "missing tables" });
           } else {
-            // Check application tables
-            const tables = db
-              .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
-              .all()
-              .map((r) => r.name);
-
-            if (component === "GALLERY_DB" || filePath.includes("galleries.sqlite")) {
-              const hasGalleries = tables.includes("galleries");
-              const hasSchema = tables.includes("gallery_schema");
-              if (!hasGalleries || !hasSchema) {
-                hasFailure = true;
-                results.push({
-                  path: filePath,
-                  type: "sqlite",
-                  valid: false,
-                  error: `Tables requises manquantes dans GALLERY_DB (trouvé : ${tables.join(", ")})`,
-                });
-                continue;
-              }
-            } else if (component === "RATE_LIMIT_DB" || filePath.includes("rate-limit.sqlite")) {
-              const hasRequests = tables.includes("requests");
-              const hasClaims = tables.includes("contact_claims");
-              if (!hasRequests || !hasClaims) {
-                hasFailure = true;
-                results.push({
-                  path: filePath,
-                  type: "sqlite",
-                  valid: false,
-                  error: `Tables requises manquantes dans RATE_LIMIT_DB (trouvé : ${tables.join(", ")})`,
-                });
-                continue;
-              }
-            }
-
-            results.push({
-              path: filePath,
-              type: "sqlite",
-              valid: true,
-              details: { tablesCount: tables.length, tables },
-            });
+            verificationResults.push({ path: backupFilePath, type: "sqlite", valid: true, details: { tables } });
           }
-        } catch (err) {
-          hasFailure = true;
-          results.push({ path: filePath, type: "sqlite", valid: false, error: err.message });
-        } finally {
-          if (db) {
-            try {
-              db.close();
-            } catch {
-              /* ignore */
-            }
+        }
+      } catch (err) {
+        integrityErrors.push(`GALLERY_DB inaccessible ou corrompue : ${err.message}`);
+        verificationResults.push({ path: backupFilePath, type: "sqlite", valid: false, error: err.message });
+      } finally {
+        if (db) {
+          try {
+            db.close();
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+    } else if (item.component === "RATE_LIMIT_DB") {
+      let db;
+      try {
+        db = new DatabaseSync(backupFilePath, { readOnly: true });
+        const check = db.prepare("PRAGMA integrity_check").get();
+        if (!check || check.integrity_check !== "ok") {
+          integrityErrors.push(`RATE_LIMIT_DB a échoué au PRAGMA integrity_check`);
+          verificationResults.push({ path: backupFilePath, type: "sqlite", valid: false, error: "integrity_check failed" });
+        } else {
+          const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name);
+          if (!tables.includes("requests") || !tables.includes("contact_claims")) {
+            integrityErrors.push(`RATE_LIMIT_DB tables requises manquantes (trouvé : ${tables.join(", ")})`);
+            verificationResults.push({ path: backupFilePath, type: "sqlite", valid: false, error: "missing tables" });
+          } else {
+            verificationResults.push({ path: backupFilePath, type: "sqlite", valid: true, details: { tables } });
+          }
+        }
+      } catch (err) {
+        integrityErrors.push(`RATE_LIMIT_DB inaccessible ou corrompue : ${err.message}`);
+        verificationResults.push({ path: backupFilePath, type: "sqlite", valid: false, error: err.message });
+      } finally {
+        if (db) {
+          try {
+            db.close();
+          } catch {
+            /* ignore */
           }
         }
       }
     }
+  }
 
-    return { results, hasFailure };
-  };
+  // If any integrity or schema error occurred, stop immediately without touching destinations
+  if (integrityErrors.length > 0) {
+    return {
+      success: false,
+      reason: "VALIDATION_FAILED",
+      errors: integrityErrors,
+      verificationResults,
+    };
+  }
 
-  // If verifyOnly, check application schemas directly inside the verified backup files
   if (verifyOnly) {
-    const backupEntries = manifest.files.map((item) => ({
-      filePath: path.join(resolvedBackupDir, item.backupRelPath),
-      component: item.component,
-    }));
-    const { results, hasFailure } = validateApplicationSchemas(backupEntries);
-
-    if (hasFailure) {
-      return {
-        success: false,
-        reason: "SCHEMA_VERIFICATION_FAILED",
-        errors: results.filter((r) => !r.valid).map((r) => `${r.type} (${r.path}) : ${r.error}`),
-        verificationResults: results,
-      };
-    }
-
     return {
       success: true,
       verified: true,
       totalFiles: manifest.files.length,
       totalBytes: manifest.totalBytes,
-      verificationResults: results,
+      verificationResults,
     };
   }
 
-  // 3. Destination Planning & Path Confinement
-  const isIsolated = Boolean(targetDir);
-  if (!isIsolated && !force && !dryRun) {
+  // 4. Target Directory Confinement & Preparation
+  const resolvedTargetDir = path.resolve(targetDir);
+
+  // Refuse if target exists (even if empty, or a symlink)
+  if (pathExists(resolvedTargetDir)) {
     throw new Error(
-      "Restauration sur les emplacements d'origine refusée sans confirmation explicite (--force et --service-stopped). Utilisez --target-dir pour une restauration isolée sécurisée."
+      `La cible de restauration existe déjà (${resolvedTargetDir}). Pour garantir la sécurité, la cible doit être un dossier neuf non existant.`
     );
   }
 
-  if (!isIsolated && !serviceStopped && !dryRun) {
-    throw new Error(
-      "CRITICAL: La restauration en place exige l'arrêt préalable du serveur Parallax. Confirmez cet arrêt avec --service-stopped."
-    );
-  }
+  // Refuse if any ancestor contains user symlinks
+  assertNoUserSymlinks(resolvedTargetDir, "Cible de restauration");
 
-  let resolvedTargetDir = null;
-  if (isIsolated) {
-    resolvedTargetDir = path.resolve(targetDir);
-
-    if (isSubPath(resolvedTargetDir, resolvedBackupDir) || resolvedTargetDir === resolvedBackupDir) {
-      throw new Error(`La cible de restauration ne peut pas être à l'intérieur du dossier de sauvegarde.`);
-    }
-
-    if (fs.existsSync(resolvedTargetDir)) {
-      const contents = fs.readdirSync(resolvedTargetDir);
-      if (contents.length > 0 && !force && !dryRun) {
-        throw new Error(
-          `Le dossier cible existe déjà et n'est pas vide : ${resolvedTargetDir}. Utilisez --force pour autoriser l'écrasement.`
-        );
-      }
-    }
+  // Ensure target doesn't overlap backup directory
+  const canonBackup = getCanonicalPath(resolvedBackupDir);
+  const canonTarget = getCanonicalPath(resolvedTargetDir);
+  if (isSubPath(canonBackup, canonTarget) || isSubPath(canonTarget, canonBackup) || canonBackup === canonTarget) {
+    throw new Error("La cible de restauration ne peut pas chevaucher le dossier de sauvegarde.");
   }
 
   const plan = manifest.files.map((item) => {
-    let dest;
-    if (isIsolated) {
-      dest = path.resolve(resolvedTargetDir, item.backupRelPath);
-      // Strictly verify destination confinement within targetDir
-      if (!isSubPath(resolvedTargetDir, dest)) {
-        throw new Error(`Tentative d'évasion de répertoire détectée pour le fichier : ${item.backupRelPath}`);
-      }
-    } else {
-      // In-place restore: do not trust arbitrary originalPath, check confinement
-      dest = path.resolve(item.originalPath);
-    }
-
+    const dest = path.resolve(resolvedTargetDir, item.backupRelPath);
+    assertPathConfined(resolvedTargetDir, dest, item.backupRelPath);
     return {
       component: item.component,
       srcBackupPath: path.join(resolvedBackupDir, item.backupRelPath),
@@ -364,42 +352,47 @@ export function performSiteRestore(options = {}) {
     };
   }
 
-  // 4. Execution of restore
+  // 5. Staging Copy & Atomic Publication
+  const stagingDir = `${resolvedTargetDir}.staging-${crypto.randomUUID()}`;
+  fs.mkdirSync(stagingDir, { recursive: true, mode: 0o700 });
+
   const restoredPaths = [];
   try {
     for (const item of plan) {
-      const destDir = path.dirname(item.destPath);
+      const stagingDest = path.resolve(stagingDir, path.relative(resolvedTargetDir, item.destPath));
+      assertPathConfined(stagingDir, stagingDest, item.component);
+
+      const destDir = path.dirname(stagingDest);
       fs.mkdirSync(destDir, { recursive: true, mode: 0o700 });
-      fs.copyFileSync(item.srcBackupPath, item.destPath);
-      fs.chmodSync(item.destPath, 0o600);
+
+      fs.copyFileSync(item.srcBackupPath, stagingDest);
+      fs.chmodSync(stagingDest, 0o600);
       restoredPaths.push(item.destPath);
     }
-  } catch (err) {
-    throw new Error(`Erreur lors de la copie des fichiers de restauration : ${err instanceof Error ? err.message : String(err)}`, { cause: err });
-  }
 
-  // 5. Post-restoration verification of restored files
-  const restoredEntries = plan.map((p) => ({ filePath: p.destPath, component: p.component }));
-  const { results: verificationResults, hasFailure } = validateApplicationSchemas(restoredEntries);
+    // Atomically publish staging directory as target directory
+    fs.renameSync(stagingDir, resolvedTargetDir);
 
-  if (hasFailure) {
     return {
-      success: false,
-      reason: "POST_RESTORE_VERIFICATION_FAILED",
-      errors: verificationResults.filter((r) => !r.valid).map((r) => `${r.type} (${r.path}) : ${r.error}`),
-      verificationResults,
+      success: true,
+      verified: true,
       restoredCount: restoredPaths.length,
-      isIsolated,
+      targetDir: resolvedTargetDir,
+      verificationResults,
     };
+  } catch (err) {
+    if (pathExists(stagingDir)) {
+      try {
+        fs.rmSync(stagingDir, { recursive: true, force: true });
+      } catch {
+        /* ignore */
+      }
+    }
+    throw new Error(
+      `Erreur lors de la copie ou publication de la restauration : ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err }
+    );
   }
-
-  return {
-    success: true,
-    verified: true,
-    restoredCount: restoredPaths.length,
-    isIsolated,
-    verificationResults,
-  };
 }
 
 // ESM CLI entrypoint
@@ -408,8 +401,13 @@ if (isMain) {
   const args = process.argv.slice(2);
   const dryRun = args.includes("--dry-run");
   const verifyOnly = args.includes("--verify-only");
-  const force = args.includes("--force");
-  const serviceStopped = args.includes("--service-stopped");
+
+  if (args.includes("--force")) {
+    console.error(
+      `[ERREUR] L'option --force est interdite : la restauration automatisée refuse l'écrasement ou le mélange d'un dossier existant. Spécifiez une cible neuve non existante.`
+    );
+    process.exit(1);
+  }
 
   const backupDirIndex = args.indexOf("--backup-dir");
   const backupDir = backupDirIndex !== -1 ? args[backupDirIndex + 1] : undefined;
@@ -418,8 +416,13 @@ if (isMain) {
   const targetDir = targetDirIndex !== -1 ? args[targetDirIndex + 1] : undefined;
 
   if (!backupDir) {
+    console.error(`Usage: node scripts/restore.js --backup-dir <chemin> [--target-dir <chemin>] [--dry-run] [--verify-only]`);
+    process.exit(1);
+  }
+
+  if (!verifyOnly && !targetDir) {
     console.error(
-      `Usage: node scripts/restore.js --backup-dir <chemin> [--target-dir <chemin>] [--dry-run] [--verify-only] [--force] [--service-stopped]`
+      `[ERREUR] Le paramètre --target-dir est obligatoire. La restauration s'effectue exclusivement vers un répertoire cible isolé neuf.`
     );
     process.exit(1);
   }
@@ -431,8 +434,6 @@ if (isMain) {
       targetDir,
       dryRun,
       verifyOnly,
-      force,
-      serviceStopped,
     });
 
     if (!res.success) {
@@ -446,7 +447,7 @@ if (isMain) {
     }
 
     if (verifyOnly) {
-      console.log(`\n[OK] Intégrité de la sauvegarde validée : ${res.totalFiles} fichiers conformes.`);
+      console.log(`\n[OK] Intégrité et conformité des schémas validées : ${res.totalFiles} fichiers conformes.`);
       if (res.verificationResults) {
         for (const v of res.verificationResults) {
           console.log(` - ${v.type} (${v.path}) : ${v.valid ? "VALIDE" : "ERREUR"}`);
@@ -460,7 +461,7 @@ if (isMain) {
       console.log(`[OK] Simulation de restauration réussie.`);
     } else {
       console.log(`\n[SUCCÈS] ${res.restoredCount} fichiers restaurés avec succès.`);
-      console.log(`Mode : ${res.isIsolated ? "Restauré sur cible isolée" : "Restauré aux emplacements d'origine"}`);
+      console.log(`Destination isolée : ${res.targetDir}`);
       for (const v of res.verificationResults) {
         console.log(`- Vérification ${v.type}: ${v.path} [${v.valid ? "VALIDE" : "ERREUR"}]`);
       }

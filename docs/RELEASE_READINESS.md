@@ -129,17 +129,28 @@ npm run backup -- --service-stopped --out-dir /chemin/vers/dossier-sauvegarde
 - **Permissions appliquées :** `0700` pour les répertoires, `0600` pour les fichiers et secrets.
 - **Publication atomique :** Les fichiers sont écrits dans un dossier temporaire privé (`.staging`), vérifiés, puis renommés de façon atomique vers la destination finale avec leur `manifest.json`.
 
-### D. Procédure de Contrôle & Restauration
+### D. Procédure de Contrôle & Restauration Isolée
+
+La restauration automatisée s'effectue **strictement vers un répertoire cible isolé neuf**. Tout écrasement en place, mélange de dossiers ou drapeau `--force` est expressément refusé afin de préserver l'intégrité des fichiers sains existants.
+
 ```bash
-# 1. Vérification de l'intégrité et des schémas de la sauvegarde (lecture seule)
+# 1. Vérification approfondie de l'intégrité et des schémas (lecture seule, sans écriture)
 npm run restore -- --backup-dir ~/.parallax-backups/parallax-backup-<timestamp> --verify-only
 
-# 2. Restauration de contrôle sur une cible isolée (fortement recommandé avant toute réouverture)
+# 2. Restauration isolée vers un répertoire cible neuf (la cible ne doit pas préexister)
 npm run restore -- --backup-dir ~/.parallax-backups/parallax-backup-<timestamp> --target-dir /tmp/parallax-restore-test
 
-# 3. Restauration en place sur les emplacements d'origine (service arrêté, confirmation explicite requise)
-npm run restore -- --backup-dir ~/.parallax-backups/parallax-backup-<timestamp> --force --service-stopped
+# 3. Mode simulation (dry-run) pour inspecter le plan de restauration sans copie
+npm run restore -- --backup-dir ~/.parallax-backups/parallax-backup-<timestamp> --target-dir /tmp/parallax-restore-test --dry-run
 ```
+
+**Procédure de reprise opérateur en production (reprise après sinistre) :**
+1. **Arrêt du service :** Couper le serveur applicatif Parallax (`launchctl stop com.parallax.web`).
+2. **Restauration isolée :** Exécuter `restore` vers un répertoire de destination neuf (ex. `~/.parallax-data/restored-<timestamp>`).
+3. **Contrôle opérateur :** Valider les schémas et l'intégrité des données restaurées dans cette zone isolée.
+4. **Bascule contrôlée :** Mettre à jour les variables de chemins dans `.env.local` (`SITE_CONTENT_PATH`, `PORTFOLIO_CONTENT_PATH`, `GALLERY_DB_PATH`, `SITE_MEDIA_PATH`, etc.) pour pointer vers les données restaurées validées, ou archiver les anciens dossiers et déplacer manuellement les dossiers validés sous contrôle d'un opérateur humain.
+5. **Redémarrage :** Relancer le service applicatif (`launchctl start com.parallax.web`).
+
 
 ---
 
@@ -174,7 +185,7 @@ Pour exécuter le site Parallax en continu sur macOS (ex: Mac mini serveur) avec
    # Exemple : /usr/local/bin/node ou /opt/homebrew/bin/node
    ```
 
-2. Créer le fichier `~/Library/LaunchAgents/com.parallax.web.plist` (en adaptant les chemins) :
+2. Créer le fichier `~/Library/LaunchAgents/com.parallax.web.plist` (en adaptant les chemins d'accès absolus) :
    ```xml
    <?xml version="1.0" encoding="UTF-8"?>
    <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -187,8 +198,7 @@ Pour exécuter le site Parallax en continu sur macOS (ex: Mac mini serveur) avec
        <key>ProgramArguments</key>
        <array>
            <string>/usr/local/bin/node</string>
-           <string>node_modules/@react-router/serve/bin.js</string>
-           <string>build/server/index.js</string>
+           <string>scripts/start-server.js</string>
        </array>
        <key>EnvironmentVariables</key>
        <dict>
@@ -211,6 +221,10 @@ Pour exécuter le site Parallax en continu sur macOS (ex: Mac mini serveur) avec
    </plist>
    ```
 
+   *Note sur le fonctionnement de `scripts/start-server.js` :*
+   Ce wrapper résout automatiquement la configuration privée via `.env.local`, préserve toute variable déjà injectée (sans exposer de secrets dans le fichier `.plist`), exécute la vérification stricte préalable de démarrage (`runStartupValidation`), positionne le répertoire de travail effectif sur `apps/web` pour la résolution des fichiers statiques `public/`, puis lance `@react-router/serve` (`node_modules/@react-router/serve/dist/cli.js`) sur le build de production `apps/web/build/server/index.js`.
+   *(Alternative directe sans wrapper : `WorkingDirectory` = `/chemin/vers/.../apps/web`, `ProgramArguments` = `["/usr/local/bin/node", "../../node_modules/@react-router/serve/bin.cjs", "build/server/index.js"]`).*
+
 3. Vérifier la syntaxe du fichier plist :
    ```bash
    plutil -lint ~/Library/LaunchAgents/com.parallax.web.plist
@@ -224,22 +238,22 @@ Pour exécuter le site Parallax en continu sur macOS (ex: Mac mini serveur) avec
    ```
 
 ### D. Configuration Reverse Proxy (Nginx / Caddy)
-Parallax écoute en interne sur `127.0.0.1:3000`. Un reverse proxy public gère le nom de domaine officiel, la terminaison HTTPS et les certificats TLS.
+Parallax écoute en interne sur l'interface de boucle locale `127.0.0.1:3000`. Un reverse proxy public gère le nom de domaine officiel, la terminaison HTTPS et les certificats TLS.
 
-**Directives pour Nginx (`/etc/nginx/sites-available/parallax`) :**
+**Directives pour Nginx directement exposé (`/etc/nginx/sites-available/parallax`) :**
 ```nginx
 server {
     listen 80;
-    server_name parallax.studio; # Remplacer par le domaine réel
+    server_name <votre-domaine.com>; # Remplacer par le domaine officiel
     return 301 https://$host$request_uri;
 }
 
 server {
     listen 443 ssl http2;
-    server_name parallax.studio; # Remplacer par le domaine réel
+    server_name <votre-domaine.com>; # Remplacer par le domaine officiel
 
-    ssl_certificate /etc/letsencrypt/live/parallax.studio/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/parallax.studio/privkey.pem;
+    ssl_certificate /etc/letsencrypt/live/<votre-domaine.com>/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/<votre-domaine.com>/privkey.pem;
 
     client_max_body_size 100M; # Adapté aux imports de médias
 
@@ -249,8 +263,16 @@ server {
 
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+        # Écrase X-Forwarded-For avec l'IP cliente directe déterminée par Nginx.
+        # N'utilise PAS $proxy_add_x_forwarded_for afin d'éviter les listes séparées par des virgules
+        # rejetées par getClientIp() dans Parallax.
+        proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Supprime explicitement l'en-tête CF-Connecting-IP potentiellement injecté par un client externe
+        # pour empêcher tout contournement de limitation de débit.
+        proxy_set_header CF-Connecting-IP "";
 
         # Gestion des connexions persistantes
         proxy_set_header Upgrade $http_upgrade;
@@ -258,6 +280,11 @@ server {
     }
 }
 ```
+
+**Variante avec CDN Cloudflare :**
+Si Cloudflare est utilisé en amont de Nginx, la chaîne de confiance doit être établie explicitement :
+1. Nginx doit restreindre l'acceptation de l'IP réelle uniquement aux adresses IP de sortie officielles de Cloudflare via les directives `set_real_ip_from <plage-cidr-cloudflare>;` et `real_ip_header CF-Connecting-IP;`.
+2. L'en-tête `CF-Connecting-IP` n'est alors retransmis à Parallax que s'il émane d'une connexion Cloudflare authentifiée.
 
 **Règles IP & `TRUST_PROXY` :**
 - Dans le fichier `.env.local` de production : positionner `TRUST_PROXY=true` uniquement lorsque le serveur est placé derrière ce reverse proxy de confiance. Cela permet au middleware de limitation de débit (`rate-limit.server.ts`) d'utiliser l'adresse IP cliente transmise dans `X-Forwarded-For`.

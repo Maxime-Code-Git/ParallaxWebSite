@@ -3,6 +3,9 @@ export interface RestoreOptions {
   targetDir?: string;
   dryRun?: boolean;
   verifyOnly?: boolean;
+  /**
+   * @deprecated L'option --force est strictement interdite : la restauration s'effectue exclusivement vers un répertoire cible isolé neuf.
+   */
   force?: boolean;
   serviceStopped?: boolean;
 }
@@ -21,6 +24,7 @@ export interface RestoreResult {
   verified?: boolean;
   dryRun?: boolean;
   isIsolated?: boolean;
+  targetDir?: string;
   restoredCount?: number;
   totalFiles?: number;
   totalBytes?: number;

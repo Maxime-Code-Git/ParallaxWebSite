@@ -277,23 +277,7 @@ function migrateContactClaimsSchema(database: DatabaseSync): void {
   }
 }
 
-function initDb(): DatabaseSync {
-  const dbPath = ENV.RATE_LIMIT_DB_PATH;
-
-  if (db && currentDbPath === dbPath) {
-    return db;
-  }
-
-  if (db) {
-    try {
-      db.close();
-    } catch {
-      // Ignored
-    }
-    db = undefined;
-    currentDbPath = undefined;
-  }
-
+export function openRateLimitDb(dbPath: string): DatabaseSync {
   let localDb: DatabaseSync | undefined;
   try {
     const dir = path.dirname(dbPath);
@@ -336,10 +320,7 @@ function initDb(): DatabaseSync {
     `);
 
     checkAuxiliaryFiles(dbPath);
-
-    db = localDb;
-    currentDbPath = dbPath;
-    return db;
+    return localDb;
   } catch (err: unknown) {
     if (localDb) {
       try {
@@ -351,6 +332,28 @@ function initDb(): DatabaseSync {
     if (err instanceof RateLimitStorageError) throw err;
     throw new RateLimitStorageError(`Erreur d'initialisation de la base SQLite de limitation de debit`, err);
   }
+}
+
+function initDb(): DatabaseSync {
+  const dbPath = ENV.RATE_LIMIT_DB_PATH;
+
+  if (db && currentDbPath === dbPath) {
+    return db;
+  }
+
+  if (db) {
+    try {
+      db.close();
+    } catch {
+      // Ignored
+    }
+    db = undefined;
+    currentDbPath = undefined;
+  }
+
+  db = openRateLimitDb(dbPath);
+  currentDbPath = dbPath;
+  return db;
 }
 
 export function closeRateLimitDatabase(): void {

@@ -6,6 +6,12 @@ import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { getMonorepoRoot, loadEnvLocal } from "./env-loader.js";
 import { validateSiteContentDocument, validatePortfolioContentDocument } from "@parallax/shared";
+import {
+  assertNoUserSymlinks,
+  getCanonicalPath,
+  isSubPath,
+  pathExists,
+} from "./path-safety.js";
 
 /**
  * Computes SHA-256 of a file using a bounded-memory buffer (64 KB).
@@ -27,14 +33,6 @@ export function computeSha256(filePath) {
 }
 
 /**
- * Checks if childPath is strictly a subpath of parentDir (preventing traversal).
- */
-export function isSubPath(parentDir, childPath) {
-  const rel = path.relative(path.resolve(parentDir), path.resolve(childPath));
-  return Boolean(rel && !rel.startsWith("..") && !path.isAbsolute(rel));
-}
-
-/**
  * Backups a SQLite database cleanly using VACUUM INTO.
  * Guarantees connection closure in finally block and throws on failure (no raw fallback).
  */
@@ -43,9 +41,12 @@ export function backupSqliteDatabase(srcPath, destPath) {
     throw new Error(`Fichier SQLite source introuvable : ${srcPath}`);
   }
 
-  const stat = fs.statSync(srcPath);
+  const stat = fs.lstatSync(srcPath);
+  if (stat.isSymbolicLink()) {
+    throw new Error(`La base SQLite source ne doit pas être un lien symbolique : ${srcPath}`);
+  }
   if (!stat.isFile()) {
-    throw new Error(`Le chemin SQLite source n'est pas un fichier : ${srcPath}`);
+    throw new Error(`Le chemin SQLite source n'est pas un fichier régulier : ${srcPath}`);
   }
 
   let db;
@@ -80,7 +81,7 @@ export function backupSqliteDatabase(srcPath, destPath) {
 
 /**
  * Recursively copies a directory with restricted permissions (0700 dirs, 0600 files).
- * Skips symlinks to prevent directory traversal.
+ * Rejects symlinks in sources to ensure complete, consistent archives without external escapes.
  */
 export function copyDirRecursive(srcDir, destDir, fileList = [], baseRel = "") {
   if (!fs.existsSync(srcDir)) return;
@@ -88,13 +89,15 @@ export function copyDirRecursive(srcDir, destDir, fileList = [], baseRel = "") {
 
   const entries = fs.readdirSync(srcDir, { withFileTypes: true });
   for (const entry of entries) {
-    if (entry.isSymbolicLink()) {
-      // Reject/ignore symlinks to prevent escaping source boundaries
-      continue;
-    }
     const srcChild = path.join(srcDir, entry.name);
     const destChild = path.join(destDir, entry.name);
     const relChild = path.join(baseRel, entry.name);
+
+    if (entry.isSymbolicLink()) {
+      throw new Error(
+        `Lien symbolique source interdit détecté : ${srcChild}. Les sources de sauvegarde ne doivent contenir aucun lien symbolique.`
+      );
+    }
 
     if (entry.isDirectory()) {
       copyDirRecursive(srcChild, destChild, fileList, relChild);
@@ -135,15 +138,22 @@ export function performSiteBackup(options = {}) {
     throw new Error("Composant indispensable manquant : SITE_CONTENT_PATH non configuré.");
   }
   const siteContentPath = path.resolve(env.SITE_CONTENT_PATH);
-  if (!fs.existsSync(siteContentPath) || !fs.statSync(siteContentPath).isFile()) {
+  if (!fs.existsSync(siteContentPath)) {
     throw new Error(`Fichier indispensable introuvable : SITE_CONTENT_PATH=${siteContentPath}`);
+  }
+  assertNoUserSymlinks(siteContentPath, "SITE_CONTENT_PATH");
+  if (!fs.statSync(siteContentPath).isFile()) {
+    throw new Error(`Fichier indispensable non régulier : SITE_CONTENT_PATH=${siteContentPath}`);
   }
 
   let siteContentJson;
   try {
     siteContentJson = JSON.parse(fs.readFileSync(siteContentPath, "utf-8"));
   } catch (err) {
-    throw new Error(`Fichier indispensable SITE_CONTENT corrompu (JSON invalide) : ${err instanceof Error ? err.message : String(err)}`, { cause: err });
+    throw new Error(
+      `Fichier indispensable SITE_CONTENT corrompu (JSON invalide) : ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err }
+    );
   }
   const siteContentValidation = validateSiteContentDocument(siteContentJson);
   if (!siteContentValidation.success) {
@@ -154,15 +164,22 @@ export function performSiteBackup(options = {}) {
     throw new Error("Composant indispensable manquant : PORTFOLIO_CONTENT_PATH non configuré.");
   }
   const portfolioContentPath = path.resolve(env.PORTFOLIO_CONTENT_PATH);
-  if (!fs.existsSync(portfolioContentPath) || !fs.statSync(portfolioContentPath).isFile()) {
+  if (!fs.existsSync(portfolioContentPath)) {
     throw new Error(`Fichier indispensable introuvable : PORTFOLIO_CONTENT_PATH=${portfolioContentPath}`);
+  }
+  assertNoUserSymlinks(portfolioContentPath, "PORTFOLIO_CONTENT_PATH");
+  if (!fs.statSync(portfolioContentPath).isFile()) {
+    throw new Error(`Fichier indispensable non régulier : PORTFOLIO_CONTENT_PATH=${portfolioContentPath}`);
   }
 
   let portfolioContentJson;
   try {
     portfolioContentJson = JSON.parse(fs.readFileSync(portfolioContentPath, "utf-8"));
   } catch (err) {
-    throw new Error(`Fichier indispensable PORTFOLIO_CONTENT corrompu (JSON invalide) : ${err instanceof Error ? err.message : String(err)}`, { cause: err });
+    throw new Error(
+      `Fichier indispensable PORTFOLIO_CONTENT corrompu (JSON invalide) : ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err }
+    );
   }
   const portfolioContentValidation = validatePortfolioContentDocument(portfolioContentJson);
   if (!portfolioContentValidation.success) {
@@ -181,6 +198,9 @@ export function performSiteBackup(options = {}) {
 
   const defaultBackupRoot = path.join(process.env.HOME || "/tmp", ".parallax-backups");
   const backupDir = options.outDir ? path.resolve(options.outDir) : path.join(defaultBackupRoot, backupId);
+
+  // Validate backupDir against symlinks in its hierarchy
+  assertNoUserSymlinks(backupDir, "Dossier de destination");
 
   // 3. Inventory components
   const inventory = [
@@ -252,6 +272,7 @@ export function performSiteBackup(options = {}) {
   if (options.configPath) {
     const customConfig = path.resolve(options.configPath);
     if (fs.existsSync(customConfig)) {
+      assertNoUserSymlinks(customConfig, "Fichier config");
       inventory.push({
         component: "ENV_CONFIG",
         type: "file",
@@ -265,6 +286,7 @@ export function performSiteBackup(options = {}) {
     // Normal CLI run: backup monorepo root .env.local if present
     const envLocalPath = path.join(root, ".env.local");
     if (fs.existsSync(envLocalPath)) {
+      assertNoUserSymlinks(envLocalPath, "Fichier .env.local");
       inventory.push({
         component: "ENV_CONFIG",
         type: "file",
@@ -277,18 +299,23 @@ export function performSiteBackup(options = {}) {
   }
 
   // 4. Validate output path against sources and existing backups
-  if (fs.existsSync(backupDir)) {
+  if (pathExists(backupDir)) {
     throw new Error(`Le dossier de destination existe déjà : ${backupDir}. Spécifiez une destination neuve.`);
   }
 
+  const canonBackupDir = getCanonicalPath(backupDir);
+
   for (const item of inventory) {
     if (item.srcPath && fs.existsSync(item.srcPath)) {
-      if (isSubPath(item.srcPath, backupDir) || item.srcPath === backupDir) {
+      assertNoUserSymlinks(item.srcPath, `Source ${item.component}`);
+      const canonSrc = getCanonicalPath(item.srcPath);
+
+      if (isSubPath(canonSrc, canonBackupDir) || canonSrc === canonBackupDir) {
         throw new Error(
           `Destination invalide : le dossier de sortie (${backupDir}) se trouve à l'intérieur d'une source (${item.component} -> ${item.srcPath}).`
         );
       }
-      if (isSubPath(backupDir, item.srcPath)) {
+      if (isSubPath(canonBackupDir, canonSrc)) {
         throw new Error(
           `Destination invalide : le dossier de sortie (${backupDir}) recouvre une source (${item.component} -> ${item.srcPath}).`
         );
@@ -320,13 +347,15 @@ export function performSiteBackup(options = {}) {
         try {
           const files = fs.readdirSync(d, { withFileTypes: true });
           for (const f of files) {
-            if (f.isSymbolicLink()) continue;
+            if (f.isSymbolicLink()) {
+              throw new Error(`Lien symbolique source interdit : ${path.join(d, f.name)}`);
+            }
             const p = path.join(d, f.name);
             if (f.isDirectory()) s += countDirSize(p);
             else if (f.isFile()) s += fs.statSync(p).size;
           }
-        } catch {
-          /* ignore unreadable intermediate files */
+        } catch (err) {
+          if (err instanceof Error && err.message.includes("Lien symbolique")) throw err;
         }
         return s;
       };
@@ -413,6 +442,7 @@ export function performSiteBackup(options = {}) {
 
     // Build and write manifest.json
     const manifest = {
+      manifestVersion: 1,
       backupId,
       createdAt: new Date().toISOString(),
       nodeVersion: process.version,
@@ -437,7 +467,7 @@ export function performSiteBackup(options = {}) {
     };
   } catch (err) {
     // Clean up staging directory on failure to avoid leaving partial artifacts
-    if (fs.existsSync(stagingDir)) {
+    if (pathExists(stagingDir)) {
       try {
         fs.rmSync(stagingDir, { recursive: true, force: true });
       } catch {

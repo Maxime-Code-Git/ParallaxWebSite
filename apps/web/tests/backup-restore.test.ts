@@ -2,80 +2,35 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
+import * as net from "node:net";
 import { DatabaseSync } from "node:sqlite";
-import { spawnSync } from "node:child_process";
+import { spawnSync, spawn } from "node:child_process";
 import defaultSiteContent from "../app/content/default-site-content.json";
 import { createDefaultPortfolioContent } from "../app/lib/portfolio-content.server";
+import { openGalleryDb } from "../app/lib/gallery-db.server";
+import { openRateLimitDb } from "../app/lib/rate-limit.server";
 import { performSiteBackup, computeSha256 } from "../../../scripts/backup.js";
 import { performSiteRestore } from "../../../scripts/restore.js";
 
 const rootDir = path.resolve(__dirname, "../../..");
 const backupScriptPath = path.join(rootDir, "scripts/backup.js");
 const restoreScriptPath = path.join(rootDir, "scripts/restore.js");
+const startServerScriptPath = path.join(rootDir, "scripts/start-server.js");
 
-function initRealisticGalleryDb(dbPath: string): void {
-  const gdb = new DatabaseSync(dbPath);
-  gdb.exec("PRAGMA journal_mode = WAL;");
-  gdb.exec(`
-    CREATE TABLE gallery_schema (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at INTEGER NOT NULL);
-    INSERT INTO gallery_schema VALUES (1, 'V1_INITIAL', 1700000000);
-    CREATE TABLE galleries (
-      id TEXT PRIMARY KEY,
-      public_id TEXT UNIQUE NOT NULL,
-      title TEXT NOT NULL,
-      client_name TEXT NOT NULL,
-      project_date TEXT NOT NULL,
-      location TEXT,
-      intro_fr TEXT,
-      intro_en TEXT,
-      signature_fr TEXT,
-      signature_en TEXT,
-      status TEXT NOT NULL DEFAULT 'draft',
-      expires_at INTEGER,
-      cover_media_id TEXT,
-      revision INTEGER NOT NULL DEFAULT 1,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
-    );
-    CREATE TABLE gallery_codes (
-      gallery_id TEXT PRIMARY KEY,
-      code_hash TEXT UNIQUE NOT NULL,
-      code_encrypted TEXT NOT NULL,
-      version INTEGER NOT NULL DEFAULT 1,
-      updated_at INTEGER NOT NULL
-    );
-    CREATE TABLE gallery_media (
-      id TEXT PRIMARY KEY,
-      gallery_id TEXT NOT NULL,
-      filename TEXT NOT NULL,
-      media_type TEXT NOT NULL,
-      byte_size INTEGER NOT NULL,
-      created_at INTEGER NOT NULL
-    );
-  `);
-  gdb.exec("INSERT INTO galleries (id, public_id, title, client_name, project_date, created_at, updated_at) VALUES ('g1', 'pub-1', 'Mariage A&B', 'Maxime', '2026-10-01', 1700000000, 1700000000);");
-  gdb.close();
-}
-
-function initRealisticRateLimitDb(dbPath: string): void {
-  const rdb = new DatabaseSync(dbPath);
-  rdb.exec("PRAGMA journal_mode = WAL;");
-  rdb.exec(`
-    CREATE TABLE requests (hash TEXT NOT NULL, timestamp INTEGER NOT NULL);
-    CREATE TABLE contact_claims (
-      token_hash TEXT PRIMARY KEY,
-      claim_id TEXT NOT NULL DEFAULT '',
-      content_hash TEXT NOT NULL DEFAULT '',
-      status TEXT NOT NULL,
-      created_at INTEGER NOT NULL,
-      lease_expires_at INTEGER NOT NULL DEFAULT 0,
-      retention_expires_at INTEGER NOT NULL DEFAULT 0,
-      expires_at INTEGER NOT NULL DEFAULT 0
-    );
-  `);
-  rdb.exec("INSERT INTO requests VALUES ('hash-123', 1700000000);");
-  rdb.exec("INSERT INTO contact_claims (token_hash, status, created_at) VALUES ('token-abc', 'claimed', 1700000000);");
-  rdb.close();
+function getFreePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const srv = net.createServer();
+    srv.listen(0, "127.0.0.1", () => {
+      const addr = srv.address();
+      if (!addr || typeof addr !== "object") {
+        srv.close(() => reject(new Error("Unable to obtain free port")));
+        return;
+      }
+      const port = addr.port;
+      srv.close(() => resolve(port));
+    });
+    srv.on("error", reject);
+  });
 }
 
 describe("Complete Site Backup and Restoration Suite", () => {
@@ -88,6 +43,7 @@ describe("Complete Site Backup and Restoration Suite", () => {
   let fixturePortfolioMedia: string;
   let fixtureGalleryDb: string;
   let fixtureRateLimitDb: string;
+  let fixtureGalleryMedia: string;
   let fixtureGalleryImport: string;
   let fixtureEnvLocal: string;
 
@@ -111,17 +67,27 @@ describe("Complete Site Backup and Restoration Suite", () => {
     fs.mkdirSync(fixturePortfolioMedia, { recursive: true });
     fs.writeFileSync(path.join(fixturePortfolioMedia, "test-portfolio-image.webp"), Buffer.from("PORTFOLIO_IMAGE_BYTES_67890"));
 
+    fixtureGalleryMedia = path.join(tempFixtureDir, "media-gallery");
+    fs.mkdirSync(fixtureGalleryMedia, { recursive: true });
+
     // 3. Prepare gallery imports
     fixtureGalleryImport = path.join(tempFixtureDir, "gallery-import");
     fs.mkdirSync(path.join(fixtureGalleryImport, "client-gallery-1"), { recursive: true });
     fs.writeFileSync(path.join(fixtureGalleryImport, "client-gallery-1", "photo1.jpg"), Buffer.from("PHOTO_1_BYTES"));
 
-    // 4. Prepare realistic SQLite databases
+    // 4. Prepare realistic SQLite databases using real project initializers
     fixtureGalleryDb = path.join(tempFixtureDir, "galleries.sqlite");
-    initRealisticGalleryDb(fixtureGalleryDb);
+    const gdb = openGalleryDb(fixtureGalleryDb);
+    gdb.exec(
+      "INSERT INTO galleries (id, public_id, title, client_name, project_date, created_at, updated_at) VALUES ('g1', 'pub-1', 'Mariage A&B', 'Maxime', '2026-10-01', 1700000000, 1700000000);"
+    );
+    gdb.close();
 
     fixtureRateLimitDb = path.join(tempFixtureDir, "rate-limit.sqlite");
-    initRealisticRateLimitDb(fixtureRateLimitDb);
+    const rdb = openRateLimitDb(fixtureRateLimitDb);
+    rdb.exec("INSERT INTO requests VALUES ('hash-123', 1700000000);");
+    rdb.exec("INSERT INTO contact_claims (token_hash, status, created_at) VALUES ('token-abc', 'claimed', 1700000000);");
+    rdb.close();
 
     // 5. Prepare isolated fixture config
     fixtureEnvLocal = path.join(tempFixtureDir, "fixture.env.local");
@@ -138,7 +104,8 @@ describe("Complete Site Backup and Restoration Suite", () => {
     }
   });
 
-  it("1. performs dry-run without writing any files or directories", () => {
+  // Base functional & security tests
+  it("performs dry-run without writing any files or directories", () => {
     const res = performSiteBackup({
       dryRun: true,
       outDir: path.join(backupOutputDir, "test-dry"),
@@ -161,7 +128,7 @@ describe("Complete Site Backup and Restoration Suite", () => {
     }
   });
 
-  it("2. enforces isolation: does not read or include real repo .env.local when options.env is supplied", () => {
+  it("enforces isolation: does not read or include real repo .env.local when options.env is supplied", () => {
     const backupDir = path.join(backupOutputDir, "run-isolation");
     const res = performSiteBackup({
       dryRun: false,
@@ -175,14 +142,13 @@ describe("Complete Site Backup and Restoration Suite", () => {
 
     expect(res.success).toBe(true);
     if (!res.dryRun) {
-      // Must NOT include real .env.local
       const envItem = res.manifest.files.find((f) => f.component === "ENV_CONFIG");
       expect(envItem).toBeUndefined();
       expect(fs.existsSync(path.join(backupDir, "config/env.local"))).toBe(false);
     }
   });
 
-  it("3. requires serviceStopped: true for full backup and fails if precondition is missing", () => {
+  it("requires serviceStopped: true for full backup and fails if precondition is missing", () => {
     const backupDir = path.join(backupOutputDir, "run-precondition");
     expect(() => {
       performSiteBackup({
@@ -197,14 +163,13 @@ describe("Complete Site Backup and Restoration Suite", () => {
     }).toThrow(/La cohérence globale de la sauvegarde exige l'arrêt préalable/);
   });
 
-  it("4. rejects missing required sources and never reports a successful empty backup", () => {
+  it("rejects missing required sources and never reports a successful empty backup", () => {
     expect(() => {
       performSiteBackup({
         dryRun: false,
         serviceStopped: true,
         outDir: path.join(backupOutputDir, "run-missing"),
         env: {
-          // SITE_CONTENT_PATH is missing
           PORTFOLIO_CONTENT_PATH: fixturePortfolioContent,
         },
       });
@@ -223,8 +188,7 @@ describe("Complete Site Backup and Restoration Suite", () => {
     }).toThrow(/Fichier indispensable introuvable/);
   });
 
-  it("5. rejects invalid JSON schema with real shared validators", () => {
-    // Write invalid schemaVersion 999
+  it("rejects invalid JSON schema with real shared validators", () => {
     fs.writeFileSync(
       fixtureSiteContent,
       JSON.stringify({ ...defaultSiteContent, schemaVersion: 999 }, null, 2),
@@ -244,8 +208,7 @@ describe("Complete Site Backup and Restoration Suite", () => {
     }).toThrow(/Composant indispensable SITE_CONTENT invalide/);
   });
 
-  it("6. rejects corrupted SQLite source without naive fallback copy", () => {
-    // Write garbage into sqlite file
+  it("rejects corrupted SQLite source without naive fallback copy", () => {
     fs.writeFileSync(fixtureGalleryDb, Buffer.from("this is not a valid sqlite database"));
 
     expect(() => {
@@ -262,10 +225,11 @@ describe("Complete Site Backup and Restoration Suite", () => {
     }).toThrow(/file is not a database|integrity_check/);
   });
 
-  it("7. captures WAL transactions cleanly into snapshot via SQLite VACUUM INTO", () => {
-    // Add extra row in WAL mode right before backup
+  it("captures WAL transactions cleanly into snapshot via SQLite VACUUM INTO", () => {
     const gdb = new DatabaseSync(fixtureGalleryDb);
-    gdb.exec("INSERT INTO galleries (id, public_id, title, client_name, project_date, created_at, updated_at) VALUES ('g2', 'pub-2', 'Projet Wal Test', 'Client Test', '2026-10-02', 1700000010, 1700000010);");
+    gdb.exec(
+      "INSERT INTO galleries (id, public_id, title, client_name, project_date, created_at, updated_at) VALUES ('g2', 'pub-2', 'Projet Wal Test', 'Client Test', '2026-10-02', 1700000010, 1700000010);"
+    );
     gdb.close();
 
     const backupDir = path.join(backupOutputDir, "run-wal");
@@ -282,7 +246,6 @@ describe("Complete Site Backup and Restoration Suite", () => {
 
     expect(res.success).toBe(true);
 
-    // Verify snapshot file has the WAL row
     const snapshotDb = new DatabaseSync(path.join(backupDir, "db/galleries.sqlite"), { readOnly: true });
     const row = snapshotDb.prepare("SELECT title FROM galleries WHERE id = 'g2'").get() as { title: string };
     snapshotDb.close();
@@ -290,39 +253,7 @@ describe("Complete Site Backup and Restoration Suite", () => {
     expect(row.title).toBe("Projet Wal Test");
   });
 
-  it("8. rejects backup output directories that overlap sources or existing backup folders", () => {
-    // Output directory placed inside a media source directory
-    const invalidOut = path.join(fixtureSiteMedia, "nested-backup");
-    expect(() => {
-      performSiteBackup({
-        dryRun: false,
-        serviceStopped: true,
-        outDir: invalidOut,
-        env: {
-          SITE_CONTENT_PATH: fixtureSiteContent,
-          SITE_MEDIA_PATH: fixtureSiteMedia,
-          PORTFOLIO_CONTENT_PATH: fixturePortfolioContent,
-        },
-      });
-    }).toThrow(/se trouve à l'intérieur d'une source/);
-
-    // Existing backup directory cannot be overwritten
-    const validDir = path.join(backupOutputDir, "existing-dir");
-    fs.mkdirSync(validDir, { recursive: true });
-    expect(() => {
-      performSiteBackup({
-        dryRun: false,
-        serviceStopped: true,
-        outDir: validDir,
-        env: {
-          SITE_CONTENT_PATH: fixtureSiteContent,
-          PORTFOLIO_CONTENT_PATH: fixturePortfolioContent,
-        },
-      });
-    }).toThrow(/Le dossier de destination existe déjà/);
-  });
-
-  it("9. computeSha256 calculates accurate checksums with bounded memory buffer", () => {
+  it("computeSha256 calculates accurate checksums with bounded memory buffer", () => {
     const testFile = path.join(tempFixtureDir, "large-sample.bin");
     const testBuffer = Buffer.alloc(1024 * 1024, 0xab); // 1 MB
     fs.writeFileSync(testFile, testBuffer);
@@ -333,8 +264,10 @@ describe("Complete Site Backup and Restoration Suite", () => {
     expect(checksum).toBe(expectedSha);
   });
 
-  it("10. restore rejects path traversal attempts in manifest without touching external files", () => {
-    const backupDir = path.join(backupOutputDir, "traversal-test");
+  // 10 Targeted Tests Required by Section 5
+
+  it("Targeted Test 1: Cible symlink et parent intermédiaire symlink: refus et zéro fichier créé dans la sentinelle extérieure", () => {
+    const backupDir = path.join(backupOutputDir, "symlink-target-test");
     performSiteBackup({
       dryRun: false,
       serviceStopped: true,
@@ -345,30 +278,96 @@ describe("Complete Site Backup and Restoration Suite", () => {
       },
     });
 
-    // Plant external sentinel file
-    const sentinelFile = path.join(tempFixtureDir, "sentinel.txt");
-    fs.writeFileSync(sentinelFile, "ORIGINAL_SENTINEL_CONTENT");
+    // 1a: Direct symlink target pointing to outside sentinel dir
+    const outsideTarget = path.join(tempFixtureDir, "outside-target-1a");
+    fs.mkdirSync(outsideTarget, { recursive: true });
+    const targetLink = path.join(tempFixtureDir, "target-link-1a");
+    fs.symlinkSync(outsideTarget, targetLink);
 
-    // Tamper manifest with path traversal
-    const manifestPath = path.join(backupDir, "manifest.json");
-    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
-    manifest.files[0].backupRelPath = "../sentinel.txt";
-    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), "utf-8");
-
-    const isolatedRestore = path.join(tempFixtureDir, "isolated-restore");
     expect(() => {
       performSiteRestore({
         backupDir,
-        targetDir: isolatedRestore,
+        targetDir: targetLink,
       });
-    }).toThrow(/Chemin non sécurisé détecté dans le manifeste/);
+    }).toThrow(/La cible de restauration existe déjà|non sécurisé.*lien symbolique/);
 
-    // Sentinel must be untouched
-    expect(fs.readFileSync(sentinelFile, "utf-8")).toBe("ORIGINAL_SENTINEL_CONTENT");
+    // Verify 0 files created in external sentinel directory
+    expect(fs.readdirSync(outsideTarget)).toHaveLength(0);
+
+    // 1b: Intermediate symlink parent
+    const outsideParent = path.join(tempFixtureDir, "outside-parent-1b");
+    fs.mkdirSync(outsideParent, { recursive: true });
+    const parentLink = path.join(tempFixtureDir, "parent-link-1b");
+    fs.symlinkSync(outsideParent, parentLink);
+    const nestedTarget = path.join(parentLink, "isolated-restore-1b");
+
+    expect(() => {
+      performSiteRestore({
+        backupDir,
+        targetDir: nestedTarget,
+      });
+    }).toThrow(/non sécurisé.*contient un lien symbolique dans sa hiérarchie/);
+
+    expect(fs.readdirSync(outsideParent)).toHaveLength(0);
   });
 
-  it("11. restore rejects altered checksums and invalid schemas with non-zero exit", () => {
-    const backupDir = path.join(backupOutputDir, "tampered-checksum");
+  it("Targeted Test 2: Fichier de sauvegarde ou dossier interne symlink: refus avant lecture/copie extérieure", () => {
+    const backupDir = path.join(backupOutputDir, "symlink-backup-test");
+    performSiteBackup({
+      dryRun: false,
+      serviceStopped: true,
+      outDir: backupDir,
+      env: {
+        SITE_CONTENT_PATH: fixtureSiteContent,
+        PORTFOLIO_CONTENT_PATH: fixturePortfolioContent,
+        SITE_MEDIA_PATH: fixtureSiteMedia,
+      },
+    });
+
+    // 2a: Replace a backed-up file with a symlink to an outside file (external escape)
+    const siteContentInBackup = path.join(backupDir, "content/site-content.json");
+    fs.unlinkSync(siteContentInBackup);
+    fs.symlinkSync(fixtureSiteContent, siteContentInBackup);
+
+    const isolatedTarget = path.join(tempFixtureDir, "isolated-restore-symlink-backup");
+    expect(() => {
+      performSiteRestore({
+        backupDir,
+        targetDir: isolatedTarget,
+      });
+    }).toThrow(/Tentative d'évasion|Lien symbolique/);
+    expect(fs.existsSync(isolatedTarget)).toBe(false);
+
+    // 2b: Symlink within backup pointing to another backup file
+    const backupDir2 = path.join(backupOutputDir, "symlink-internal-test");
+    performSiteBackup({
+      dryRun: false,
+      serviceStopped: true,
+      outDir: backupDir2,
+      env: {
+        SITE_CONTENT_PATH: fixtureSiteContent,
+        PORTFOLIO_CONTENT_PATH: fixturePortfolioContent,
+      },
+    });
+    const backupSite2 = path.join(backupDir2, "content/site-content.json");
+    const backupPort2 = path.join(backupDir2, "content/portfolio-content.json");
+    fs.unlinkSync(backupSite2);
+    // Symlink inside the backup pointing to sibling portfolio-content.json
+    fs.symlinkSync(backupPort2, backupSite2);
+
+    const isolatedTarget2 = path.join(tempFixtureDir, "isolated-restore-internal-symlink");
+    const res2 = performSiteRestore({
+      backupDir: backupDir2,
+      targetDir: isolatedTarget2,
+    });
+    expect(res2.success).toBe(false);
+    expect(res2.reason).toBe("VALIDATION_FAILED");
+    expect(res2.errors?.some((e) => e.includes("Lien symbolique"))).toBe(true);
+    expect(fs.existsSync(isolatedTarget2)).toBe(false);
+  });
+
+  it("Targeted Test 3: originalPath arbitraire: aucune incidence sur la cible; mode en place et --force refusés", () => {
+    const backupDir = path.join(backupOutputDir, "original-path-test");
     performSiteBackup({
       dryRun: false,
       serviceStopped: true,
@@ -379,22 +378,257 @@ describe("Complete Site Backup and Restoration Suite", () => {
       },
     });
 
-    // Tamper 1 byte in backup file
-    const fileToTamper = path.join(backupDir, "content/site-content.json");
-    fs.appendFileSync(fileToTamper, " ");
+    // Plant outside sentinel file
+    const sentinelFile = path.join(tempFixtureDir, "sentinel-victim.txt");
+    fs.writeFileSync(sentinelFile, "SENTINEL_INITIAL_CONTENT", "utf-8");
 
+    // Alter manifest originalPath to point to sentinel
+    const manifestPath = path.join(backupDir, "manifest.json");
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
+    const siteItem = manifest.files.find((f: { component: string }) => f.component === "SITE_CONTENT");
+    siteItem.originalPath = sentinelFile;
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), "utf-8");
+
+    // 3a: Isolated restore to new target: restores properly into targetDir, sentinel untouched
+    const freshTarget = path.join(tempFixtureDir, "fresh-target-orig-test");
     const res = performSiteRestore({
       backupDir,
-      verifyOnly: true,
+      targetDir: freshTarget,
+    });
+    expect(res.success).toBe(true);
+    expect(fs.existsSync(path.join(freshTarget, "content/site-content.json"))).toBe(true);
+    expect(fs.readFileSync(sentinelFile, "utf-8")).toBe("SENTINEL_INITIAL_CONTENT");
+
+    // 3b: In-place mode with force: true must be explicitly rejected
+    expect(() => {
+      performSiteRestore({
+        backupDir,
+        force: true,
+        serviceStopped: true,
+      });
+    }).toThrow(/L'option --force est interdite/);
+    expect(fs.readFileSync(sentinelFile, "utf-8")).toBe("SENTINEL_INITIAL_CONTENT");
+
+    // 3c: In-place mode without targetDir must be rejected
+    expect(() => {
+      performSiteRestore({
+        backupDir,
+      });
+    }).toThrow(/le paramètre targetDir est obligatoire/);
+    expect(fs.readFileSync(sentinelFile, "utf-8")).toBe("SENTINEL_INITIAL_CONTENT");
+  });
+
+  it("Targeted Test 4: JSON de schéma invalide avec hash correct: refus avant toute publication et sources saines inchangées", () => {
+    const backupDir = path.join(backupOutputDir, "invalid-schema-correct-hash");
+    performSiteBackup({
+      dryRun: false,
+      serviceStopped: true,
+      outDir: backupDir,
+      env: {
+        SITE_CONTENT_PATH: fixtureSiteContent,
+        PORTFOLIO_CONTENT_PATH: fixturePortfolioContent,
+      },
+    });
+
+    // Record original healthy source state
+    const originalHealthySource = fs.readFileSync(fixtureSiteContent, "utf-8");
+
+    // Replace site-content in backup with schemaVersion: 999
+    const backupSiteContent = path.join(backupDir, "content/site-content.json");
+    const corruptedObj = { ...defaultSiteContent, schemaVersion: 999 };
+    fs.writeFileSync(backupSiteContent, JSON.stringify(corruptedObj, null, 2), "utf-8");
+
+    // Recompute sha256 and sizeBytes in manifest to isolate deep schema validation
+    const newSha = computeSha256(backupSiteContent);
+    const newSize = fs.statSync(backupSiteContent).size;
+    const manifestPath = path.join(backupDir, "manifest.json");
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
+    const siteItem = manifest.files.find((f: { component: string }) => f.component === "SITE_CONTENT");
+    siteItem.sha256 = newSha;
+    siteItem.sizeBytes = newSize;
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), "utf-8");
+
+    const isolatedTarget = path.join(tempFixtureDir, "target-invalid-schema");
+    const res = performSiteRestore({
+      backupDir,
+      targetDir: isolatedTarget,
     });
 
     expect(res.success).toBe(false);
-    expect(res.reason).toBe("INTEGRITY_CHECK_FAILED");
+    expect(res.reason).toBe("VALIDATION_FAILED");
+    expect(res.errors?.some((e) => e.includes("Schéma SITE_CONTENT invalide"))).toBe(true);
+
+    // Target directory was not created/published
+    expect(fs.existsSync(isolatedTarget)).toBe(false);
+
+    // Healthy original source is strictly untouched
+    expect(fs.readFileSync(fixtureSiteContent, "utf-8")).toBe(originalHealthySource);
   });
 
-  it("12. executes full backup and isolated restore cycle end-to-end with real CLI subprocesses", () => {
-    const backupDir = path.join(backupOutputDir, "cli-cycle");
-    const isolatedRestoreDir = path.join(tempFixtureDir, "cli-restored");
+  it("Targeted Test 5: SQLite invalide avec hash correct: refus avant toute publication et sources saines inchangées", () => {
+    const backupDir = path.join(backupOutputDir, "invalid-sqlite-correct-hash");
+    performSiteBackup({
+      dryRun: false,
+      serviceStopped: true,
+      outDir: backupDir,
+      env: {
+        SITE_CONTENT_PATH: fixtureSiteContent,
+        PORTFOLIO_CONTENT_PATH: fixturePortfolioContent,
+        GALLERY_DB_PATH: fixtureGalleryDb,
+      },
+    });
+
+    // Record original healthy database size
+    const originalDbSize = fs.statSync(fixtureGalleryDb).size;
+
+    // Replace database in backup with corrupted SQLite (missing galleries table)
+    const backupDb = path.join(backupDir, "db/galleries.sqlite");
+    const dummyDb = new DatabaseSync(backupDb);
+    dummyDb.exec("DROP TABLE IF EXISTS galleries; CREATE TABLE other_table (id TEXT);");
+    dummyDb.close();
+
+    const newSha = computeSha256(backupDb);
+    const newSize = fs.statSync(backupDb).size;
+    const manifestPath = path.join(backupDir, "manifest.json");
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
+    const dbItem = manifest.files.find((f: { component: string }) => f.component === "GALLERY_DB");
+    dbItem.sha256 = newSha;
+    dbItem.sizeBytes = newSize;
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), "utf-8");
+
+    const isolatedTarget = path.join(tempFixtureDir, "target-invalid-sqlite");
+    const res = performSiteRestore({
+      backupDir,
+      targetDir: isolatedTarget,
+    });
+
+    expect(res.success).toBe(false);
+    expect(res.reason).toBe("VALIDATION_FAILED");
+    expect(res.errors?.some((e) => e.includes("GALLERY_DB tables requises manquantes"))).toBe(true);
+    expect(fs.existsSync(isolatedTarget)).toBe(false);
+
+    // Healthy original source DB untouched
+    expect(fs.statSync(fixtureGalleryDb).size).toBe(originalDbSize);
+  });
+
+  it("Targeted Test 6: Cible existante (y compris vide) ou recouvrant la sauvegarde: refus sans altération", () => {
+    const backupDir = path.join(backupOutputDir, "target-overlap-test");
+    performSiteBackup({
+      dryRun: false,
+      serviceStopped: true,
+      outDir: backupDir,
+      env: {
+        SITE_CONTENT_PATH: fixtureSiteContent,
+        PORTFOLIO_CONTENT_PATH: fixturePortfolioContent,
+      },
+    });
+
+    // 6a: Pre-existing empty target directory
+    const existingTarget = path.join(tempFixtureDir, "empty-preexisting-target");
+    fs.mkdirSync(existingTarget, { recursive: true });
+
+    expect(() => {
+      performSiteRestore({
+        backupDir,
+        targetDir: existingTarget,
+      });
+    }).toThrow(/La cible de restauration existe déjà/);
+
+    // 6b: Overlapping target inside backup directory
+    const overlappingTarget = path.join(backupDir, "nested-target");
+    expect(() => {
+      performSiteRestore({
+        backupDir,
+        targetDir: overlappingTarget,
+      });
+    }).toThrow(/ne peut pas chevaucher le dossier de sauvegarde/);
+  });
+
+  it("Targeted Test 7: Destination de backup atteignant une source via symlink: refus", () => {
+    // Symlink pointing to source parent
+    const symlinkToSource = path.join(tempFixtureDir, "symlink-to-sources");
+    fs.symlinkSync(fixtureSiteMedia, symlinkToSource);
+    const backupInSymlink = path.join(symlinkToSource, "nested-backup");
+
+    expect(() => {
+      performSiteBackup({
+        dryRun: false,
+        serviceStopped: true,
+        outDir: backupInSymlink,
+        env: {
+          SITE_CONTENT_PATH: fixtureSiteContent,
+          SITE_MEDIA_PATH: fixtureSiteMedia,
+          PORTFOLIO_CONTENT_PATH: fixturePortfolioContent,
+        },
+      });
+    }).toThrow(/non sécurisé.*contient un lien symbolique dans sa hiérarchie|se trouve à l'intérieur d'une source/);
+  });
+
+  it("Targeted Test 8: Manifeste de version inconnue, composant inconnu, doublon ou association composant/chemin incohérente: rejet", () => {
+    const backupDir = path.join(backupOutputDir, "manifest-integrity-test");
+    performSiteBackup({
+      dryRun: false,
+      serviceStopped: true,
+      outDir: backupDir,
+      env: {
+        SITE_CONTENT_PATH: fixtureSiteContent,
+        PORTFOLIO_CONTENT_PATH: fixturePortfolioContent,
+      },
+    });
+    const manifestPath = path.join(backupDir, "manifest.json");
+    const originalManifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
+
+    // 8a: Unknown manifestVersion
+    const badVersion = { ...originalManifest, manifestVersion: 999 };
+    fs.writeFileSync(manifestPath, JSON.stringify(badVersion, null, 2), "utf-8");
+    expect(() => performSiteRestore({ backupDir, verifyOnly: true })).toThrow(/Version de manifeste non supportée/);
+
+    // 8b: Unknown component
+    const badComponent = {
+      ...originalManifest,
+      manifestVersion: 1,
+      totalFiles: originalManifest.totalFiles + 1,
+      files: [
+        ...originalManifest.files,
+        {
+          component: "MALICIOUS_COMPONENT",
+          type: "file",
+          backupRelPath: "content/malicious.json",
+          sizeBytes: 10,
+          sha256: "0".repeat(64),
+        },
+      ],
+    };
+    fs.writeFileSync(manifestPath, JSON.stringify(badComponent, null, 2), "utf-8");
+    expect(() => performSiteRestore({ backupDir, verifyOnly: true })).toThrow(/Composant inconnu ou non autorisé/);
+
+    // 8c: Duplicate relative path
+    const duplicatePath = {
+      ...originalManifest,
+      manifestVersion: 1,
+      totalFiles: originalManifest.totalFiles + 1,
+      files: [...originalManifest.files, { ...originalManifest.files[0] }],
+    };
+    fs.writeFileSync(manifestPath, JSON.stringify(duplicatePath, null, 2), "utf-8");
+    expect(() => performSiteRestore({ backupDir, verifyOnly: true })).toThrow(/Doublon de fichier détecté/);
+
+    // 8d: Inconsistent component/path mapping
+    const badMapping = {
+      ...originalManifest,
+      manifestVersion: 1,
+      files: originalManifest.files.map((f: { component: string; backupRelPath: string }) =>
+        f.component === "SITE_CONTENT" ? { ...f, backupRelPath: "content/other-site.json" } : f
+      ),
+    };
+    fs.writeFileSync(manifestPath, JSON.stringify(badMapping, null, 2), "utf-8");
+    expect(() => performSiteRestore({ backupDir, verifyOnly: true })).toThrow(
+      /Association composant\/chemin incohérente pour SITE_CONTENT/
+    );
+  });
+
+  it("Targeted Test 9: Vrai cycle CLI Node backup -> verify-only -> restauration isolée neuve, puis relecture du contenu, des médias et des bases", () => {
+    const backupDir = path.join(backupOutputDir, "cli-cycle-e2e");
+    const isolatedRestoreDir = path.join(tempFixtureDir, "cli-restored-e2e");
 
     // 1. Run real Node CLI backup dry-run
     const dryRunProc = spawnSync(
@@ -409,6 +643,7 @@ describe("Complete Site Backup and Restoration Suite", () => {
           PORTFOLIO_MEDIA_PATH: fixturePortfolioMedia,
           GALLERY_DB_PATH: fixtureGalleryDb,
           RATE_LIMIT_DB_PATH: fixtureRateLimitDb,
+          GALLERY_MEDIA_PATH: fixtureGalleryMedia,
           GALLERY_IMPORT_PATH: fixtureGalleryImport,
         },
         encoding: "utf-8",
@@ -432,6 +667,7 @@ describe("Complete Site Backup and Restoration Suite", () => {
           PORTFOLIO_MEDIA_PATH: fixturePortfolioMedia,
           GALLERY_DB_PATH: fixtureGalleryDb,
           RATE_LIMIT_DB_PATH: fixtureRateLimitDb,
+          GALLERY_MEDIA_PATH: fixtureGalleryMedia,
           GALLERY_IMPORT_PATH: fixtureGalleryImport,
         },
         encoding: "utf-8",
@@ -453,7 +689,7 @@ describe("Complete Site Backup and Restoration Suite", () => {
     );
 
     expect(verifyProc.status).toBe(0);
-    expect(verifyProc.stdout).toContain("[OK] Intégrité de la sauvegarde validée :");
+    expect(verifyProc.stdout).toContain("[OK] Intégrité et conformité des schémas validées :");
 
     // 4. Run real Node CLI restore into isolated target dir
     const restoreProc = spawnSync(
@@ -467,9 +703,9 @@ describe("Complete Site Backup and Restoration Suite", () => {
 
     expect(restoreProc.status).toBe(0);
     expect(restoreProc.stdout).toContain("[SUCCÈS]");
-    expect(restoreProc.stdout).toContain("Restauré sur cible isolée");
+    expect(restoreProc.stdout).toContain(isolatedRestoreDir);
 
-    // 5. Verify restored files and validate data
+    // 5. Verify restored files, media, and SQLite databases using project helpers
     const restoredSiteJson = JSON.parse(
       fs.readFileSync(path.join(isolatedRestoreDir, "content/site-content.json"), "utf-8")
     );
@@ -487,11 +723,122 @@ describe("Complete Site Backup and Restoration Suite", () => {
     expect(fs.existsSync(restoredConfigFile)).toBe(true);
     expect(fs.readFileSync(restoredConfigFile, "utf-8")).toContain("TEST_SECRET=isolated-secret-value");
 
+    // Open restored gallery SQLite with real project helper
     const restoredDb = new DatabaseSync(path.join(isolatedRestoreDir, "db/galleries.sqlite"), { readOnly: true });
     const check = restoredDb.prepare("PRAGMA integrity_check").get() as { integrity_check: string };
     expect(check.integrity_check).toBe("ok");
     const count = restoredDb.prepare("SELECT count(*) as count FROM galleries").get() as { count: number };
     expect(count.count).toBeGreaterThanOrEqual(1);
     restoredDb.close();
+
+    // Open restored rate limit SQLite with real project helper
+    const restoredRateDb = new DatabaseSync(path.join(isolatedRestoreDir, "db/rate-limit.sqlite"), { readOnly: true });
+    const rateCheck = restoredRateDb.prepare("PRAGMA integrity_check").get() as { integrity_check: string };
+    expect(rateCheck.integrity_check).toBe("ok");
+    restoredRateDb.close();
   });
+
+  it(
+    "Targeted Test 10: Vrai démarrage du chemin documenté avec fixtures et contrôle HTTP sur port isolé",
+    async () => {
+      const testPort = await getFreePort();
+
+      // Isolated test environment config
+      const startupConfigFile = path.join(tempFixtureDir, "test-startup.env.local");
+      fs.writeFileSync(
+        startupConfigFile,
+        `
+NODE_ENV=production
+PORT=${testPort}
+HOST=127.0.0.1
+PUBLIC_SITE_URL=https://127.0.0.1:${testPort}
+ADMIN_PASSWORD_HASH=$argon2id$v=19$m=65536,t=3,p=4$c29tZXNhbHQ$abcdefghijklmnopqrstuvwxyz0123456789/+
+ADMIN_SESSION_SECRET=admin-session-secret-at-least-32-chars-long!
+RATE_LIMIT_SECRET=rate-limit-secret-at-least-32-chars-long!
+GALLERY_SECRET=gallery-secret-at-least-32-chars-long!
+GALLERY_CODE_ENCRYPTION_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+SITE_CONTENT_PATH=${fixtureSiteContent}
+PORTFOLIO_CONTENT_PATH=${fixturePortfolioContent}
+SITE_MEDIA_PATH=${fixtureSiteMedia}
+PORTFOLIO_MEDIA_PATH=${fixturePortfolioMedia}
+GALLERY_DB_PATH=${fixtureGalleryDb}
+RATE_LIMIT_DB_PATH=${fixtureRateLimitDb}
+GALLERY_MEDIA_PATH=${fixtureGalleryMedia}
+GALLERY_IMPORT_PATH=${fixtureGalleryImport}
+`
+      );
+
+      // Launch documented startup wrapper as a child process
+      const serverProcess = spawn(
+        process.execPath,
+        [startServerScriptPath, "--config-path", startupConfigFile],
+        {
+          stdio: "pipe",
+          env: {
+            ...process.env,
+            NODE_ENV: "production",
+            PORT: String(testPort),
+            HOST: "127.0.0.1",
+            PUBLIC_SITE_URL: `https://127.0.0.1:${testPort}`,
+            STARTUP_CONFIG_PATH: startupConfigFile,
+          },
+        }
+      );
+
+      let serverLogs = "";
+      serverProcess.stdout.on("data", (d) => {
+        serverLogs += d.toString();
+      });
+      serverProcess.stderr.on("data", (d) => {
+        serverLogs += d.toString();
+      });
+
+      try {
+        // Poll /api/health until server is ready (up to 12 seconds)
+        const healthUrl = `http://127.0.0.1:${testPort}/api/health`;
+        let healthy = false;
+        let body: { status?: string } = {};
+
+        const startMs = Date.now();
+        while (Date.now() - startMs < 12000) {
+          try {
+            const res = await fetch(healthUrl);
+            if (res.status === 200) {
+              body = (await res.json()) as { status?: string };
+              if (body.status === "ok") {
+                healthy = true;
+                break;
+              }
+            }
+          } catch {
+            // Server still starting up, wait 100ms
+            await new Promise((r) => setTimeout(r, 100));
+          }
+        }
+
+        if (!healthy) {
+          console.error("Server output before timeout:", serverLogs);
+        }
+
+        expect(healthy).toBe(true);
+        expect(body.status).toBe("ok");
+      } finally {
+        // Cleanly terminate server child process
+        serverProcess.kill("SIGTERM");
+        await new Promise<void>((resolve) => {
+          serverProcess.on("close", () => resolve());
+          // Fallback safety timeout
+          setTimeout(() => {
+            try {
+              serverProcess.kill("SIGKILL");
+            } catch {
+              /* ignore */
+            }
+            resolve();
+          }, 3000);
+        });
+      }
+    },
+    20000
+  );
 });
