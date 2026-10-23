@@ -14,8 +14,9 @@ import { validateOrigin, readStrictFormUrlEncoded, ActionSecurityError } from ".
 import {
   type PortfolioProject,
   type PortfolioCategory,
+  type PortfolioCategoryItem,
   type PortfolioMediaItem,
-  PORTFOLIO_CATEGORIES,
+  type PortfolioContent,
   slugify,
   resolveProjectPresentationMode,
 } from "../../lib/portfolio-content.shared";
@@ -51,6 +52,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   return Response.json(
     {
       project,
+      categories: content.categories || [],
       contentRevision: content.revision,
       media: content.media,
       csrfToken,
@@ -129,7 +131,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     return Response.json({ error: "Projet introuvable." }, { status: 404, headers: createAdminHeaders() });
   }
 
-  const nextContent = JSON.parse(JSON.stringify(content));
+  const nextContent: PortfolioContent = JSON.parse(JSON.stringify(content));
   const proj = nextContent.projects[projectIndex];
 
   // Extract form fields
@@ -203,7 +205,14 @@ export async function action({ request, params }: ActionFunctionArgs) {
   proj.title = { fr: titleFr || "Sans titre", en: titleEn || "Untitled" };
   proj.slugFr = slugFr || `projet-${Date.now().toString(36)}`;
   proj.slugEn = slugEn || `project-${Date.now().toString(36)}`;
-  proj.category = PORTFOLIO_CATEGORIES.includes(category) ? category : "documentary";
+  const validCategory = nextContent.categories?.find((c) => c.id === category);
+  if (!validCategory) {
+    return Response.json(
+      { error: "La rubrique sélectionnée est invalide ou n'existe plus." },
+      { status: 422, headers: createAdminHeaders() }
+    );
+  }
+  proj.category = category;
   proj.summary = { fr: summaryFr, en: summaryEn };
   proj.description = descriptionBlocks;
   proj.seo = {
@@ -294,13 +303,14 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
 interface LoaderData {
   project: PortfolioProject;
+  categories: PortfolioCategoryItem[];
   contentRevision: string;
   media: Record<string, PortfolioMediaItem>;
   csrfToken: string;
 }
 
 export default function AdminPortfolioEditPage() {
-  const { project, contentRevision, media, csrfToken } = useLoaderData<LoaderData>();
+  const { project, categories = [], contentRevision, media, csrfToken } = useLoaderData<LoaderData>();
   const actionData = useActionData<{ error?: string; success?: string; newRevision?: string }>();
   const navigation = useNavigation();
   const isSaving = navigation.state === "submitting";
@@ -355,6 +365,10 @@ export default function AdminPortfolioEditPage() {
   );
   const [status, setStatus] = useState(project.status);
   const [videoUrl, setVideoUrl] = useState(project.video?.url || "");
+
+  const activeCategory = categories.find((c) => c.id === category);
+  const catSlugFr = activeCategory?.slugFr || (category === "documentary" ? "documentaire" : category === "advertising" ? "publicite" : category);
+  const catSlugEn = activeCategory?.slugEn || category;
 
   // Media states
   const [coverImageId, setCoverImageId] = useState<string | null>(project.coverImageId);
@@ -605,7 +619,7 @@ export default function AdminPortfolioEditPage() {
                     className={styles.input}
                   />
                   <div className={styles.helperText}>
-                    Accessible sous : /fr/projets/{category === "documentary" ? "documentaire" : "publicite"}/{slugFr}
+                    Accessible sous : /fr/projets/{catSlugFr}/{slugFr}
                   </div>
                 </div>
 
@@ -623,7 +637,7 @@ export default function AdminPortfolioEditPage() {
                     className={styles.input}
                   />
                   <div className={styles.helperText}>
-                    Accessible under: /en/projects/{category}/{slugEn}
+                    Accessible under: /en/projects/{catSlugEn}/{slugEn}
                   </div>
                 </div>
               </div>
@@ -1033,8 +1047,11 @@ export default function AdminPortfolioEditPage() {
                   onChange={(e) => setCategory(e.target.value as PortfolioCategory)}
                   className={styles.select}
                 >
-                  <option value="documentary">Documentaire</option>
-                  <option value="advertising">Publicité</option>
+                  {categories.map((cat) => (
+                    <option key={cat.id} value={cat.id}>
+                      {cat.title.fr} {cat.status === "draft" ? "(Brouillon)" : ""}
+                    </option>
+                  ))}
                 </select>
               </div>
 
