@@ -88,6 +88,23 @@
   text-align: left;
 }
 
+.canonicalHint {
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.canonicalLink {
+  color: var(--px-accent);
+  text-decoration: underline;
+  word-break: break-all;
+  font-weight: 500;
+}
+
+.canonicalLink:hover {
+  color: var(--px-accent-hover);
+}
+
 .submitButton {
   display: block;
   box-sizing: border-box;

@@ -120,6 +120,8 @@ export interface PortfolioCategoryItem {
   showreelCoverImageId: string | null;
   morePhotosButton: LocalizedString;
   lessPhotosButton: LocalizedString;
+  moreVideosButton?: LocalizedString;
+  lessVideosButton?: LocalizedString;
   backButton: LocalizedString;
   category?: string;
 }
@@ -598,6 +600,8 @@ export function validatePortfolioCategoryItem(
 
   if (val.morePhotosButton && !validateLocalizedString(val.morePhotosButton, [...cPath, "morePhotosButton"], errors)) valid = false;
   if (val.lessPhotosButton && !validateLocalizedString(val.lessPhotosButton, [...cPath, "lessPhotosButton"], errors)) valid = false;
+  if (val.moreVideosButton && !validateLocalizedString(val.moreVideosButton, [...cPath, "moreVideosButton"], errors)) valid = false;
+  if (val.lessVideosButton && !validateLocalizedString(val.lessVideosButton, [...cPath, "lessVideosButton"], errors)) valid = false;
   if (val.backButton && !validateLocalizedString(val.backButton, [...cPath, "backButton"], errors)) valid = false;
 
   return valid;
@@ -1207,6 +1211,14 @@ export function migratePortfolioContentV1ToV2(raw: unknown): PortfolioContent {
       validateV1LocalizedString(sec.lessPhotosButton, `sections.${secKey}.lessPhotosButton`);
     }
 
+    if (sec.moreVideosButton !== undefined && sec.moreVideosButton !== null) {
+      validateV1LocalizedString(sec.moreVideosButton, `sections.${secKey}.moreVideosButton`);
+    }
+
+    if (sec.lessVideosButton !== undefined && sec.lessVideosButton !== null) {
+      validateV1LocalizedString(sec.lessVideosButton, `sections.${secKey}.lessVideosButton`);
+    }
+
     // backButton in V1 must be a valid LocalizedString if present; cannot be null or non-object
     if (sec.backButton !== undefined) {
       validateV1LocalizedString(sec.backButton, `sections.${secKey}.backButton`);
@@ -1282,6 +1294,8 @@ export function migratePortfolioContentV1ToV2(raw: unknown): PortfolioContent {
       showreelCoverImageId: doc.showreelCoverImageId ?? null,
       morePhotosButton: doc.morePhotosButton || { fr: "Voir plus de photos", en: "See more photos" },
       lessPhotosButton: doc.lessPhotosButton || { fr: "Voir moins", en: "See less" },
+      moreVideosButton: doc.moreVideosButton || { fr: "Voir plus de vidéos", en: "See more videos" },
+      lessVideosButton: doc.lessVideosButton || { fr: "Voir moins de vidéos", en: "See less videos" },
       backButton: doc.backButton || { fr: "Retour aux projets", en: "Back to projects" },
     });
   }
@@ -1312,6 +1326,8 @@ export function migratePortfolioContentV1ToV2(raw: unknown): PortfolioContent {
       showreelCoverImageId: ad.showreelCoverImageId ?? null,
       morePhotosButton: ad.morePhotosButton || { fr: "Voir plus de photos", en: "See more photos" },
       lessPhotosButton: ad.lessPhotosButton || { fr: "Voir moins", en: "See less" },
+      moreVideosButton: ad.moreVideosButton || { fr: "Voir plus de vidéos", en: "See more videos" },
+      lessVideosButton: ad.lessVideosButton || { fr: "Voir moins de vidéos", en: "See less videos" },
       backButton: ad.backButton || { fr: "Retour aux projets", en: "Back to projects" },
     });
   }
@@ -1343,6 +1359,8 @@ export function migratePortfolioContentV1ToV2(raw: unknown): PortfolioContent {
         showreelCoverImageId: sec.showreelCoverImageId ?? null,
         morePhotosButton: sec.morePhotosButton || { fr: "Voir plus de photos", en: "See more photos" },
         lessPhotosButton: sec.lessPhotosButton || { fr: "Voir moins", en: "See less" },
+        moreVideosButton: sec.moreVideosButton || { fr: "Voir plus de vidéos", en: "See more videos" },
+        lessVideosButton: sec.lessVideosButton || { fr: "Voir moins de vidéos", en: "See less videos" },
         backButton: sec.backButton || { fr: "Retour aux projets", en: "Back to projects" },
       });
     }

@@ -1,5 +1,5 @@
 import * as net from "node:net";
-import { ENV } from "./env.server";
+import { ENV, isLocalPreviewMode } from "./env.server";
 
 export const MAX_AUTH_BODY_SIZE = 8192; // 8 KiB exact
 
@@ -48,6 +48,71 @@ export function validateOrigin(request: Request): boolean {
     return originUrl.origin === siteUrl.origin;
   } catch {
     return false;
+  }
+}
+
+/**
+ * In local preview mode (explicitly enabled and bounded to loopback),
+ * checks whether an incoming GET/HEAD admin request is accessing via a loopback alias (e.g. localhost)
+ * rather than the configured canonical origin (e.g. 127.0.0.1).
+ * If so, returns the safe canonical destination URL (strictly canonical origin + original pathname/query),
+ * before any session or CSRF token is issued on the alias.
+ * Returns null if not in local preview mode, not a loopback alias, wrong port, wrong method, or already canonical.
+ */
+export function getCanonicalLoopbackRedirect(request: Request): string | null {
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    return null;
+  }
+
+  try {
+    if (!isLocalPreviewMode()) {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+
+  try {
+    const canonical = new URL(ENV.PUBLIC_SITE_URL);
+    const incoming = new URL(request.url);
+
+    const isLoopback = (host: string) => host === "localhost" || host === "127.0.0.1";
+    if (!isLoopback(incoming.hostname) || !isLoopback(canonical.hostname)) {
+      return null;
+    }
+
+    // Must match port (including default/empty port)
+    if (incoming.port !== canonical.port) {
+      return null;
+    }
+
+    // Already on canonical origin: no redirect
+    if (incoming.origin === canonical.origin) {
+      return null;
+    }
+
+    // Must be an admin route
+    if (!incoming.pathname.startsWith("/admin")) {
+      return null;
+    }
+
+    // Only redirect HTML document navigations (GET/HEAD with Accept: text/html, Sec-Fetch-Dest: document, etc.)
+    const accept = request.headers.get("Accept") || "";
+    const secFetchDest = request.headers.get("Sec-Fetch-Dest") || "";
+    const isHtmlNavigation =
+      secFetchDest === "document" ||
+      accept.includes("text/html") ||
+      accept === "*/*" ||
+      accept === "";
+    if (!isHtmlNavigation) {
+      return null;
+    }
+
+    // Build target safely using canonical.origin + incoming pathname and search params
+    const destination = new URL(incoming.pathname + incoming.search, canonical.origin);
+    return destination.toString();
+  } catch {
+    return null;
   }
 }
 

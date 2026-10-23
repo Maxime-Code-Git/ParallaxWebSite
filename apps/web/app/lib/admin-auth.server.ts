@@ -1,7 +1,12 @@
 import { redirect } from "react-router";
 import { requireAdminSession, constantTimeEqual, getAdminConfig } from "./auth.server";
 import { destroySession } from "./session.server";
-import { validateOrigin, readStrictFormUrlEncoded, ActionSecurityError } from "./security.server";
+import {
+  validateOrigin,
+  readStrictFormUrlEncoded,
+  ActionSecurityError,
+  getCanonicalLoopbackRedirect,
+} from "./security.server";
 
 export function createAdminHeaders(headers = new Headers()): Headers {
   headers.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
@@ -72,6 +77,15 @@ export function composeAdminHeaders({
 export async function requireValidAdminSession(request: Request) {
   // Ensure admin configuration is valid before checking session
   getAdminConfig();
+
+  // In local preview, canonicalize loopback alias before checking or emitting cookies
+  const canonicalRedirect = getCanonicalLoopbackRedirect(request);
+  if (canonicalRedirect) {
+    throw redirect(canonicalRedirect, {
+      status: 302,
+      headers: createAdminHeaders(),
+    });
+  }
 
   const { isValid, session } = await requireAdminSession(request);
   if (!isValid) {

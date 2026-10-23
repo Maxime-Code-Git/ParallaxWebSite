@@ -73,6 +73,10 @@ const ALLOWED_SECTION_FIELDS = [
   "morePhotosButton_en",
   "lessPhotosButton_fr",
   "lessPhotosButton_en",
+  "moreVideosButton_fr",
+  "moreVideosButton_en",
+  "lessVideosButton_fr",
+  "lessVideosButton_en",
   "backButton_fr",
   "backButton_en",
   "seo_title_fr",
@@ -106,6 +110,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     throw new Response("Rubrique introuvable", { status: 404, headers: responseHeaders });
   }
 
+  const publishedProjects = content.projects.filter(
+    (p) => p.category === categoryId && p.status === "published" && !p.archived
+  );
+  const publishedVideosCount = publishedProjects.filter((p) => Boolean(p.video?.url)).length;
+
   return Response.json(
     {
       section,
@@ -114,6 +123,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       contentRevision: content.revision,
       media: content.media,
       csrfToken,
+      publishedVideosCount,
     },
     { headers: responseHeaders }
   );
@@ -314,6 +324,18 @@ export async function action({ request, params }: ActionFunctionArgs) {
     fr: String(formData.get("lessPhotosButton_fr") || "").trim(),
     en: String(formData.get("lessPhotosButton_en") || "").trim(),
   };
+  const moreVideosFr = String(formData.get("moreVideosButton_fr") || "").trim();
+  const moreVideosEn = String(formData.get("moreVideosButton_en") || "").trim();
+  section.moreVideosButton = {
+    fr: moreVideosFr || section.moreVideosButton?.fr || "Voir plus de vidéos",
+    en: moreVideosEn || section.moreVideosButton?.en || "See more videos",
+  };
+  const lessVideosFr = String(formData.get("lessVideosButton_fr") || "").trim();
+  const lessVideosEn = String(formData.get("lessVideosButton_en") || "").trim();
+  section.lessVideosButton = {
+    fr: lessVideosFr || section.lessVideosButton?.fr || "Voir moins de vidéos",
+    en: lessVideosEn || section.lessVideosButton?.en || "See less videos",
+  };
   section.backButton = {
     fr: String(formData.get("backButton_fr") || "").trim(),
     en: String(formData.get("backButton_en") || "").trim(),
@@ -351,6 +373,7 @@ interface LoaderData {
   contentRevision: string;
   media: Record<string, PortfolioMediaItem>;
   csrfToken: string;
+  publishedVideosCount?: number;
 }
 
 export default function AdminPortfolioSectionPage() {
@@ -360,6 +383,7 @@ export default function AdminPortfolioSectionPage() {
     contentRevision,
     media: initialMedia,
     csrfToken,
+    publishedVideosCount = 0,
   } = useLoaderData<LoaderData>();
   const actionData = useActionData<{ success?: string; error?: string; newRevision?: string }>();
   const navigation = useNavigation();
@@ -403,6 +427,18 @@ export default function AdminPortfolioSectionPage() {
   const [morePhotosButtonEn, setMorePhotosButtonEn] = useState(section.morePhotosButton.en);
   const [lessPhotosButtonFr, setLessPhotosButtonFr] = useState(section.lessPhotosButton.fr);
   const [lessPhotosButtonEn, setLessPhotosButtonEn] = useState(section.lessPhotosButton.en);
+  const [moreVideosButtonFr, setMoreVideosButtonFr] = useState(
+    section.moreVideosButton?.fr || "Voir plus de vidéos"
+  );
+  const [moreVideosButtonEn, setMoreVideosButtonEn] = useState(
+    section.moreVideosButton?.en || "See more videos"
+  );
+  const [lessVideosButtonFr, setLessVideosButtonFr] = useState(
+    section.lessVideosButton?.fr || "Voir moins de vidéos"
+  );
+  const [lessVideosButtonEn, setLessVideosButtonEn] = useState(
+    section.lessVideosButton?.en || "See less videos"
+  );
   const [backButtonFr, setBackButtonFr] = useState(section.backButton.fr);
   const [backButtonEn, setBackButtonEn] = useState(section.backButton.en);
   const [seoTitleFr, setSeoTitleFr] = useState(section.seo.title.fr);
@@ -858,6 +894,10 @@ export default function AdminPortfolioSectionPage() {
             <div className={styles.card}>
               <h2 className={styles.cardTitle}>Libellés des boutons de navigation</h2>
 
+              <div style={{ marginBottom: "20px", padding: "14px 16px", background: "rgba(30, 158, 255, 0.08)", borderRadius: "8px", border: "0.5px solid rgba(30, 158, 255, 0.25)", fontSize: "14px", lineHeight: "1.5", color: "#C7CED9" }}>
+                <strong style={{ color: "#1E9EFF" }}>Volet vidéo complémentaire :</strong> {publishedVideosCount} vidéo(s) configurée(s) sur les projets publiés de cette rubrique. Le volet en bas de page s'alimente automatiquement à partir des vidéos principales et secondaires des projets publiés.
+              </div>
+
               <div className={activeLang === "fr" ? styles.tabContentVisible : styles.tabContentHidden}>
                 <div className={styles.formGroup}>
                   <label htmlFor="morePhotosButton_fr" className={styles.label}>
@@ -883,6 +923,34 @@ export default function AdminPortfolioSectionPage() {
                     type="text"
                     value={lessPhotosButtonFr}
                     onChange={(e) => setLessPhotosButtonFr(e.target.value)}
+                    className={styles.input}
+                  />
+                </div>
+
+                <div className={styles.formGroup}>
+                  <label htmlFor="moreVideosButton_fr" className={styles.label}>
+                    Bouton « Voir plus de vidéos » (FR)
+                  </label>
+                  <input
+                    id="moreVideosButton_fr"
+                    name="moreVideosButton_fr"
+                    type="text"
+                    value={moreVideosButtonFr}
+                    onChange={(e) => setMoreVideosButtonFr(e.target.value)}
+                    className={styles.input}
+                  />
+                </div>
+
+                <div className={styles.formGroup}>
+                  <label htmlFor="lessVideosButton_fr" className={styles.label}>
+                    Bouton « Voir moins de vidéos » (FR)
+                  </label>
+                  <input
+                    id="lessVideosButton_fr"
+                    name="lessVideosButton_fr"
+                    type="text"
+                    value={lessVideosButtonFr}
+                    onChange={(e) => setLessVideosButtonFr(e.target.value)}
                     className={styles.input}
                   />
                 </div>
@@ -927,6 +995,34 @@ export default function AdminPortfolioSectionPage() {
                     type="text"
                     value={lessPhotosButtonEn}
                     onChange={(e) => setLessPhotosButtonEn(e.target.value)}
+                    className={styles.input}
+                  />
+                </div>
+
+                <div className={styles.formGroup}>
+                  <label htmlFor="moreVideosButton_en" className={styles.label}>
+                    Bouton « Voir plus de vidéos » (EN)
+                  </label>
+                  <input
+                    id="moreVideosButton_en"
+                    name="moreVideosButton_en"
+                    type="text"
+                    value={moreVideosButtonEn}
+                    onChange={(e) => setMoreVideosButtonEn(e.target.value)}
+                    className={styles.input}
+                  />
+                </div>
+
+                <div className={styles.formGroup}>
+                  <label htmlFor="lessVideosButton_en" className={styles.label}>
+                    Bouton « Voir moins de vidéos » (EN)
+                  </label>
+                  <input
+                    id="lessVideosButton_en"
+                    name="lessVideosButton_en"
+                    type="text"
+                    value={lessVideosButtonEn}
+                    onChange={(e) => setLessVideosButtonEn(e.target.value)}
                     className={styles.input}
                   />
                 </div>

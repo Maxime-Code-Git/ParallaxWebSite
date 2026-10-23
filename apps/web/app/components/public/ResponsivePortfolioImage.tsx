@@ -17,6 +17,9 @@ export interface ResponsivePortfolioImageProps {
   loading?: "lazy" | "eager";
   decoding?: "async" | "auto" | "sync";
   isAdminPreview?: boolean;
+  preferLargest?: boolean;
+  onLoad?: () => void;
+  onError?: () => void;
 }
 
 export function ResponsivePortfolioImage({
@@ -32,6 +35,9 @@ export function ResponsivePortfolioImage({
   loading = "lazy",
   decoding = "async",
   isAdminPreview = false,
+  preferLargest = false,
+  onLoad,
+  onError,
 }: ResponsivePortfolioImageProps) {
   const isCustomImage =
     imageId &&
@@ -47,6 +53,8 @@ export function ResponsivePortfolioImage({
         className={className}
         loading={loading}
         decoding={decoding}
+        onLoad={onLoad}
+        onError={onError}
       />
     );
   }
@@ -68,10 +76,13 @@ export function ResponsivePortfolioImage({
       .map((v) => `${prefix}/${effectiveOwnerType}/${effectiveOwnerId}/${effectiveSlot}/${imageId}/${v.name}/webp ${v.width}w`)
       .join(", ");
 
-    const fallbackVariant =
-      sortedVariants.find((v) => v.name === "960p") ||
-      sortedVariants.find((v) => v.name === "640p") ||
-      sortedVariants[0];
+    const fallbackVariant = preferLargest
+      ? sortedVariants.find((v) => v.name === "1920p") ||
+        sortedVariants.find((v) => v.name === "1440p") ||
+        sortedVariants[sortedVariants.length - 1]
+      : sortedVariants.find((v) => v.name === "960p") ||
+        sortedVariants.find((v) => v.name === "640p") ||
+        sortedVariants[0];
 
     const fallbackImgUrl = `${prefix}/${effectiveOwnerType}/${effectiveOwnerId}/${effectiveSlot}/${imageId}/${fallbackVariant.name}/webp`;
 
@@ -87,13 +98,16 @@ export function ResponsivePortfolioImage({
           loading={loading}
           decoding={decoding}
           className={className}
+          onLoad={onLoad}
+          onError={onError}
         />
       </picture>
     );
   }
 
   // Fallback if metadata is not provided
-  const fallbackUrl = `${prefix}/${ownerType}/${ownerId}/${mediaSlot}/${imageId}/640p/webp`;
+  const fallbackVariantName = preferLargest ? "1920p" : "640p";
+  const fallbackUrl = `${prefix}/${ownerType}/${ownerId}/${mediaSlot}/${imageId}/${fallbackVariantName}/webp`;
   return (
     <img
       src={fallbackUrl}
@@ -101,6 +115,8 @@ export function ResponsivePortfolioImage({
       className={className}
       loading={loading}
       decoding={decoding}
+      onLoad={onLoad}
+      onError={onError}
     />
   );
 }

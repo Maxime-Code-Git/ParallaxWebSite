@@ -35,7 +35,9 @@ import {
   validateOrigin,
   readStrictFormUrlEncoded,
   ActionSecurityError,
+  getCanonicalLoopbackRedirect,
 } from "../../lib/security.server";
+import { ENV, isLocalPreviewMode } from "../../lib/env.server";
 import styles from "./login.module.css";
 
 export function meta() {
@@ -52,6 +54,15 @@ export function headers(args: HeadersArgs): Headers {
 export async function loader({ request }: LoaderFunctionArgs) {
   // 1. Verify admin configuration (throws 503 if missing or invalid)
   getAdminConfig();
+
+  // In local preview, canonicalize loopback alias before checking or emitting cookies
+  const canonicalRedirect = getCanonicalLoopbackRedirect(request);
+  if (canonicalRedirect) {
+    return redirect(canonicalRedirect, {
+      status: 302,
+      headers: createAdminHeaders(),
+    });
+  }
 
   // 2. Check if already authenticated
   const { isValid, session } = await requireAdminSession(request);
@@ -101,8 +112,22 @@ export async function action({ request }: ActionFunctionArgs) {
 
   // 3. Strict Origin check
   if (!validateOrigin(request)) {
+    let canonicalLoginUrl: string | undefined;
+    try {
+      if (isLocalPreviewMode()) {
+        const canonical = new URL(ENV.PUBLIC_SITE_URL);
+        canonicalLoginUrl = new URL("/admin", canonical.origin).toString();
+      }
+    } catch {
+      // Ignored
+    }
     return Response.json(
-      { error: "Origine de la requête non autorisée." },
+      {
+        error: canonicalLoginUrl
+          ? "Origine de la requête non autorisée. Vous semblez soumettre depuis une adresse locale différente de l'adresse canonique configurée."
+          : "Origine de la requête non autorisée.",
+        canonicalLoginUrl,
+      },
       {
         status: 403,
         headers: createAdminHeaders(),
@@ -239,7 +264,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
 export default function AdminLoginPage() {
   const { csrfToken } = useLoaderData<typeof loader>();
-  const actionData = useActionData<{ error?: string } | string>();
+  const actionData = useActionData<{ error?: string; canonicalLoginUrl?: string } | string>();
   const navigation = useNavigation();
   const isSubmitting = navigation.state === "submitting";
 
@@ -247,6 +272,9 @@ export default function AdminLoginPage() {
     typeof actionData === "string"
       ? actionData
       : actionData?.error;
+
+  const canonicalLoginUrl =
+    typeof actionData === "object" ? actionData?.canonicalLoginUrl : undefined;
 
   return (
     <div className={styles.container}>
@@ -276,9 +304,16 @@ export default function AdminLoginPage() {
           </div>
 
           {errorMessage && (
-            <p className={styles.error} role="alert">
-              {errorMessage}
-            </p>
+            <div className={styles.error} role="alert">
+              <p style={{ margin: 0 }}>{errorMessage}</p>
+              {canonicalLoginUrl && (
+                <p className={styles.canonicalHint}>
+                  <a href={canonicalLoginUrl} className={styles.canonicalLink}>
+                    Se connecter à l’adresse canonique : {canonicalLoginUrl}
+                  </a>
+                </p>
+              )}
+            </div>
           )}
 
           <button
