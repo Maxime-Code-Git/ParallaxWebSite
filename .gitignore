@@ -29,6 +29,7 @@ uploads/
 media/
 !apps/web/app/routes/media/
 .trash/
+/gallery-import/
 
 # Certificates and keys
 .certs/

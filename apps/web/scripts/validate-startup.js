@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
-import { validateAdminConfig, validateContentConfig, validateMediaConfig, validatePortfolioConfig } from "../app/lib/env.server.ts";
+import { validateAdminConfig, validateContentConfig, validateMediaConfig, validatePortfolioConfig, validateGalleryConfig } from "../app/lib/env.server.ts";
 
 export function runStartupValidation() {
   try {
@@ -9,6 +9,7 @@ export function runStartupValidation() {
     validateContentConfig();
     validateMediaConfig();
     validatePortfolioConfig();
+    validateGalleryConfig();
     console.log("Configuration de demarrage valide avec succes.");
     return true;
   } catch (err) {

@@ -6,7 +6,7 @@ import styles from "./header.module.css";
 interface HeaderProps {
   common: CommonContent;
   lang: "fr" | "en";
-  currentRoute: "home" | "studio" | "portfolio";
+  currentRoute: "home" | "studio" | "portfolio" | "client-area" | "gallery";
   alternateUrls?: { fr: string; en: string };
 }
 
@@ -18,15 +18,27 @@ export function Header({ common, lang, currentRoute, alternateUrls }: HeaderProp
   const contactHref = currentRoute === "home" ? "#contact" : `/${lang}#contact`;
   const sempraHref = currentRoute === "home" ? "#sempra" : `/${lang}#sempra`;
   const portfolioHref = lang === "fr" ? "/fr/projets" : "/en/projects";
-  const clientAreaHref = `/${lang}/espace-client`;
+  const clientAreaHref = lang === "fr" ? "/fr/espace-client" : "/en/client-area";
 
-  // Preserve page when switching language (supports custom alternateUrls for project/section slugs)
+  // Preserve page when switching language (supports custom alternateUrls for project/section slugs or galleries)
   const frSwitchHref =
     alternateUrls?.fr ||
-    (currentRoute === "studio" ? "/fr/studio" : currentRoute === "portfolio" ? "/fr/projets" : "/fr");
+    (currentRoute === "studio"
+      ? "/fr/studio"
+      : currentRoute === "portfolio"
+      ? "/fr/projets"
+      : currentRoute === "client-area"
+      ? "/fr/espace-client"
+      : "/fr");
   const enSwitchHref =
     alternateUrls?.en ||
-    (currentRoute === "studio" ? "/en/studio" : currentRoute === "portfolio" ? "/en/projects" : "/en");
+    (currentRoute === "studio"
+      ? "/en/studio"
+      : currentRoute === "portfolio"
+      ? "/en/projects"
+      : currentRoute === "client-area"
+      ? "/en/client-area"
+      : "/en");
 
   return (
     <>
@@ -163,6 +175,13 @@ export function Header({ common, lang, currentRoute, alternateUrls }: HeaderProp
           >
             {common.navigation.sempra[lang]}
           </a>
+          <Link
+            to={clientAreaHref}
+            className={styles.mobileNavLink}
+            onClick={() => setMobileMenuOpen(false)}
+          >
+            {common.navigation.clientArea[lang]}
+          </Link>
         </div>
       )}
     </>

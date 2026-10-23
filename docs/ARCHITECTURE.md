@@ -192,7 +192,6 @@ Depuis la racine du monorepo :
    - `GET /fr/studio` et `GET /en/studio` : Page Studio avec portraits, roles et approche du duo.
    - `GET /admin/home` et `POST /admin/home` : Formulaire d'administration de la page Accueil en francais et en anglais.
    - `GET /admin/studio` et `POST /admin/studio` : Formulaire d'administration de la page Studio en francais et en anglais.
-   - `GET /preview/login` : Endpoint d'authentification de developpement local borne strictement au mode `PARALLAX_LOCAL_PREVIEW=true` (retourne 404 en production standard).
 
 2. **Modele de donnees et persistance (`schemaVersion: 1`)** :
    - Stockage externe defini par `SITE_CONTENT_PATH` (ex: `/Users/profadmin/.parallax-data/site-content.json`).
@@ -200,3 +199,44 @@ Depuis la racine du monorepo :
    - Suivi de revision par jeton hex 32 octets aleatoire et horodatage ISO serveur. En cas de tentative d'enregistrement concurrent avec une revision obsolete, le serveur renvoie une erreur HTTP 409 et preserve l'integrite des saisies de l'utilisateur dans l'interface sans perte de donnees.
    - Selection de visuels strictement limitee aux identifiants autorises (`ALLOWED_IMAGE_MAP`). Aucun chemin arbitraire accepte en entree.
 
+## 9. Portfolio et realisations publiques (Lot 3)
+
+1. **Architecture des rubriques et realisations** :
+   - Deux rubriques fondamentales stables : `documentary` (Documentaire / Documentary) et `advertising` (Publicite / Advertising).
+   - Realisations structurees avec titre, resume, blocs de contenu typés, SEO, galerie d'images ordonnee, video avec couverture dediee, statut brouillon/publie, ordre d'affichage et side.
+   - Transition de remplacement directionnelle unique (500ms `cubic-bezier(0.7, 0, 0.2, 1)`) calculee selon `const panelDirection = imageSide === "left" ? "right" : "left"`.
+   - Stockage independant defini par `PORTFOLIO_CONTENT_PATH` et `PORTFOLIO_MEDIA_PATH`.
+
+2. **Routes et endpoints** :
+   - Pages publiques : `/fr/projets`, `/fr/projets/:rubrique`, `/fr/projets/:rubrique/:slugFr`, et equivalents `/en/projects/*`.
+   - Administration : `/admin/portfolio`, `/admin/portfolio/:id`, `/admin/portfolio/section/:sectionKey`.
+   - Upload et distribution : `/api/admin/portfolio/upload`, `/media/portfolio/:variantKey`.
+
+## 10. Espace client et galeries privees a code unique (Lot 4)
+
+1. **Modele SQLite V1 et isolation stricte** :
+   - Moteur SQLite natif `node:sqlite` V1 separe du rate limiter et du site (`GALLERY_DB_PATH`).
+   - Tables : `galleries` (UUID interne, publicId opaque, statut, expiration, revision), `gallery_codes` (HMAC sha256 unique, chiffrement AES-256-GCM, version entiere), `gallery_media` (photos et videos ordonnees, hash SHA-256 unique par galerie, dimensions, variantes WebP), `gallery_import_jobs` (baux workers exclusifs, statut, progression), `gallery_deletion_jobs` (quarantaine transactionnelle reprenable).
+   - Code d'acces unique sans compte ni identifiant : prefixe `PARALLAX-`, alphabet lisible, 96 bits d'entropie, jamais stocke en clair.
+   - Rotation du code : nouvelle valeur generee, `version = version + 1`, revocation instantanee de tous les cookies de clients actifs.
+
+2. **Routes publiques de l'espace client** :
+   - `GET /fr/espace-client` et `POST /fr/espace-client` : Formulaire de connexion FR avec carte prototype 480px.
+   - `GET /en/client-area` et `POST /en/client-area` : Formulaire de connexion EN.
+   - `GET /fr/galerie/:publicId` et `GET /en/gallery/:publicId` : Galerie privee (grille masonry 3 colonnes, pastille telechargement ronde, lightbox accessible, film 16:9).
+   - `POST /api/gallery/logout` : Deconnexion client et destruction du cookie `__parallax_gallery_session`.
+   - `GET /api/gallery/:publicId/photos?skip=24` : Pagination ordonnee stable de 24 en 24.
+   - `GET /api/gallery/:publicId/media/:mediaId?width=480|960|1920&format=webp` : Previews WebP persistantes (aucun fallback vers l'original).
+   - `GET /api/gallery/:publicId/media/:mediaId` : Streaming de video avec support RFC 7233 Range (206, Content-Range, Accept-Ranges, 416).
+   - `GET /api/gallery/:publicId/media/:mediaId/poster` : Poster prive pour film video.
+   - `GET /api/gallery/:publicId/download/original/:mediaId` : Telechargement du fichier original non altere.
+   - `GET /api/gallery/:publicId/download?type=all|photos|videos` : Streaming instantane d'archive ZIP via yazl (`compress: false`).
+
+3. **Administration des galeries** :
+   - `GET /admin/galleries` : Liste des galeries avec compteurs photos/videos, statuts et dates d'expiration.
+   - `GET /admin/galleries/new` et `POST /admin/galleries/new` : Creation atomique galerie et code d'acces.
+   - `GET /admin/galleries/:id` et `POST /admin/galleries/:id` : Edition editoriale avec verification de revision (409 Conflict), rotation du code, publication, archivage et suppression avec confirmation exacte du nom.
+   - `GET /admin/galleries/:id/preview` : Previsualisation fidele pour l'administrateur connecte sans session client.
+   - `POST /api/admin/galleries/:id/import` : Analyse du dossier source puis demarrage du job a bail persistant.
+   - `GET /api/admin/galleries/:id/imports/:importId` : Suivi de progression temps reel de l'import.
+   - `POST /api/admin/galleries/:id/media/:mediaId/poster` : Televersement de poster video via formulaire natif streaming (Sharp, limite 25 MiB).

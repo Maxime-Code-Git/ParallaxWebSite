@@ -24,7 +24,33 @@ export default [
   route("admin/portfolio", "routes/admin/portfolio.tsx"),
   route("admin/portfolio/:id", "routes/admin/portfolio-edit.tsx"),
   route("admin/portfolio/section/:category", "routes/admin/portfolio-section.tsx"),
+  route("admin/galleries", "routes/admin/galleries-list.tsx"),
+  route("admin/galleries/new", "routes/admin/galleries-new.tsx"),
+  route("admin/galleries/:id", "routes/admin/galleries-edit.tsx"),
+  route("admin/galleries/:id/preview", "routes/admin/galleries-preview.tsx"),
   route("admin/logout", "routes/admin/logout.tsx"),
+
+  // Client Area Login FR/EN
+  route("fr/espace-client", "routes/public/client-login.tsx", { id: "fr-client-login" }),
+  route("en/client-area", "routes/public/client-login.tsx", { id: "en-client-login" }),
+
+  // Client Gallery FR/EN
+  route("fr/galerie/:publicId", "routes/public/gallery.tsx", { id: "fr-gallery" }),
+  route("en/gallery/:publicId", "routes/public/gallery.tsx", { id: "en-gallery" }),
+
+  // Client Gallery APIs
+  route("api/gallery/logout", "routes/api/gallery-logout.ts"),
+  route("api/gallery/:publicId/photos", "routes/api/gallery-photos.ts"),
+  route("api/gallery/:publicId/media/:mediaId", "routes/api/gallery-media.ts"),
+  route("api/gallery/:publicId/media/:mediaId/poster", "routes/api/gallery-media-poster.ts"),
+  route("api/gallery/:publicId/download/original/:mediaId", "routes/api/gallery-download-original.ts"),
+  route("api/gallery/:publicId/download", "routes/api/gallery-download.ts"),
+
+  // Admin Gallery APIs
+  route("api/admin/galleries/:id/import", "routes/api/admin-gallery-import.ts"),
+  route("api/admin/galleries/:id/imports/:importId", "routes/api/admin-gallery-import-status.ts"),
+  route("api/admin/galleries/:id/media/:mediaId/poster", "routes/api/admin-gallery-media-poster.ts"),
+  route("api/admin/galleries/:id/media/:mediaId", "routes/api/admin-gallery-media.ts"),
 
   // Media API & Public variants serving
   route("api/admin/media-upload", "routes/api/admin-media-upload.ts"),
