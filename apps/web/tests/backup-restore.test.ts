@@ -772,6 +772,16 @@ GALLERY_IMPORT_PATH=${fixtureGalleryImport}
 `
       );
 
+      // Ensure production server build exists (e.g. fresh CI environments before 'Build' step)
+      const serverBuildPath = path.resolve(rootDir, "apps/web/build/server/index.js");
+      if (!fs.existsSync(serverBuildPath)) {
+        spawnSync("npm", ["run", "build"], {
+          cwd: rootDir,
+          env: { ...process.env, NODE_ENV: "production" },
+          stdio: "ignore",
+        });
+      }
+
       // Launch documented startup wrapper as a child process
       const serverProcess = spawn(
         process.execPath,

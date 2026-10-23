@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import fs from "node:fs";
 import path from "node:path";
 import { getMonorepoRoot, loadEnvLocal } from "./env-loader.js";
 import { runStartupValidation } from "../apps/web/scripts/validate-startup.js";
@@ -24,17 +25,25 @@ process.env.PORT = process.env.PORT || "3000";
 delete process.env.PARALLAX_LOCAL_PREVIEW;
 delete process.env.PREVIEW_MODE;
 
-// 3. Validate configuration before starting server
+// 3. Ensure production server build exists
+if (!fs.existsSync(serverBuild)) {
+  console.error(
+    `[CRITICAL] Build serveur introuvable : ${serverBuild}. Exécutez 'npm run build' avant de démarrer le serveur de production.`
+  );
+  process.exit(1);
+}
+
+// 4. Validate configuration before starting server
 const isValid = runStartupValidation();
 if (!isValid) {
   console.error("[CRITICAL] Échec du contrôle préalable de configuration. Démarrage interrompu.");
   process.exit(1);
 }
 
-// 4. Move working directory to apps/web for static public/ asset resolution
+// 5. Move working directory to apps/web for static public/ asset resolution
 process.chdir(appsWebDir);
 
-// 5. Pass build path to @react-router/serve and execute
+// 6. Pass build path to @react-router/serve and execute
 process.argv = [
   process.argv[0],
   serveCli,
