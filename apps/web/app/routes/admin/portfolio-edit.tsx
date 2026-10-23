@@ -674,7 +674,7 @@ export default function AdminPortfolioEditPage() {
 
               <div className={`${styles.formGroup} ${activeLang === "fr" ? styles.tabContentVisible : styles.tabContentHidden}`}>
                 <label className={styles.label} htmlFor="descriptionFr">
-                  Contenu détaillé (FR) — Séparez les paragraphes par un saut de ligne
+                  Contenu détaillé (FR) : séparez les paragraphes par un saut de ligne
                 </label>
                 <textarea
                   id="descriptionFr"
@@ -688,7 +688,7 @@ export default function AdminPortfolioEditPage() {
 
               <div className={`${styles.formGroup} ${activeLang === "en" ? styles.tabContentVisible : styles.tabContentHidden}`}>
                 <label className={styles.label} htmlFor="descriptionEn">
-                  Detailed Content (EN) — Separate paragraphs with blank lines
+                  Detailed Content (EN): Separate paragraphs with blank lines
                 </label>
                 <textarea
                   id="descriptionEn"

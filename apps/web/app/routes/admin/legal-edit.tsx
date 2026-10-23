@@ -555,7 +555,7 @@ export default function AdminLegalEditPage() {
               }
             >
               {isPublished
-                ? `Publié (v${pageRecord.published?.version} — ${pageRecord.published?.effectiveDate})`
+                ? `Publié (v${pageRecord.published?.version} | ${pageRecord.published?.effectiveDate})`
                 : "Brouillon non publié"}
             </span>
             {hasUnsavedEdits && (
@@ -586,7 +586,7 @@ export default function AdminLegalEditPage() {
         {isCorrupted && (
           <div className={formStyles.alertError} role="alert">
             <p>
-              <strong>Attention — Contenu de secours actif en mémoire :</strong> Le fichier de configuration présente une anomalie de validation et les modifications sont bloquées pour protéger vos données.
+              <strong>Attention : contenu de secours actif en mémoire :</strong> Le fichier de configuration présente une anomalie de validation et les modifications sont bloquées pour protéger vos données.
             </p>
             {corruptionError && (
               <p className={formStyles.alertSubText}>

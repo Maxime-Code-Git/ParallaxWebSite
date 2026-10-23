@@ -582,7 +582,8 @@ describe("Legal Content, Centralized Company Bindings & Belgian Compliance", () 
 
       const sampleTemplateFr = "— Numéro de TVA intracommunautaire : {{company.vatNumber}} ({{company.vatRegime}}).";
       const resolvedFr = resolveCompanyTokens(sampleTemplateFr, nonSubjectCompany, "public", "fr");
-      expect(resolvedFr).toBe("— Régime TVA : Non assujetti à la TVA.");
+      expect(resolvedFr).toBe(", régime TVA : Non assujetti à la TVA.");
+      expect(resolvedFr).not.toContain("—");
       expect(resolvedFr).not.toContain("()");
       expect(resolvedFr).not.toContain("TVA intracommunautaire : .");
     });

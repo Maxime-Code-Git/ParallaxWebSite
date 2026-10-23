@@ -287,7 +287,7 @@ function formatBytes(bytes: number): string {
 }
 
 function formatDate(timestamp: number | null): string {
-  if (!timestamp) return "—";
+  if (!timestamp) return "Non renseigné";
   return new Intl.DateTimeFormat("fr-FR", {
     day: "numeric",
     month: "short",

@@ -19,6 +19,8 @@ import {
   type ContactPageContent,
   type SiteContent,
   DEFAULT_CONTACT_PAGE_MESSAGES,
+  cleanCommonContent,
+  cleanContactContent,
 } from "./site-content.shared";
 import { sendContactEmail, getSmtpDiagnostic, SmtpConfigError, SmtpDeliveryError } from "./mailer.server";
 
@@ -408,8 +410,8 @@ export async function handleContactLoader(args: LoaderFunctionArgs, forcedLang?:
     {
       lang,
       content: {
-        common: content.common,
-        contactPage: content.contactPage,
+        common: cleanCommonContent(content.common),
+        contactPage: cleanContactContent(content.contactPage),
         home: {
           contact: {
             email: content.home.contact.email,

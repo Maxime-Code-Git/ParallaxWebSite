@@ -19,6 +19,7 @@ import {
 } from "../../lib/portfolio-content.shared";
 import { getPublicPortfolioContent } from "../../lib/portfolio-content.server";
 import { getSiteContent, type CommonContent } from "../../lib/site-content.server";
+import { cleanTypography, cleanCommonContent } from "../../lib/site-content.shared";
 import { ENV } from "../../lib/env.server";
 import {
   getPortfolioOverviewUrl,
@@ -50,23 +51,31 @@ export function meta({ data }: { data?: LoaderData }) {
   if (!data) return [{ title: "Portfolio | Parallax" }];
   const { lang, content, panelState, siteUrl, alternateUrls } = data;
 
-  let pageTitle = content.overview.seo.title[lang] || `${content.overview.title[lang]} — Parallax`;
-  let pageDesc = content.overview.seo.description[lang] || content.overview.intro[lang];
+  let pageTitle = cleanTypography(
+    content.overview.seo.title[lang] || `${content.overview.title[lang]} | Parallax`
+  );
+  let pageDesc = cleanTypography(
+    content.overview.seo.description[lang] || content.overview.intro[lang]
+  );
 
   if (panelState.activeProject) {
-    pageTitle =
+    pageTitle = cleanTypography(
       panelState.activeProject.seo.title[lang] ||
-      `${panelState.activeProject.title[lang]} — Parallax`;
-    pageDesc =
+        `${panelState.activeProject.title[lang]} | Parallax`
+    );
+    pageDesc = cleanTypography(
       panelState.activeProject.seo.description[lang] ||
-      panelState.activeProject.summary[lang];
+        panelState.activeProject.summary[lang]
+    );
   } else if (panelState.activeCategory) {
     const sec =
       content.categories?.find((c) => c.id === panelState.activeCategory) ||
       content.sections?.[panelState.activeCategory];
     if (sec) {
-      pageTitle = sec.seo.title[lang] || `${sec.title[lang]} — Parallax`;
-      pageDesc = sec.seo.description[lang] || sec.intro[lang];
+      pageTitle = cleanTypography(
+        sec.seo.title[lang] || `${sec.title[lang]} | Parallax`
+      );
+      pageDesc = cleanTypography(sec.seo.description[lang] || sec.intro[lang]);
     }
   }
 
@@ -92,7 +101,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const lang: "fr" | "en" = pathname.startsWith("/en") ? "en" : "fr";
 
   const { content, publicProjects, publicCategories } = getPublicPortfolioContent();
-  const common = getSiteContent().common;
+  const common = cleanCommonContent(getSiteContent().common);
 
   // Use route params: client navigations keep the .data suffix in request.url.
   let activeCategory: PortfolioCategory | null = null;
