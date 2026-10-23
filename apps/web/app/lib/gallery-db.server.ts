@@ -14,6 +14,13 @@ export class GalleryDatabaseError extends Error {
   }
 }
 
+export class GalleryConflictError extends Error {
+  constructor(message = "Conflit de revision : la galerie a ete modifiee par une autre operation.") {
+    super(message);
+    this.name = "GalleryConflictError";
+  }
+}
+
 /**
  * Validates directory permissions and symlink restrictions.
  */
@@ -227,6 +234,68 @@ export function openGalleryDb(dbPath: string): DatabaseSync {
       `);
     }
 
+    // Parallax Gallery Schema V2 Migration (Data retention & deletion audit)
+    const v2Row = db
+      .prepare("SELECT version FROM gallery_schema WHERE version = 2")
+      .get() as { version: number } | undefined;
+
+    if (!v2Row) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS retention_settings (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          enabled INTEGER NOT NULL DEFAULT 0,
+          retention_days INTEGER DEFAULT NULL,
+          log_retention_days INTEGER DEFAULT NULL,
+          revision INTEGER NOT NULL DEFAULT 1,
+          updated_at INTEGER NOT NULL
+        );
+      `);
+
+      const hasSettings = db.prepare("SELECT 1 FROM retention_settings WHERE id = 1").get();
+      if (!hasSettings) {
+        db.prepare(`
+          INSERT INTO retention_settings (id, enabled, retention_days, log_retention_days, revision, updated_at)
+          VALUES (1, 0, NULL, NULL, 1, ?)
+        `).run(Date.now());
+      }
+
+      const galleryCols = (
+        db.prepare("PRAGMA table_info(galleries)").all() as { name: string }[]
+      ).map((c) => c.name);
+
+      if (!galleryCols.includes("retention_exempt")) {
+        db.exec("ALTER TABLE galleries ADD COLUMN retention_exempt INTEGER NOT NULL DEFAULT 0;");
+      }
+      if (!galleryCols.includes("retention_exempt_reason")) {
+        db.exec("ALTER TABLE galleries ADD COLUMN retention_exempt_reason TEXT;");
+      }
+
+      const deletionCols = (
+        db.prepare("PRAGMA table_info(gallery_deletion_jobs)").all() as { name: string }[]
+      ).map((c) => c.name);
+
+      if (!deletionCols.includes("decision_source")) {
+        db.exec("ALTER TABLE gallery_deletion_jobs ADD COLUMN decision_source TEXT NOT NULL DEFAULT 'manual';");
+      }
+      if (!deletionCols.includes("gallery_title")) {
+        db.exec("ALTER TABLE gallery_deletion_jobs ADD COLUMN gallery_title TEXT;");
+      }
+      if (!deletionCols.includes("media_count")) {
+        db.exec("ALTER TABLE gallery_deletion_jobs ADD COLUMN media_count INTEGER DEFAULT 0;");
+      }
+      if (!deletionCols.includes("total_size")) {
+        db.exec("ALTER TABLE gallery_deletion_jobs ADD COLUMN total_size INTEGER DEFAULT 0;");
+      }
+      if (!deletionCols.includes("completed_at")) {
+        db.exec("ALTER TABLE gallery_deletion_jobs ADD COLUMN completed_at INTEGER;");
+      }
+
+      db.prepare(`
+        INSERT INTO gallery_schema (version, name, applied_at)
+        VALUES (2, 'parallax_gallery_v2', ?)
+      `).run(Date.now());
+    }
+
     db.exec("COMMIT;");
   } catch (err) {
     try {
@@ -376,80 +445,193 @@ function safeDeleteQuarantineTarget(baseMedia: string, jobId: string, galleryId?
   }
 }
 
+export { safeDeleteQuarantineTarget };
+
+export interface DeletionResult {
+  id: string;
+  jobId: string;
+  title: string;
+  mediaCount: number;
+  totalSize: number;
+  knownImportFolders: string[];
+}
+
 /**
- * Deletes a gallery, quarantines its files in GALLERY_MEDIA_PATH/.trash/gallery-deletions/:jobId,
- * and schedules transactional deletion.
- * Persists deletion intent in DB first to eliminate crash window between rename and transaction.
+ * Executes unified transactional deletion for up to 50 galleries in a closed, bounded set.
+ * Atomically validates all IDs, optimistic revisions, cancels active imports, records durable intent,
+ * immediately revokes client access via database cascades, moves media to quarantine outside SQLite lock,
+ * and triggers asynchronous cleanup.
  */
-export function deleteGalleryAndQuarantine(galleryId: string): void {
-  if (!galleryId || typeof galleryId !== "string" || !/^[0-9a-fA-F-]{36}$/.test(galleryId)) {
-    throw new Error("Invalid gallery ID");
+export function deleteGalleriesWithIntentBulk(
+  items: { id: string; expectedRevision?: number }[],
+  options: {
+    decisionSource?: string;
+    checkAutoEligibility?: boolean;
+  } = {}
+): DeletionResult[] {
+  if (!items || !Array.isArray(items) || items.length === 0) {
+    throw new Error("Aucune galerie sélectionnée pour la suppression.");
+  }
+  if (items.length > 50) {
+    throw new Error("La sélection groupée est limitée à 50 galeries maximum.");
+  }
+
+  const seenIds = new Set<string>();
+  for (const item of items) {
+    if (!item.id || typeof item.id !== "string" || !/^[0-9a-fA-F-]{36}$/.test(item.id)) {
+      throw new Error(`ID de galerie invalide : ${item?.id}`);
+    }
+    if (seenIds.has(item.id)) {
+      throw new Error(`Doublon détecté dans la sélection : ${item.id}`);
+    }
+    seenIds.add(item.id);
   }
 
   const db = getGalleryDb();
-
-  const gallery = db.prepare("SELECT id FROM galleries WHERE id = ?").get(galleryId) as
-    | { id: string }
-    | undefined;
-
-  if (!gallery) {
-    throw new Error("Gallery not found");
-  }
-
   const baseMedia = path.resolve(ENV.GALLERY_MEDIA_PATH);
-  const mediaDir = path.resolve(baseMedia, galleryId);
-
-  // Strict confinement check
-  const relMedia = path.relative(baseMedia, mediaDir);
-  if (!relMedia || path.isAbsolute(relMedia) || relMedia.startsWith(".." + path.sep) || relMedia === "..") {
-    throw new Error("Invalid media directory path");
-  }
-
-  let hasMediaDir = false;
-  if (fs.existsSync(mediaDir)) {
-    const stat = fs.lstatSync(mediaDir);
-    if (stat.isSymbolicLink() || !stat.isDirectory()) {
-      throw new Error("INVALID_MEDIA_PATH");
-    }
-    hasMediaDir = true;
-  }
-
-  // Quarantine lives under GALLERY_MEDIA_PATH/.trash to guarantee same filesystem/volume
-  const trashRoot = path.join(baseMedia, ".trash");
-  const trashBase = path.join(trashRoot, "gallery-deletions");
-
-  if (fs.existsSync(trashRoot)) {
-    const rootStat = fs.lstatSync(trashRoot);
-    if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) {
-      throw new Error("INVALID_QUARANTINE_PATH");
-    }
-  }
-
-  if (fs.existsSync(trashBase)) {
-    const trashStat = fs.lstatSync(trashBase);
-    if (trashStat.isSymbolicLink() || !trashStat.isDirectory()) {
-      throw new Error("INVALID_QUARANTINE_PATH");
-    }
-  } else {
-    fs.mkdirSync(trashBase, { recursive: true, mode: 0o700 });
-  }
-
-  const jobId = crypto.randomUUID();
-  const quarantineDir = path.join(trashBase, jobId);
-  const relativeQuarantinePath = path.join(".trash", "gallery-deletions", jobId);
-
   const now = Date.now();
+  const decisionSource = options.decisionSource || "manual";
+
+  const deletionPlans: {
+    galleryId: string;
+    jobId: string;
+    title: string;
+    mediaCount: number;
+    totalSize: number;
+    knownImportFolders: string[];
+    relativeQuarantinePath: string;
+  }[] = [];
+
+  // 1. Transactional validation and intent persistence
   db.exec("BEGIN EXCLUSIVE TRANSACTION;");
   try {
-    // Delete gallery from DB first (foreign keys ON DELETE CASCADE will purge codes, media, and import jobs)
-    // Persisting intent first ensures no orphaned active records if crash occurs before/during rename
-    db.prepare("DELETE FROM galleries WHERE id = ?").run(galleryId);
+    for (const item of items) {
+      const gallery = db.prepare(`
+        SELECT id, title, revision, status, expires_at, retention_exempt
+        FROM galleries
+        WHERE id = ?
+      `).get(item.id) as
+        | {
+            id: string;
+            title: string;
+            revision: number;
+            status: string;
+            expires_at: number | null;
+            retention_exempt: number;
+          }
+        | undefined;
 
-    // Record deletion job
-    db.prepare(`
-      INSERT INTO gallery_deletion_jobs (id, gallery_id, relative_quarantine_path, status, created_at, updated_at)
-      VALUES (?, ?, ?, 'pending', ?, ?)
-    `).run(jobId, galleryId, relativeQuarantinePath, now, now);
+      if (!gallery) {
+        throw new Error(`Galerie introuvable : ${item.id}`);
+      }
+
+      if (typeof item.expectedRevision === "number" && gallery.revision !== item.expectedRevision) {
+        throw new GalleryConflictError(
+          `Conflit de révision (409) sur la galerie « ${gallery.title} » : la galerie a été modifiée par une autre opération en arrière-plan.`
+        );
+      }
+
+      // Check for active imports count
+      const activeImports = (
+        db.prepare(`
+          SELECT COUNT(*) as count FROM gallery_import_jobs
+          WHERE gallery_id = ? AND status IN ('pending', 'scanning', 'importing')
+        `).get(item.id) as { count: number }
+      ).count;
+
+      // Check if deletion is already in progress
+      const existingJob = db.prepare(`
+        SELECT id FROM gallery_deletion_jobs
+        WHERE gallery_id = ? AND status IN ('pending', 'processing')
+      `).get(item.id) as { id: string } | undefined;
+
+      if (existingJob) {
+        throw new Error(`Une suppression est déjà en cours pour la galerie « ${gallery.title} »`);
+      }
+
+      if (options.checkAutoEligibility) {
+        const settingsRow = db.prepare("SELECT enabled, retention_days FROM retention_settings WHERE id = 1").get() as
+          | { enabled: number; retention_days: number | null }
+          | undefined;
+        const enabled = Boolean(settingsRow?.enabled);
+        const retentionDays = settingsRow?.retention_days ?? null;
+
+        if (!enabled || retentionDays === null) {
+          throw new Error("Politique de purge automatique désactivée ou non configurée");
+        }
+        if (gallery.status === "draft" || gallery.expires_at === null || gallery.expires_at > now) {
+          throw new Error(`La galerie « ${gallery.title} » n'est pas expirée`);
+        }
+        if (gallery.retention_exempt) {
+          throw new Error(`La galerie « ${gallery.title} » est suspendue / exemptée de purge`);
+        }
+        if (activeImports > 0) {
+          throw new Error(`La galerie « ${gallery.title} » a une importation active en cours`);
+        }
+        const scheduledPurgeAt = gallery.expires_at + retentionDays * 86_400_000;
+        if (scheduledPurgeAt > now) {
+          throw new Error(`La date de purge prévisionnelle n'est pas atteinte pour « ${gallery.title} »`);
+        }
+      }
+
+      // Query media stats
+      const stats = db.prepare(`
+        SELECT COUNT(*) as mediaCount, COALESCE(SUM(file_size), 0) as totalSize
+        FROM gallery_media
+        WHERE gallery_id = ?
+      `).get(item.id) as { mediaCount: number; totalSize: number };
+
+      // Query known import folders
+      const importFolders = (
+        db.prepare(`
+          SELECT DISTINCT import_folder FROM gallery_import_jobs
+          WHERE gallery_id = ?
+        `).all(item.id) as { import_folder: string }[]
+      ).map((r) => r.import_folder);
+
+      // Cancel any active import jobs
+      db.prepare(`
+        UPDATE gallery_import_jobs
+        SET status = 'cancelled',
+            error_message = 'Importation annulée suite à la suppression de la galerie',
+            updated_at = ?
+        WHERE gallery_id = ? AND status IN ('pending', 'scanning', 'importing')
+      `).run(now, item.id);
+
+      const jobId = crypto.randomUUID();
+      const relativeQuarantinePath = path.join(".trash", "gallery-deletions", jobId);
+
+      // Record durable deletion intent
+      db.prepare(`
+        INSERT INTO gallery_deletion_jobs (
+          id, gallery_id, relative_quarantine_path, status, decision_source,
+          gallery_title, media_count, total_size, created_at, updated_at
+        ) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)
+      `).run(
+        jobId,
+        gallery.id,
+        relativeQuarantinePath,
+        decisionSource,
+        gallery.title,
+        stats.mediaCount,
+        stats.totalSize,
+        now,
+        now
+      );
+
+      // Delete gallery record: foreign keys ON DELETE CASCADE immediately purge gallery_codes, gallery_media!
+      db.prepare("DELETE FROM galleries WHERE id = ?").run(gallery.id);
+
+      deletionPlans.push({
+        galleryId: gallery.id,
+        jobId,
+        title: gallery.title,
+        mediaCount: stats.mediaCount,
+        totalSize: stats.totalSize,
+        knownImportFolders: importFolders,
+        relativeQuarantinePath,
+      });
+    }
 
     db.exec("COMMIT;");
   } catch (err) {
@@ -458,23 +640,83 @@ export function deleteGalleryAndQuarantine(galleryId: string): void {
     } catch {
       // Ignored
     }
-    throw new GalleryDatabaseError("Erreur lors de la suppression de la galerie", err);
+    throw err;
   }
 
-  // Now move media directory to quarantine
-  if (hasMediaDir) {
+  // 2. Filesystem movements to quarantine (outside transaction)
+  const trashBase = path.join(baseMedia, ".trash", "gallery-deletions");
+  if (!fs.existsSync(trashBase)) {
     try {
-      fs.renameSync(mediaDir, quarantineDir);
-    } catch {
-      // If rename fails, quarantine recovery worker cleans up baseMedia/<galleryId>
-    }
-  } else {
-    try {
-      fs.mkdirSync(quarantineDir, { recursive: true, mode: 0o700 });
+      fs.mkdirSync(trashBase, { recursive: true, mode: 0o700 });
     } catch {
       // Ignored
     }
   }
+
+  for (const plan of deletionPlans) {
+    const mediaDir = path.resolve(baseMedia, plan.galleryId);
+    const quarantineDir = path.resolve(baseMedia, plan.relativeQuarantinePath);
+
+    // Confinement check
+    const relMedia = path.relative(baseMedia, mediaDir);
+    if (!relMedia || path.isAbsolute(relMedia) || relMedia.startsWith(".." + path.sep) || relMedia === "..") {
+      continue;
+    }
+
+    if (fs.existsSync(mediaDir)) {
+      try {
+        const stat = fs.lstatSync(mediaDir);
+        if (!stat.isSymbolicLink() && stat.isDirectory()) {
+          fs.renameSync(mediaDir, quarantineDir);
+        }
+      } catch {
+        // Recovery worker will clean up baseMedia/<galleryId> if rename fails
+      }
+    } else {
+      try {
+        fs.mkdirSync(quarantineDir, { recursive: true, mode: 0o700 });
+      } catch {
+        // Ignored
+      }
+    }
+  }
+
+  return deletionPlans.map((p) => ({
+    id: p.galleryId,
+    jobId: p.jobId,
+    title: p.title,
+    mediaCount: p.mediaCount,
+    totalSize: p.totalSize,
+    knownImportFolders: p.knownImportFolders,
+  }));
+}
+
+/**
+ * Single gallery deletion using the unified transactional deletion service.
+ */
+export function deleteGalleryWithIntent(
+  galleryId: string,
+  options: {
+    decisionSource?: string;
+    expectedRevision?: number;
+    checkAutoEligibility?: boolean;
+  } = {}
+): DeletionResult {
+  const results = deleteGalleriesWithIntentBulk(
+    [{ id: galleryId, expectedRevision: options.expectedRevision }],
+    {
+      decisionSource: options.decisionSource || "manual",
+      checkAutoEligibility: options.checkAutoEligibility,
+    }
+  );
+  return results[0];
+}
+
+/**
+ * Deletes a gallery and quarantines its files using the unified transactional deletion service.
+ */
+export function deleteGalleryAndQuarantine(galleryId: string, expectedRevision?: number): void {
+  deleteGalleryWithIntent(galleryId, { decisionSource: "manual", expectedRevision });
 }
 
 /**
@@ -488,17 +730,22 @@ export function processGalleryDeletions(): void {
   const batchSize = 5;
   const leaseDurationMs = 5 * 60 * 1000;
 
-  let jobsToProcess: { id: string; gallery_id: string; relative_quarantine_path: string }[];
+  let jobsToProcess: { id: string; gallery_id: string; relative_quarantine_path: string; attempt_count: number }[];
 
   db.exec("BEGIN EXCLUSIVE TRANSACTION;");
   try {
     const pending = db.prepare(`
-      SELECT id, gallery_id, relative_quarantine_path
+      SELECT id, gallery_id, relative_quarantine_path, attempt_count
       FROM gallery_deletion_jobs
       WHERE (status = 'pending' OR (status = 'processing' AND lease_expires_at < ?))
         AND attempt_count < ?
       LIMIT ?
-    `).all(now, maxAttempts, batchSize) as { id: string; gallery_id: string; relative_quarantine_path: string }[];
+    `).all(now, maxAttempts, batchSize) as {
+      id: string;
+      gallery_id: string;
+      relative_quarantine_path: string;
+      attempt_count: number;
+    }[];
 
     if (pending.length === 0) {
       db.exec("COMMIT;");
@@ -547,18 +794,24 @@ export function processGalleryDeletions(): void {
       db.prepare(`
         UPDATE gallery_deletion_jobs
         SET status = 'completed',
+            completed_at = ?,
+            worker_id = NULL,
+            lease_expires_at = NULL,
             updated_at = ?
         WHERE id = ? AND worker_id = ?
-      `).run(Date.now(), job.id, workerId);
+      `).run(Date.now(), Date.now(), job.id, workerId);
     } catch (err: unknown) {
-      const errCode = err instanceof Error ? err.message : "CLEANUP_FAILED";
+      const rawCode = err instanceof Error ? err.message : "CLEANUP_FAILED";
+      const safeCode = rawCode.slice(0, 100);
       db.prepare(`
         UPDATE gallery_deletion_jobs
         SET status = 'failed',
             error_code = ?,
+            worker_id = NULL,
+            lease_expires_at = NULL,
             updated_at = ?
         WHERE id = ? AND worker_id = ?
-      `).run(errCode, Date.now(), job.id, workerId);
+      `).run(safeCode, Date.now(), job.id, workerId);
     }
   }
 }

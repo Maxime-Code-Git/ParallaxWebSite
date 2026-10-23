@@ -99,9 +99,10 @@ const MODULES: DashboardModule[] = [
   {
     id: "retention",
     title: "Conservation et suppression",
-    description: "Politique de purge automatique, export de donnees et conformite RGPD.",
-    status: "Lot suivant",
-    isActive: false,
+    description: "Cycle de conservation, prévision des purges, exports privés et suppression sécurisée des galeries.",
+    status: "Actif",
+    isActive: true,
+    href: "/admin/data-retention",
   },
   {
     id: "legal",
