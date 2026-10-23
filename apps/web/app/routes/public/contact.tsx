@@ -43,10 +43,39 @@ export function meta({ data }: { data?: ContactLoaderData }) {
   if (!data) {
     return [{ title: "Contact | Parallax" }];
   }
-  const { content, lang } = data;
+  const { content, lang, siteUrl } = data;
+  const base = (siteUrl || "").replace(/\/$/, "");
+  const pageTitle = cleanTypography(content.contactPage.seo.title[lang]);
+  const pageDesc = cleanTypography(content.contactPage.seo.description[lang]);
+
+  const canonicalUrl = `${base}/${lang}/contact`;
+  const frUrl = `${base}/fr/contact`;
+  const enUrl = `${base}/en/contact`;
+  const ogImageUrl = `${base}/img/index-0ff090a6e4.jpg`;
+  const brand = cleanTypography(content.common?.brandName) || "Parallax";
+
   return [
-    { title: cleanTypography(content.contactPage.seo.title[lang]) },
-    { name: "description", content: cleanTypography(content.contactPage.seo.description[lang]) },
+    { title: pageTitle },
+    { name: "description", content: pageDesc },
+    { name: "robots", content: "index, follow" },
+    { tagName: "link", rel: "canonical", href: canonicalUrl },
+    { tagName: "link", rel: "alternate", hrefLang: "fr", href: frUrl },
+    { tagName: "link", rel: "alternate", hrefLang: "en", href: enUrl },
+    { tagName: "link", rel: "alternate", hrefLang: "x-default", href: frUrl },
+    // Open Graph
+    { property: "og:type", content: "website" },
+    { property: "og:site_name", content: brand },
+    { property: "og:title", content: pageTitle },
+    { property: "og:description", content: pageDesc },
+    { property: "og:url", content: canonicalUrl },
+    { property: "og:image", content: ogImageUrl },
+    { property: "og:locale", content: lang === "fr" ? "fr_FR" : "en_US" },
+    { property: "og:locale:alternate", content: lang === "fr" ? "en_US" : "fr_FR" },
+    // Twitter Card
+    { name: "twitter:card", content: "summary_large_image" },
+    { name: "twitter:title", content: pageTitle },
+    { name: "twitter:description", content: pageDesc },
+    { name: "twitter:image", content: ogImageUrl },
   ];
 }
 
