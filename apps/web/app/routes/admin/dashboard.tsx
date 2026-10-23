@@ -84,10 +84,11 @@ const MODULES: DashboardModule[] = [
   },
   {
     id: "company",
-    title: "Parametres de l'entreprise",
-    description: "Denomination, siege social, TVA, BCE et identite de la structure.",
-    status: "Lot suivant",
-    isActive: false,
+    title: "Paramètres de l'entreprise",
+    description: "Dénomination, siège social, TVA, BCE, contacts et hébergement.",
+    status: "Actif",
+    isActive: true,
+    href: "/admin/company",
   },
   {
     id: "galleries",
@@ -107,10 +108,11 @@ const MODULES: DashboardModule[] = [
   },
   {
     id: "legal",
-    title: "Pages legales et cookies",
-    description: "Edition des mentions legales, politique de confidentialite, CGV et traceurs.",
-    status: "Lot suivant",
-    isActive: false,
+    title: "Pages légales et cookies",
+    description: "Édition bilingue FR/EN, mentions légales, confidentialité, CGV et inventaire des traceurs.",
+    status: "Actif",
+    isActive: true,
+    href: "/admin/legal",
   },
 ];
 
@@ -142,7 +144,7 @@ export default function AdminDashboardPage() {
         <div className={styles.leadSection}>
           <h2 className={styles.pageTitle}>Modules d'administration</h2>
           <p className={styles.pageSubtitle}>
-            Sélectionnez un module pour administrer le contenu du site. Les modules Accueil et Studio sont actifs pour ce lot.
+            Sélectionnez un module pour administrer le contenu, les galeries et les paramètres du site Parallax.
           </p>
         </div>
 

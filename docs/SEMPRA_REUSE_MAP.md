@@ -16,9 +16,9 @@ Ce document inventorie formellement les briques techniques de référence du pro
 | **Pipeline d'import d'images de site (Lot 2 bis)** | `api.admin.home-image.ts`, `home-media.server.ts`, `portfolio-image.server.ts`, `media.home.*.tsx`, `ImageUploader.tsx` | **Porté et adapté** | **Lot 2 bis** (`apps/web/app/lib/media-image.server.ts`, `routes/media/site-variant.ts`, `routes/api/admin-media-upload.ts`, `ImageUploader.tsx`) |
 | **Galeries privées & Téléchargements ZIP** | `gallery-*.server.ts`, code unique | **Porté et adapté** | **Lot 4** (`apps/web/app/lib/gallery-*.server.ts`, routes client/admin) |
 | **Previews WebP / Sharp** | `gallery-preview.server.ts`, `portfolio-image.server.ts` | **Porté et adapté** | **Lot 4 / Lot 3** (`apps/web/app/lib/gallery-preview.server.ts`, `media-image.server.ts`) |
-| **Suppression & Rétention RGPD** | `gallery-deletion-worker.server.ts` | **Différé** | Lot 5 |
-| **Formulaire Contact & Mailer** | `contact.server.ts`, `mailer.server.ts` | **Porté** | Lot 6 |
-| **Pages légales & Inventaire cookies** | `admin.legal.tsx`, cookies techniques | **Différé** | Lot 7 |
+| **Suppression & Rétention RGPD** | `gallery-deletion-worker.server.ts` | **Porté et adapté** | **Lot 5** (`apps/web/app/lib/gallery-deletion-worker.server.ts`, `data-retention.server.ts`) |
+| **Formulaire Contact & Mailer** | `contact.server.ts`, `mailer.server.ts` | **Porté et adapté** | **Lot 6** (`apps/web/app/lib/contact.server.ts`, `mailer.server.ts`, routes Contact) |
+| **Pages légales & Inventaire cookies** | `admin.legal.tsx`, cookies techniques | **Porté et adapté** | **Lot 7** (`apps/web/app/routes/admin/legal-*.tsx`, `public/legal-*.tsx`, `lib/privacy-preferences.*`) |
 | **Tests E2E & Runner Playwright** | `run-e2e.js`, `playwright.config.ts` | **Différé** | Lot dédié ultérieur |
 
 ---
@@ -405,21 +405,27 @@ Ce document inventorie formellement les briques techniques de référence du pro
    - Validation stricte des sections legales bilingues.
 
 3. **Choix** :
-   - **Différé au Lot 7**.
+   - **Porté et adapté au Lot 7**.
 
 4. **Adaptations Parallax** :
-   - Conserver l'integralite du cycle de vie brouillon / publication / archive / restauration dans l'admin.
-   - Adapter les CGV a l'activite de production audiovisuelle (cession de droits d'auteur, droit a l'image, autorisations de tournage, conditions de paiement et de livraison).
-   - Renseigner les donnees d'immatriculation juridique exactes de Parallax / LS studio.
-   - Rappel important : l'implementation technique ne vaut pas validation juridique ; les textes devront faire l'objet d'une validation formelle par un juriste.
+   - **Cycle de vie documentaire étanche** : Séparation stricte `draft` vs `published` pour les 4 pages légales FR/EN (`mentions`, `privacy`, `terms`, `cookies`). Incrément de version automatique à la publication, validation stricte anti-placeholders (`[à compléter]`), blocage de la publication des mentions sans identification complète de l'entreprise (dénomination, adresse, BCE, hébergeur).
+   - **Paramètres d'entreprise et synchronisation canonique** (`/admin/company`) : Synchronisation atomique et canonique des coordonnées (`common.brandName`, `home.contact.email`, `home.contact.instagramUrl`, `home.contact.youtubeUrl`, `contactPage.card.phone`).
+   - **Protection contre les fuites d'identité et de brouillon** : Filtrage strict des getters publics (`getPublicCompanyContent()`, `getPublicLegalDocument()`). Aucune fuite d'adresse privée non confirmée ou de texte de brouillon dans les payloads JSON ou le HTML SSR public.
+   - **Prévisualisation privée authentifiée** (`/admin/legal/:pageKey/preview`) : Route réservée aux administrateurs avec en-têtes stricts `Cache-Control: no-store` et `X-Robots-Tag: noindex, nofollow`.
+   - **Gestion des préférences de confidentialité** : Accord explicite préalable obligatoire avant tout chargement d'iframe externe (YouTube / Vimeo). Cookie HttpOnly signé HMAC-SHA256 (`__parallax_privacy_prefs`, TTL 180 jours, SameSite=Lax, `RATE_LIMIT_SECRET`). Projection validée par le serveur sans lecture directe de `document.cookie`. Accord ponctuel en mémoire cantonné au média actif. Démontage immédiat de l'iframe du DOM lors d'une révocation des préférences via l'événement `parallax:privacy-updated`. Fallback natif sans JavaScript avec redirection 303 sécurisée et lecture streaming bornée à 8 Kio.
+   - **Routes publiques canoniques et redirections 301** : 8 URLs bilingues canoniques (`/fr/mentions-legales`, `/en/legal-notice`, `/fr/confidentialite`, `/en/privacy-policy`, `/fr/cgv`, `/en/terms`, `/fr/cookies`, `/en/cookies`) et redirection 301 permanente des anciennes URLs (`/en/mentions-legales`, `/en/confidentialite`, `/en/cgv`, `/fr/politique-de-confidentialite`).
 
-5. **Tests Sempra pertinents** :
-   - `apps/web/tests/admin-legal-http.test.ts`
-   - `apps/web/tests/admin-legal.test.tsx`
-   - `apps/web/tests/cgv-meta.test.ts`
+5. **Tests Parallax Lot 7** :
+   - `apps/web/tests/lot7-company-admin.test.ts`
+   - `apps/web/tests/lot7-content-migration.test.ts`
+   - `apps/web/tests/lot7-legal-lifecycle.test.ts`
+   - `apps/web/tests/lot7-legal-routes.test.ts`
+   - `apps/web/tests/lot7-privacy-preferences.test.ts`
+   - `apps/web/tests/lot7-sentinel-leakage.test.ts`
+   - `apps/web/tests/lot7-video-player-consent.test.tsx`
 
 6. **Elements non verifies** :
-   - Conformite des clauses de cession de droits avec les legislations extra-europeennes.
+   - Validation formelle finale par un juriste des clauses contractuelles et conditions d'exercice de l'activité audiovisuelle.
 
 ---
 

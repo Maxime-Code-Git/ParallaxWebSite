@@ -114,10 +114,10 @@ describe("Admin UI Components", () => {
         "Projets et portfolio",
         "Studio",
         "Contact",
-        "Parametres de l'entreprise",
+        "Paramètres de l'entreprise",
         "Galeries clients",
         "Conservation et suppression",
-        "Pages legales et cookies",
+        "Pages légales et cookies",
       ];
 
       for (const modTitle of expectedModules) {
@@ -125,10 +125,10 @@ describe("Admin UI Components", () => {
       }
 
       const activeBadges = screen.getAllByText("Actif");
-      expect(activeBadges.length).toBe(6);
+      expect(activeBadges.length).toBe(8);
 
-      const nextLotBadges = screen.getAllByText("Lot suivant");
-      expect(nextLotBadges.length).toBe(2);
+      const nextLotBadges = screen.queryAllByText("Lot suivant");
+      expect(nextLotBadges.length).toBe(0);
     });
   });
 });

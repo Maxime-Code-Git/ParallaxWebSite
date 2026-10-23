@@ -137,12 +137,12 @@ describe("Admin Contact Content & Migration V1->V2", () => {
 
       const { content, isCorrupted } = getRawSiteContent();
       expect(isCorrupted).toBe(false);
-      expect(content.schemaVersion).toBe(2);
+      expect(content.schemaVersion).toBe(3);
       expect(content.contactPage).toBeDefined();
 
-      // Ensure file on disk was upgraded to V2
+      // Ensure file on disk was upgraded to current schema (V3)
       const onDisk = JSON.parse(fs.readFileSync(testContentFile, "utf-8"));
-      expect(onDisk.schemaVersion).toBe(2);
+      expect(onDisk.schemaVersion).toBe(3);
       expect(onDisk.contactPage).toBeDefined();
     });
   });
