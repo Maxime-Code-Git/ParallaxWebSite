@@ -1167,7 +1167,7 @@ export default function AdminGalleryEditPage() {
           {photos.length > 0 && (
             <div>
               <h3 className={styles.sectionSubHeading}>
-                Photos ({photos.length}) — Réorganisez l'ordre d'affichage ou gérez chaque photo
+                Photos ({photos.length}) : Réorganisez l'ordre d'affichage ou gérez chaque photo
               </h3>
               <div className={styles.mediaGrid}>
                 {photos.map((p, idx) => {
