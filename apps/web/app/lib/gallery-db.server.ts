@@ -123,6 +123,7 @@ export function openGalleryDb(dbPath: string): DatabaseSync {
           expires_at INTEGER,
           cover_media_id TEXT,
           revision INTEGER NOT NULL DEFAULT 1,
+          code_version INTEGER NOT NULL DEFAULT 1,
           created_at INTEGER NOT NULL,
           updated_at INTEGER NOT NULL
         );
@@ -268,6 +269,20 @@ export function openGalleryDb(dbPath: string): DatabaseSync {
       }
       if (!galleryCols.includes("retention_exempt_reason")) {
         db.exec("ALTER TABLE galleries ADD COLUMN retention_exempt_reason TEXT;");
+      }
+      if (!galleryCols.includes("code_version")) {
+        db.exec("ALTER TABLE galleries ADD COLUMN code_version INTEGER NOT NULL DEFAULT 1;");
+        db.exec(`
+          UPDATE galleries
+          SET code_version = (
+            SELECT COALESCE(MAX(version), 1)
+            FROM gallery_codes
+            WHERE gallery_codes.gallery_id = galleries.id
+          )
+          WHERE EXISTS (
+            SELECT 1 FROM gallery_codes WHERE gallery_codes.gallery_id = galleries.id
+          );
+        `);
       }
 
       const deletionCols = (

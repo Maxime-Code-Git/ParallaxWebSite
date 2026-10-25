@@ -65,11 +65,18 @@ export class GalleryCodeDecryptionError extends Error {
   }
 }
 
+const STRICT_HEX_REGEX = /^[0-9a-fA-F]+$/;
+
 /**
  * AES-256-GCM decryption of an encrypted gallery code.
  * Throws GalleryCodeDecryptionError if the format is invalid or decryption fails (e.g. wrong key, corrupted tag).
+ * Throws CRITICAL configuration errors directly if GALLERY_CODE_ENCRYPTION_KEY is invalid.
  */
 export function decryptGalleryCode(encryptedStr: string): string {
+  // 1. Retrieve encryption key FIRST outside of decryption try/catch.
+  // Configuration errors must propagate and not be disguised as data decryption errors.
+  const key = getAesKey();
+
   if (typeof encryptedStr !== "string" || !encryptedStr) {
     throw new GalleryCodeDecryptionError("Données de code chiffré manquantes ou invalides.");
   }
@@ -81,28 +88,31 @@ export function decryptGalleryCode(encryptedStr: string): string {
   if (!ivHex || !ciphertextHex || !authTagHex) {
     throw new GalleryCodeDecryptionError("Format du code chiffré incomplet.");
   }
-  let iv: Buffer;
-  let ciphertext: Buffer;
-  let authTag: Buffer;
-  try {
-    iv = Buffer.from(ivHex, "hex");
-    ciphertext = Buffer.from(ciphertextHex, "hex");
-    authTag = Buffer.from(authTagHex, "hex");
-  } catch (err: unknown) {
-    throw new GalleryCodeDecryptionError("Décodage hexadécimal du code chiffré impossible.", { cause: err });
+
+  // 2. Strict hexadecimal validation (Buffer.from does not validate non-hex or odd-length characters)
+  if (ivHex.length !== 24 || !STRICT_HEX_REGEX.test(ivHex)) {
+    throw new GalleryCodeDecryptionError("Format d'IV invalide (exactement 24 caractères hexadécimaux requis).");
   }
-  if (iv.length !== 12 || authTag.length !== 16) {
-    throw new GalleryCodeDecryptionError("Longueur d'IV (12 octets) ou de tag d'authentification (16 octets) invalide.");
+  if (authTagHex.length !== 32 || !STRICT_HEX_REGEX.test(authTagHex)) {
+    throw new GalleryCodeDecryptionError("Format de tag d'authentification invalide (exactement 32 caractères hexadécimaux requis).");
+  }
+  if (ciphertextHex.length < 2 || ciphertextHex.length % 2 !== 0 || !STRICT_HEX_REGEX.test(ciphertextHex)) {
+    throw new GalleryCodeDecryptionError("Format de texte chiffré invalide (hexadécimal de longueur paire non vide requis).");
   }
 
+  const iv = Buffer.from(ivHex, "hex");
+  const ciphertext = Buffer.from(ciphertextHex, "hex");
+  const authTag = Buffer.from(authTagHex, "hex");
+
+  // 3. Perform AES-256-GCM decryption and catch only cipher / authentication failure
   try {
-    const decipher = crypto.createDecipheriv("aes-256-gcm", getAesKey(), iv);
+    const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
     decipher.setAuthTag(authTag);
     const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
     return decrypted.toString("utf8");
   } catch (err: unknown) {
     throw new GalleryCodeDecryptionError(
-      `Échec du déchiffrement AES-GCM : clé incompatible ou données altérées (${err instanceof Error ? err.message : String(err)}).`,
+      "Échec du déchiffrement AES-GCM : clé incompatible ou données altérées.",
       { cause: err }
     );
   }

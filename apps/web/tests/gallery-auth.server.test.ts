@@ -9,6 +9,7 @@ import {
   hashGalleryCode,
   encryptGalleryCode,
   decryptGalleryCode,
+  GalleryCodeDecryptionError,
   getGallerySessionStorage,
   createGalleryCsrfToken,
   verifyGalleryCsrfToken,
@@ -113,6 +114,77 @@ describe("gallery-auth.server.ts (Cryptographic Tokens, Sessions, and Access Gua
       const tamperedEncrypted = `${parts[0]}:${tamperedCiphertext}:${parts[2]}`;
 
       expect(() => decryptGalleryCode(tamperedEncrypted)).toThrow();
+    });
+
+    it("strictly validates hexadecimal format and rejects invalid suffixes or characters without mutation", () => {
+      const originalCode = "PARALLAX-2345-6789-ABCD-EFGH";
+      const encrypted = encryptGalleryCode(originalCode);
+      const parts = encrypted.split(":");
+      expect(parts.length).toBe(3);
+
+      // 1. Suffix 'zz' on IV
+      expect(() => decryptGalleryCode(`${parts[0]}zz:${parts[1]}:${parts[2]}`)).toThrowError(
+        GalleryCodeDecryptionError
+      );
+
+      // 2. Suffix 'zz' on ciphertext
+      expect(() => decryptGalleryCode(`${parts[0]}:${parts[1]}zz:${parts[2]}`)).toThrowError(
+        GalleryCodeDecryptionError
+      );
+
+      // 3. Suffix 'zz' on auth tag
+      expect(() => decryptGalleryCode(`${parts[0]}:${parts[1]}:${parts[2]}zz`)).toThrowError(
+        GalleryCodeDecryptionError
+      );
+
+      // 4. Non-hex characters in IV
+      const badIv = parts[0].slice(0, -1) + "z";
+      expect(() => decryptGalleryCode(`${badIv}:${parts[1]}:${parts[2]}`)).toThrowError(
+        GalleryCodeDecryptionError
+      );
+
+      // 5. Non-hex characters in auth tag
+      const badTag = parts[2].slice(0, -1) + "z";
+      expect(() => decryptGalleryCode(`${parts[0]}:${parts[1]}:${badTag}`)).toThrowError(
+        GalleryCodeDecryptionError
+      );
+
+      // 6. Odd length ciphertext
+      const oddCipher = parts[1].slice(0, -1);
+      expect(() => decryptGalleryCode(`${parts[0]}:${oddCipher}:${parts[2]}`)).toThrowError(
+        GalleryCodeDecryptionError
+      );
+
+      // 7. Non-hex character in ciphertext
+      const badCipher = parts[1].slice(0, -1) + "z";
+      expect(() => decryptGalleryCode(`${parts[0]}:${badCipher}:${parts[2]}`)).toThrowError(
+        GalleryCodeDecryptionError
+      );
+
+      // 8. Empty ciphertext
+      expect(() => decryptGalleryCode(`${parts[0]}::${parts[2]}`)).toThrowError(
+        GalleryCodeDecryptionError
+      );
+
+      // 9. Extra segment
+      expect(() => decryptGalleryCode(`${parts[0]}:${parts[1]}:${parts[2]}:extra`)).toThrowError(
+        GalleryCodeDecryptionError
+      );
+
+      // 10. Valid unchanged continues to decrypt cleanly
+      expect(decryptGalleryCode(encrypted)).toBe(originalCode);
+    });
+
+    it("propagates CRITICAL configuration error directly when GALLERY_CODE_ENCRYPTION_KEY is invalid without masking as GalleryCodeDecryptionError", () => {
+      const originalCode = "PARALLAX-2345-6789-ABCD-EFGH";
+      const encrypted = encryptGalleryCode(originalCode);
+      const originalKey = process.env.GALLERY_CODE_ENCRYPTION_KEY;
+      try {
+        process.env.GALLERY_CODE_ENCRYPTION_KEY = "invalid-config";
+        expect(() => decryptGalleryCode(encrypted)).toThrowError(/CRITICAL: GALLERY_CODE_ENCRYPTION_KEY/);
+      } finally {
+        process.env.GALLERY_CODE_ENCRYPTION_KEY = originalKey;
+      }
     });
   });
 

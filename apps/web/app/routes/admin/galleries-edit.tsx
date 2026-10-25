@@ -49,6 +49,7 @@ interface LoaderData {
   codeVersion: number;
   codeStatus: "available" | "unavailable";
   codeWarning: string | null;
+  codeReason?: "not_found" | "decryption_failed";
   folders: string[];
   importRootPath: string;
   csrfToken: string;
@@ -105,6 +106,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       codeVersion: codeState.version,
       codeStatus: codeState.status,
       codeWarning: codeState.warning,
+      codeReason: codeState.reason,
       folders,
       importRootPath,
       csrfToken,
@@ -280,6 +282,7 @@ export default function AdminGalleryEditPage() {
     codeVersion,
     codeStatus,
     codeWarning,
+    codeReason,
     folders,
     importRootPath,
     csrfToken,
@@ -623,7 +626,9 @@ export default function AdminGalleryEditPage() {
               </div>
               <p className={`${styles.codeMeta} ${styles.codeMetaTop6}`}>
                 {codeStatus === "unavailable"
-                  ? "Le code ne peut pas être déchiffré. Pour rétablir l'accès client, régénérez un nouveau code ci-contre."
+                  ? codeReason === "not_found"
+                    ? "Aucun code d'accès n'est enregistré pour cette galerie. Vous pouvez générer un nouveau code ci-contre pour ouvrir l'accès."
+                    : "Code impossible à afficher avec la clé active. L'accès client n'est pas déterminé par ce constat ; une régénération est facultative et invalidera explicitement les accès antérieurs."
                   : "Ce code unique donne accès à la galerie. Le renouveler révoque immédiatement tous les anciens accès."}
               </p>
             </div>

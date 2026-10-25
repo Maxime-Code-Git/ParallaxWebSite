@@ -40,6 +40,7 @@ export interface Gallery {
   expires_at: number | null;
   cover_media_id: string | null;
   revision: number;
+  code_version?: number;
   retention_exempt?: number;
   retention_exempt_reason?: string | null;
   created_at: number;
@@ -138,7 +139,7 @@ export function getGalleries(): (Gallery & { photoCount: number; videoCount: num
   const db = getGalleryDb();
   const rows = db.prepare(`
     SELECT g.*,
-           COALESCE(c.version, 1) as codeVersion,
+           COALESCE(c.version, g.code_version, 1) as codeVersion,
            (SELECT COUNT(*) FROM gallery_media m WHERE m.gallery_id = g.id AND m.media_type = 'photo' AND m.is_ready = 1) as photoCount,
            (SELECT COUNT(*) FROM gallery_media m WHERE m.gallery_id = g.id AND m.media_type = 'video' AND m.is_ready = 1) as videoCount
     FROM galleries g
@@ -171,6 +172,11 @@ export function getGalleryByPublicId(publicId: string): Gallery | undefined {
  */
 export function getGalleryAccessCodeState(galleryId: string): GalleryAccessCodeState {
   const db = getGalleryDb();
+  const gal = db.prepare("SELECT code_version FROM galleries WHERE id = ?").get(galleryId) as
+    | { code_version: number }
+    | undefined;
+  const durableVersion = gal?.code_version ?? 1;
+
   const row = db.prepare("SELECT code_encrypted, version FROM gallery_codes WHERE gallery_id = ?").get(galleryId) as
     | { code_encrypted: string; version: number }
     | undefined;
@@ -179,9 +185,9 @@ export function getGalleryAccessCodeState(galleryId: string): GalleryAccessCodeS
     return {
       status: "unavailable",
       code: null,
-      version: 0,
+      version: durableVersion,
       reason: "not_found",
-      warning: "Aucun code d'accès n'est enregistré pour cette galerie. Vous pouvez générer un nouveau code ci-dessous pour permettre l'accès client.",
+      warning: "Aucun code d'accès n'est enregistré pour cette galerie. Vous pouvez générer un nouveau code ci-dessous pour ouvrir l'accès.",
     };
   }
 
@@ -200,7 +206,8 @@ export function getGalleryAccessCodeState(galleryId: string): GalleryAccessCodeS
         code: null,
         version: row.version,
         reason: "decryption_failed",
-        warning: "Le code d'accès actuel ne peut pas être déchiffré avec la clé active (clé de chiffrement différente ou données altérées). Les clients ne peuvent pas se connecter avec ce code. Vous pouvez régénérer un nouveau code ci-dessous pour rétablir l'accès.",
+        warning:
+          "Le code d'accès actuel ne peut pas être affiché avec la clé active (clé de chiffrement différente ou données altérées). Ce constat n'indique pas que l'accès client est interrompu si le secret d'authentification est inchangé. Une régénération est facultative et invalidera explicitement les sessions antérieures.",
       };
     }
     throw err;
@@ -263,8 +270,8 @@ export function createGallery(data: {
       INSERT INTO galleries (
         id, public_id, title, client_name, project_date, location,
         intro_fr, intro_en, signature_fr, signature_en,
-        status, expires_at, cover_media_id, revision, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, NULL, 1, ?, ?)
+        status, expires_at, cover_media_id, revision, code_version, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, NULL, 1, 1, ?, ?)
     `).run(
       id,
       publicId,
@@ -406,11 +413,17 @@ export function rotateGalleryCode(galleryId: string): { code: string; version: n
 
   db.exec("BEGIN EXCLUSIVE TRANSACTION;");
   try {
+    const galRow = db.prepare("SELECT code_version FROM galleries WHERE id = ?").get(galleryId) as
+      | { code_version: number }
+      | undefined;
     const currentCode = db.prepare("SELECT version FROM gallery_codes WHERE gallery_id = ?").get(galleryId) as
       | { version: number }
       | undefined;
 
-    const newVersion = (currentCode?.version || 0) + 1;
+    const previousVersion = Math.max(galRow?.code_version ?? 0, currentCode?.version ?? 0);
+    const newVersion = previousVersion + 1;
+
+    db.prepare("UPDATE galleries SET code_version = ?, updated_at = ? WHERE id = ?").run(newVersion, now, galleryId);
 
     db.prepare(`
       INSERT INTO gallery_codes (gallery_id, code_hash, code_encrypted, version, updated_at)
