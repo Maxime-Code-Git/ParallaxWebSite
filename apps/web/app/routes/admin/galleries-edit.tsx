@@ -588,6 +588,12 @@ export default function AdminGalleryEditPage() {
             <span className={styles.codeMeta}>Version : v{codeVersion}</span>
           </h2>
 
+          {gallery.status !== "published" && (
+            <div className={styles.alertWarning} role="alert">
+              <strong>Code inactif :</strong> cette galerie est actuellement en statut « {gallery.status === "draft" ? "Brouillon" : "Archivée"} ». Le code d'accès restera inactif sur l'espace client tant que la galerie n'est pas publiée (nécessite au moins 1 média prêt et une date d'expiration valide).
+            </div>
+          )}
+
           <div className={styles.codeBox}>
             <div>
               <div className={styles.codeDisplay}>

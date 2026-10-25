@@ -15,6 +15,7 @@ import {
   type PortfolioContent,
   type PortfolioProject,
   type PortfolioCategoryItem,
+  resolveProjectPresentationMode,
 } from "../../lib/portfolio-content.shared";
 import {
   getRawPortfolioContent,
@@ -1225,42 +1226,54 @@ export default function AdminPortfolioPage() {
           Aucun projet ne correspond aux filtres sélectionnés.
         </div>
       ) : (
-        <table className={styles.projectsTable}>
-          <thead>
-            <tr className={styles.tableHeaderRow}>
-              <th className={styles.tableTh}>Visuel</th>
-              <th className={styles.tableTh}>Projet</th>
-              <th className={styles.tableTh}>Rubrique</th>
-              <th className={styles.tableTh}>Statut</th>
-              <th className={styles.tableTh}>Mode</th>
-              <th className={styles.tableTh}>Ordre</th>
-              <th className={styles.tableThRight}>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredProjects.map((p, pIdx) => {
-              const catItem = categories.find((c) => c.id === p.category);
-              const catTitle = catItem ? catItem.title.fr : p.category;
+        <div className={styles.tableResponsiveWrapper}>
+          <table className={styles.projectsTable}>
+            <thead>
+              <tr className={styles.tableHeaderRow}>
+                <th className={styles.tableTh}>Visuel</th>
+                <th className={styles.tableTh}>Projet</th>
+                <th className={styles.tableTh}>Rubrique</th>
+                <th className={styles.tableTh}>Statut</th>
+                <th className={styles.tableTh}>Mode</th>
+                <th className={styles.tableTh}>Ordre</th>
+                <th className={styles.tableThRight}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredProjects.map((p, pIdx) => {
+                const catItem = categories.find((c) => c.id === p.category);
+                const catTitle = catItem ? catItem.title.fr : p.category;
+                const isVideo = resolveProjectPresentationMode(p) === "video";
+                const candidateCoverId = isVideo
+                  ? p.video?.coverImageId || p.draftVideoCoverImageId || p.coverImageId
+                  : p.coverImageId;
+                const mediaItem = candidateCoverId ? content.media[candidateCoverId] : null;
+                const effectiveOwnerId = mediaItem?.ownerId || p.id;
+                const effectiveOwnerType = mediaItem?.ownerType || "project";
+                const effectiveSlot = mediaItem?.mediaSlot || (isVideo && !p.coverImageId ? "video_cover" : "cover");
 
-              return (
-                <tr key={p.id} className={styles.tableRow}>
-                  <td className={`${styles.tableCell} ${styles.tableCellThumbnail}`}>
-                    {p.coverImageId ? (
+                return (
+                  <tr key={p.id} className={styles.tableRow}>
+                    <td className={`${styles.tableCell} ${styles.tableCellThumbnail}`}>
                       <div className={styles.projectThumb}>
-                        <ResponsivePortfolioImage
-                          imageId={p.coverImageId}
-                          ownerType="project"
-                          ownerId={p.id}
-                          mediaSlot="cover"
-                          mediaMetadata={content.media[p.coverImageId]}
-                          alt={p.coverAlt.fr}
-                          loading="lazy"
-                        />
+                        {candidateCoverId ? (
+                          <ResponsivePortfolioImage
+                            imageId={candidateCoverId}
+                            ownerType={effectiveOwnerType}
+                            ownerId={effectiveOwnerId}
+                            mediaSlot={effectiveSlot}
+                            mediaMetadata={mediaItem}
+                            alt={p.coverAlt?.fr || p.title?.fr || "Couverture projet"}
+                            loading="lazy"
+                            isAdminPreview={true}
+                          />
+                        ) : (
+                          <div className={styles.projectThumbPlaceholder} aria-hidden="true">
+                            {isVideo ? "Vidéo" : "Photo"}
+                          </div>
+                        )}
                       </div>
-                    ) : (
-                      <div className={styles.projectThumb} />
-                    )}
-                  </td>
+                    </td>
 
                   <td className={styles.tableCell}>
                     <div className={styles.projectTitleCell}>{p.title.fr}</div>
@@ -1373,7 +1386,8 @@ export default function AdminPortfolioPage() {
             })}
           </tbody>
         </table>
-      )}
+      </div>
+    )}
       </div>
 
       {/* Delete Project Modal */}

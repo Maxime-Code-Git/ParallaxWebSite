@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Form,
   Link,
@@ -31,6 +31,7 @@ interface LoaderData {
 
 interface ActionData {
   error?: string;
+  submittedCode?: string;
 }
 
 export function meta({ data }: { data?: LoaderData }) {
@@ -170,7 +171,10 @@ export async function action({ request }: ActionFunctionArgs) {
     if (authResult.retryAfter) {
       responseHeaders["Retry-After"] = String(authResult.retryAfter);
     }
-    return Response.json({ error: authResult.error }, { status: authResult.status, headers: responseHeaders });
+    return Response.json(
+      { error: authResult.error, submittedCode: code },
+      { status: authResult.status, headers: responseHeaders }
+    );
   }
 
   const targetPath = lang === "fr" ? `/fr/galerie/${authResult.publicId}` : `/en/gallery/${authResult.publicId}`;
@@ -189,7 +193,13 @@ export default function ClientLoginPage() {
   const navigation = useNavigation();
   const isSubmitting = navigation.state === "submitting";
 
-  const [codeValue, setCodeValue] = useState("");
+  const [codeValue, setCodeValue] = useState(actionData?.submittedCode || "");
+
+  useEffect(() => {
+    if (actionData?.submittedCode !== undefined) {
+      setCodeValue(actionData.submittedCode);
+    }
+  }, [actionData?.submittedCode]);
 
   const isEn = lang === "en";
   const contactHref = `/${lang}#contact`;
@@ -239,6 +249,7 @@ export default function ClientLoginPage() {
                 className={styles.input}
                 value={codeValue}
                 onChange={(e) => setCodeValue(e.target.value.toUpperCase())}
+                disabled={isSubmitting}
                 required
               />
             </div>

@@ -88,6 +88,7 @@ const ALLOWED_PROJECT_FIELDS = [
   "videoCoverImageId",
   "videoUrl",
   "galleryImageIds",
+  "galleryAlt",
 ] as const;
 
 export async function action({ request, params }: ActionFunctionArgs) {
@@ -157,14 +158,69 @@ export async function action({ request, params }: ActionFunctionArgs) {
   const videoCoverImageId = formData.get("videoCoverImageId") ? String(formData.get("videoCoverImageId")) : null;
   const rawVideoUrl = String(formData.get("videoUrl") || "").trim();
 
+  // Strict server-side validation of galleryImageIds
+  const rawGids = formData.get("galleryImageIds");
   let galleryImageIds: string[] = [];
-  try {
-    const rawGids = formData.get("galleryImageIds");
-    if (rawGids) {
+  if (rawGids !== null && rawGids !== "") {
+    try {
       galleryImageIds = JSON.parse(String(rawGids));
+    } catch {
+      return Response.json(
+        { error: "Format JSON invalide pour la liste des photos de la galerie." },
+        { status: 422, headers: createAdminHeaders() }
+      );
     }
-  } catch {
-    // fallback empty
+  }
+
+  if (!Array.isArray(galleryImageIds)) {
+    return Response.json(
+      { error: "La liste des photos de la galerie doit être un tableau." },
+      { status: 422, headers: createAdminHeaders() }
+    );
+  }
+
+  for (const id of galleryImageIds) {
+    if (typeof id !== "string" || !id.trim()) {
+      return Response.json(
+        { error: "Chaque identifiant de photo de la galerie doit être une chaîne non vide." },
+        { status: 422, headers: createAdminHeaders() }
+      );
+    }
+  }
+
+  const uniqueGids = new Set(galleryImageIds);
+  if (uniqueGids.size !== galleryImageIds.length) {
+    return Response.json(
+      { error: "La galerie ne doit pas comporter de doublons d'images." },
+      { status: 422, headers: createAdminHeaders() }
+    );
+  }
+
+  for (const gid of galleryImageIds) {
+    const mediaItem = nextContent.media[gid];
+    if (!mediaItem || mediaItem.ownerType !== "project" || mediaItem.ownerId !== proj.id) {
+      return Response.json(
+        { error: `L'image "${gid}" n'appartient pas à ce projet ou est introuvable.` },
+        { status: 422, headers: createAdminHeaders() }
+      );
+    }
+  }
+
+  // Parse and validate galleryAlt if provided
+  let galleryAlt: Record<string, { fr: string; en: string }> | undefined = proj.galleryAlt;
+  const rawGalleryAlt = formData.get("galleryAlt");
+  if (rawGalleryAlt) {
+    try {
+      const parsedAlt = JSON.parse(String(rawGalleryAlt));
+      if (parsedAlt && typeof parsedAlt === "object" && !Array.isArray(parsedAlt)) {
+        galleryAlt = parsedAlt;
+      }
+    } catch {
+      return Response.json(
+        { error: "Format JSON invalide pour les textes alternatifs de la galerie." },
+        { status: 422, headers: createAdminHeaders() }
+      );
+    }
   }
 
   // Parse video if present
@@ -222,6 +278,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
   proj.coverImageId = coverImageId;
   proj.coverAlt = { fr: coverAltFr || proj.title.fr, en: coverAltEn || proj.title.en };
   proj.galleryImageIds = galleryImageIds;
+  proj.galleryAlt = galleryAlt;
   proj.video = videoObj;
   proj.draftVideoCoverImageId = videoCoverImageId;
   const presentationMode = (String(formData.get("presentationMode") || "photo") as "photo" | "video");
@@ -376,6 +433,7 @@ export default function AdminPortfolioEditPage() {
     project.video?.coverImageId || project.draftVideoCoverImageId || null
   );
   const [galleryImageIds, setGalleryImageIds] = useState<string[]>(project.galleryImageIds || []);
+  const [galleryAlt] = useState<Record<string, { fr: string; en: string }>>(project.galleryAlt || {});
   const [mediaRegistry, setMediaRegistry] = useState(media);
 
   // Upload status states
@@ -548,6 +606,7 @@ export default function AdminPortfolioEditPage() {
         <input type="hidden" name="coverImageId" value={coverImageId || ""} />
         <input type="hidden" name="videoCoverImageId" value={videoCoverImageId || ""} />
         <input type="hidden" name="galleryImageIds" value={JSON.stringify(galleryImageIds)} />
+        <input type="hidden" name="galleryAlt" value={JSON.stringify(galleryAlt)} />
 
         <div className={styles.formGrid}>
           {/* Main Left Column */}
@@ -823,49 +882,75 @@ export default function AdminPortfolioEditPage() {
 
                   {galleryImageIds.length > 0 && (
                     <div className={styles.galleryGrid}>
-                      {galleryImageIds.map((gid, gIdx) => (
-                        <div key={gid} className={styles.galleryItem}>
-                          <ResponsivePortfolioImage
-                            imageId={gid}
-                            ownerType="project"
-                            ownerId={project.id}
-                            mediaSlot="gallery"
-                            mediaMetadata={mediaRegistry[gid]}
-                            alt={`Galerie ${gIdx + 1}`}
-                            isAdminPreview
-                          />
-                          <div className={styles.galleryActionsBar}>
-                            <div className={styles.reorderBtnGroup}>
+                      {galleryImageIds.map((gid, gIdx) => {
+                        const isAlsoCover = gid === coverImageId;
+                        return (
+                          <div key={gid} className={styles.galleryCard}>
+                            <div className={styles.galleryThumbWrapper}>
+                              <ResponsivePortfolioImage
+                                imageId={gid}
+                                ownerType="project"
+                                ownerId={project.id}
+                                mediaSlot="gallery"
+                                mediaMetadata={mediaRegistry[gid]}
+                                alt={`Photo de galerie ${gIdx + 1}`}
+                                isAdminPreview
+                              />
+                              <span className={styles.galleryOrderBadge} aria-hidden="true">
+                                {gIdx + 1}
+                              </span>
+                              {isAlsoCover && (
+                                <span
+                                  className={styles.galleryCoverBadge}
+                                  title="Cette photo sert aussi de couverture principale"
+                                >
+                                  Couverture
+                                </span>
+                              )}
+                            </div>
+
+                            <div className={styles.galleryActionsBar}>
+                              <div className={styles.reorderBtnGroup}>
+                                <button
+                                  type="button"
+                                  disabled={gIdx === 0}
+                                  className={styles.reorderBtn}
+                                  onClick={() => moveGalleryImage(gIdx, "up")}
+                                  aria-label={`Déplacer la photo ${gIdx + 1} vers la gauche`}
+                                  title="Déplacer vers la gauche"
+                                >
+                                  ←
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={gIdx === galleryImageIds.length - 1}
+                                  className={styles.reorderBtn}
+                                  onClick={() => moveGalleryImage(gIdx, "down")}
+                                  aria-label={`Déplacer la photo ${gIdx + 1} vers la droite`}
+                                  title="Déplacer vers la droite"
+                                >
+                                  →
+                                </button>
+                              </div>
+
                               <button
                                 type="button"
-                                disabled={gIdx === 0}
-                                className={styles.reorderBtn}
-                                onClick={() => moveGalleryImage(gIdx, "up")}
-                                aria-label="Déplacer vers la gauche"
+                                className={styles.removeBtnText}
+                                onClick={() => removeGalleryImage(gid)}
+                                aria-label={`Retirer la photo ${gIdx + 1} de la galerie`}
                               >
-                                ←
-                              </button>
-                              <button
-                                type="button"
-                                disabled={gIdx === galleryImageIds.length - 1}
-                                className={styles.reorderBtn}
-                                onClick={() => moveGalleryImage(gIdx, "down")}
-                                aria-label="Déplacer vers la droite"
-                              >
-                                →
+                                Retirer
                               </button>
                             </div>
-                            <button
-                              type="button"
-                              className={styles.removeBtnText}
-                              onClick={() => removeGalleryImage(gid)}
-                              aria-label="Retirer cette photo"
-                            >
-                              Retirer
-                            </button>
+
+                            {isAlsoCover && (
+                              <p className={styles.galleryCoverNotice}>
+                                Image également couverture. Le retrait de la galerie préserve la couverture.
+                              </p>
+                            )}
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>

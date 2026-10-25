@@ -323,14 +323,15 @@ export async function authenticateGalleryCode(
     checkRateLimit(ip, "gallery");
   } catch (err) {
     if (err instanceof RateLimitExceededError) {
+      const minutes = Math.ceil(err.retryAfter / 60);
       return {
         success: false,
         status: 429,
         retryAfter: err.retryAfter,
         error:
           lang === "fr"
-            ? `Trop de tentatives. Veuillez réessayer dans ${err.retryAfter} secondes.`
-            : `Too many attempts. Please try again in ${err.retryAfter} seconds.`,
+            ? `Trop de tentatives. Veuillez réessayer dans ${minutes > 1 ? `environ ${minutes} minutes` : `${err.retryAfter} secondes`}.`
+            : `Too many attempts. Please try again in ${minutes > 1 ? `approximately ${minutes} minutes` : `${err.retryAfter} seconds`}.`,
       };
     }
     return {
