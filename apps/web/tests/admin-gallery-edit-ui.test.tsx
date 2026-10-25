@@ -10,6 +10,7 @@ vi.mock("react-router", async (importOriginal) => {
     useActionData: vi.fn(),
     useNavigation: vi.fn(() => ({ state: "idle" })),
     useRevalidator: vi.fn(() => ({ revalidate: vi.fn(), state: "idle" })),
+    useSubmit: vi.fn(() => vi.fn()),
     Form: ({ children, ...props }: React.FormHTMLAttributes<HTMLFormElement>) => (
       <form {...props}>{children}</form>
     ),

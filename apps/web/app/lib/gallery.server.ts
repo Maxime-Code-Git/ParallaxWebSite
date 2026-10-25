@@ -7,6 +7,7 @@ import {
   decryptGalleryCode,
   GalleryCodeDecryptionError,
 } from "./gallery-auth.server";
+import { deleteStoredGalleryMediaFiles } from "./gallery-preview.server";
 
 export class GalleryCodeNotFoundError extends Error {
   constructor(message = "Code d'accès introuvable pour cette galerie.", options?: ErrorOptions) {
@@ -605,13 +606,13 @@ export function getGalleryMediaList(galleryId: string, mediaType?: "photo" | "vi
     return db.prepare(`
       SELECT * FROM gallery_media
       WHERE gallery_id = ? AND media_type = ? AND is_ready = 1
-      ORDER BY sort_order ASC
+      ORDER BY sort_order ASC, created_at ASC, id ASC
     `).all(galleryId, mediaType) as unknown as GalleryMediaRow[];
   }
   return db.prepare(`
     SELECT * FROM gallery_media
     WHERE gallery_id = ? AND is_ready = 1
-    ORDER BY sort_order ASC
+    ORDER BY sort_order ASC, created_at ASC, id ASC
   `).all(galleryId) as unknown as GalleryMediaRow[];
 }
 
@@ -631,7 +632,7 @@ export function getGalleryPhotosPaginated(galleryId: string, skip = 0, limit = 2
   const items = db.prepare(`
     SELECT * FROM gallery_media
     WHERE gallery_id = ? AND media_type = 'photo' AND is_ready = 1
-    ORDER BY sort_order ASC
+    ORDER BY sort_order ASC, created_at ASC, id ASC
     LIMIT ? OFFSET ?
   `).all(galleryId, safeLimit, safeSkip) as unknown as GalleryMediaRow[];
 
@@ -699,5 +700,345 @@ export function parsePreviewVariants(
     return Object.keys(variants).length > 0 ? variants : null;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Removes a single photo from a gallery atomically:
+ * - Checks optimistic revision and belonging to the gallery.
+ * - Rejects mutation if an import or gallery deletion is currently active.
+ * - Reassigns cover photo if this was the cover (to next ready photo or null).
+ * - Reverts gallery status to draft if it was published and becomes completely empty of media.
+ * - Deletes the media row in DB and cleans up preview/poster/original files in storage.
+ * - Strictly leaves source files in imports intact.
+ */
+export function deleteGalleryPhoto(
+  galleryId: string,
+  mediaId: string,
+  expectedRevision: number
+): { success: boolean; unpublishNotice: boolean; newCoverId: string | null; deletedFilename: string } {
+  if (!galleryId || typeof galleryId !== "string") {
+    throw new GalleryValidationError("ID de galerie invalide.");
+  }
+  if (!mediaId || typeof mediaId !== "string") {
+    throw new GalleryValidationError("ID de média invalide.");
+  }
+
+  const db = getGalleryDb();
+
+  // 1. Guard against active imports
+  const activeImports = (
+    db.prepare(`
+      SELECT COUNT(*) as count FROM gallery_import_jobs
+      WHERE gallery_id = ? AND status IN ('pending', 'scanning', 'importing')
+    `).get(galleryId) as { count: number }
+  ).count;
+
+  if (activeImports > 0) {
+    throw new GalleryConflictError(
+      "Une opération d'importation est en cours pour cette galerie. Suppression de photo impossible pour le moment."
+    );
+  }
+
+  // 2. Guard against active gallery deletion
+  const activeDeletion = db.prepare(`
+    SELECT id FROM gallery_deletion_jobs
+    WHERE gallery_id = ? AND status IN ('pending', 'processing')
+  `).get(galleryId);
+
+  if (activeDeletion) {
+    throw new GalleryConflictError(
+      "Une suppression de la galerie est en cours. Suppression de photo impossible pour le moment."
+    );
+  }
+
+  // 3. Verify media exists, belongs to gallery and is a photo
+  const mediaItem = db.prepare(`
+    SELECT id, gallery_id, media_type, original_filename
+    FROM gallery_media
+    WHERE id = ? AND gallery_id = ?
+  `).get(mediaId, galleryId) as { id: string; gallery_id: string; media_type: string; original_filename: string } | undefined;
+
+  if (!mediaItem) {
+    throw new GalleryValidationError("Photo introuvable ou n'appartenant pas à cette galerie.");
+  }
+  if (mediaItem.media_type !== "photo") {
+    throw new GalleryValidationError("Seules les photos peuvent être supprimées via cette action.");
+  }
+
+  // 4. Verify gallery and revision
+  const currentGallery = db.prepare(`
+    SELECT id, revision, status, cover_media_id
+    FROM galleries
+    WHERE id = ?
+  `).get(galleryId) as { id: string; revision: number; status: string; cover_media_id: string | null } | undefined;
+
+  if (!currentGallery) {
+    throw new GalleryValidationError("Galerie introuvable.");
+  }
+
+  if (currentGallery.revision !== expectedRevision) {
+    throw new GalleryConflictError();
+  }
+
+  // 5. Determine new cover if this photo was the cover
+  let newCoverId = currentGallery.cover_media_id;
+  if (currentGallery.cover_media_id === mediaId) {
+    const nextPhoto = db.prepare(`
+      SELECT id FROM gallery_media
+      WHERE gallery_id = ? AND media_type = 'photo' AND is_ready = 1 AND id != ?
+      ORDER BY sort_order ASC, created_at ASC, id ASC
+      LIMIT 1
+    `).get(galleryId, mediaId) as { id: string } | undefined;
+
+    newCoverId = nextPhoto?.id || null;
+  }
+
+  // 6. Determine new status if gallery becomes completely empty
+  const remainingMediaCount = (
+    db.prepare(`
+      SELECT COUNT(*) as count FROM gallery_media
+      WHERE gallery_id = ? AND is_ready = 1 AND id != ?
+    `).get(galleryId, mediaId) as { count: number }
+  ).count;
+
+  let newStatus = currentGallery.status;
+  let unpublishNotice = false;
+  if (remainingMediaCount === 0 && currentGallery.status === "published") {
+    newStatus = "draft";
+    unpublishNotice = true;
+  }
+
+  const now = Date.now();
+
+  // 7. Atomic DB deletion and gallery update
+  db.exec("BEGIN EXCLUSIVE TRANSACTION;");
+  try {
+    const delRes = db.prepare("DELETE FROM gallery_media WHERE id = ? AND gallery_id = ?").run(mediaId, galleryId);
+    if (delRes.changes === 0) {
+      throw new GalleryValidationError("Échec de la suppression en base de données.");
+    }
+
+    const galRes = db.prepare(`
+      UPDATE galleries
+      SET cover_media_id = ?,
+          status = ?,
+          revision = revision + 1,
+          updated_at = ?
+      WHERE id = ? AND revision = ?
+    `).run(newCoverId, newStatus, now, galleryId, expectedRevision);
+
+    if (galRes.changes === 0) {
+      throw new GalleryConflictError();
+    }
+
+    db.exec("COMMIT;");
+  } catch (err) {
+    try {
+      db.exec("ROLLBACK;");
+    } catch {
+      // Ignored
+    }
+    if (err instanceof GalleryConflictError || err instanceof GalleryValidationError) {
+      throw err;
+    }
+    throw new Error(`Erreur lors de la suppression de la photo : ${err instanceof Error ? err.message : String(err)}`, { cause: err });
+  }
+
+  // 8. Filesystem cleanup outside transaction (safe & confined)
+  try {
+    deleteStoredGalleryMediaFiles(galleryId, mediaId);
+  } catch (cleanErr) {
+    console.error(`[WARN] Erreur lors du nettoyage des fichiers du média ${mediaId}:`, cleanErr);
+  }
+
+  return {
+    success: true,
+    unpublishNotice,
+    newCoverId,
+    deletedFilename: mediaItem.original_filename,
+  };
+}
+
+/**
+ * Reorders photos of a gallery atomically according to an explicit ordered list of media IDs:
+ * - Checks optimistic revision and guards against concurrent active imports / deletions.
+ * - Validates completeness, uniqueness, and belonging of all provided photo IDs.
+ * - Preserves video ordering and chosen cover photo.
+ * - Strictly increases sort_order so that subsequent imports naturally append.
+ */
+export function reorderGalleryPhotos(
+  galleryId: string,
+  orderedMediaIds: string[],
+  expectedRevision: number
+): void {
+  if (!galleryId || typeof galleryId !== "string") {
+    throw new GalleryValidationError("ID de galerie invalide.");
+  }
+  if (!Array.isArray(orderedMediaIds) || orderedMediaIds.length === 0) {
+    throw new GalleryValidationError("La liste des photos à réordonner est vide.");
+  }
+
+  const db = getGalleryDb();
+
+  // Guard active imports
+  const activeImports = (
+    db.prepare(`
+      SELECT COUNT(*) as count FROM gallery_import_jobs
+      WHERE gallery_id = ? AND status IN ('pending', 'scanning', 'importing')
+    `).get(galleryId) as { count: number }
+  ).count;
+  if (activeImports > 0) {
+    throw new GalleryConflictError(
+      "Une opération d'importation est en cours pour cette galerie. Réorganisation impossible pour le moment."
+    );
+  }
+
+  // Guard active deletion
+  const activeDeletion = db.prepare(`
+    SELECT id FROM gallery_deletion_jobs
+    WHERE gallery_id = ? AND status IN ('pending', 'processing')
+  `).get(galleryId);
+  if (activeDeletion) {
+    throw new GalleryConflictError(
+      "Une suppression de la galerie est en cours. Réorganisation impossible pour le moment."
+    );
+  }
+
+  // Check gallery and revision
+  const gallery = db.prepare("SELECT id, revision FROM galleries WHERE id = ?").get(galleryId) as
+    | { id: string; revision: number }
+    | undefined;
+  if (!gallery) {
+    throw new GalleryValidationError("Galerie introuvable.");
+  }
+  if (gallery.revision !== expectedRevision) {
+    throw new GalleryConflictError();
+  }
+
+  // Fetch current ready photos
+  const currentPhotos = db.prepare(`
+    SELECT id, sort_order
+    FROM gallery_media
+    WHERE gallery_id = ? AND media_type = 'photo' AND is_ready = 1
+    ORDER BY sort_order ASC, created_at ASC, id ASC
+  `).all(galleryId) as unknown as { id: string; sort_order: number }[];
+
+  if (orderedMediaIds.length !== currentPhotos.length) {
+    throw new GalleryValidationError("La liste des photos ne correspond pas au nombre de photos de la galerie.");
+  }
+
+  const currentIds = new Set(currentPhotos.map((p) => p.id));
+  const seenIds = new Set<string>();
+
+  for (const id of orderedMediaIds) {
+    if (typeof id !== "string" || !currentIds.has(id)) {
+      throw new GalleryValidationError(`Photo invalide ou n'appartenant pas à cette galerie : ${id}`);
+    }
+    if (seenIds.has(id)) {
+      throw new GalleryValidationError(`Doublon dans la liste des photos : ${id}`);
+    }
+    seenIds.add(id);
+  }
+
+  // Determine existing sort order slots or sequential slots
+  const existingSortOrders = currentPhotos.map((p) => p.sort_order);
+  const isDistinct = new Set(existingSortOrders).size === existingSortOrders.length;
+  const newSortOrders = isDistinct
+    ? existingSortOrders
+    : orderedMediaIds.map((_, i) => i);
+
+  const now = Date.now();
+
+  db.exec("BEGIN EXCLUSIVE TRANSACTION;");
+  try {
+    const updateStmt = db.prepare(`
+      UPDATE gallery_media
+      SET sort_order = ?, updated_at = ?
+      WHERE id = ? AND gallery_id = ?
+    `);
+
+    for (let i = 0; i < orderedMediaIds.length; i++) {
+      updateStmt.run(newSortOrders[i], now, orderedMediaIds[i], galleryId);
+    }
+
+    const galRes = db.prepare(`
+      UPDATE galleries
+      SET revision = revision + 1, updated_at = ?
+      WHERE id = ? AND revision = ?
+    `).run(now, galleryId, expectedRevision);
+
+    if (galRes.changes === 0) {
+      throw new GalleryConflictError();
+    }
+
+    db.exec("COMMIT;");
+  } catch (err) {
+    try {
+      db.exec("ROLLBACK;");
+    } catch {
+      // Ignored
+    }
+    if (err instanceof GalleryConflictError || err instanceof GalleryValidationError) {
+      throw err;
+    }
+    throw new Error(`Erreur lors de la réorganisation des photos : ${err instanceof Error ? err.message : String(err)}`, { cause: err });
+  }
+}
+
+/**
+ * Moves a single photo one step up or down among the gallery's ready photos:
+ * - direction "up" moves towards position 0 (earlier).
+ * - direction "down" moves towards the end (later).
+ */
+export function moveGalleryPhoto(
+  galleryId: string,
+  mediaId: string,
+  direction: "up" | "down",
+  expectedRevision: number
+): void {
+  const db = getGalleryDb();
+
+  // Validate gallery existence and optimistic revision upfront
+  const gallery = db.prepare("SELECT id, revision FROM galleries WHERE id = ?").get(galleryId) as
+    | { id: string; revision: number }
+    | undefined;
+  if (!gallery) {
+    throw new GalleryValidationError("Galerie introuvable.");
+  }
+  if (gallery.revision !== expectedRevision) {
+    throw new GalleryConflictError();
+  }
+
+  const currentPhotos = db.prepare(`
+    SELECT id
+    FROM gallery_media
+    WHERE gallery_id = ? AND media_type = 'photo' AND is_ready = 1
+    ORDER BY sort_order ASC, created_at ASC, id ASC
+  `).all(galleryId) as unknown as { id: string }[];
+
+  const currentIndex = currentPhotos.findIndex((p) => p.id === mediaId);
+  if (currentIndex === -1) {
+    throw new GalleryValidationError("Photo introuvable dans cette galerie.");
+  }
+
+  if (direction === "up") {
+    if (currentIndex === 0) return; // Already at top
+    const targetIndex = currentIndex - 1;
+    const reordered = currentPhotos.map((p) => p.id);
+    const temp = reordered[currentIndex];
+    reordered[currentIndex] = reordered[targetIndex];
+    reordered[targetIndex] = temp;
+    reorderGalleryPhotos(galleryId, reordered, expectedRevision);
+  } else if (direction === "down") {
+    if (currentIndex === currentPhotos.length - 1) return; // Already at bottom
+    const targetIndex = currentIndex + 1;
+    const reordered = currentPhotos.map((p) => p.id);
+    const temp = reordered[currentIndex];
+    reordered[currentIndex] = reordered[targetIndex];
+    reordered[targetIndex] = temp;
+    reorderGalleryPhotos(galleryId, reordered, expectedRevision);
+  } else {
+    throw new GalleryValidationError("Direction invalide (doit être 'up' ou 'down').");
   }
 }

@@ -210,3 +210,50 @@ export function removePreviews(galleryId: string, mediaId: string): void {
     }
   }
 }
+
+/**
+ * Safely removes all stored files for a gallery media item (original, previews, posters).
+ * Does NOT touch any source files located in the import directory.
+ */
+export function deleteStoredGalleryMediaFiles(galleryId: string, mediaId: string): void {
+  const base = path.resolve(ENV.GALLERY_MEDIA_PATH);
+
+  // 1. Remove preview variants
+  removePreviews(galleryId, mediaId);
+
+  // 2. Remove poster directory if any
+  try {
+    verifySecurePathChain(base, [galleryId], "directory");
+    verifySecurePathChain(base, [galleryId, ".posters"], "directory");
+    const postersDir = path.join(base, galleryId, ".posters", mediaId);
+    if (fs.existsSync(postersDir)) {
+      const stat = fs.lstatSync(postersDir);
+      if (stat.isSymbolicLink()) {
+        fs.unlinkSync(postersDir);
+      } else {
+        fs.rmSync(postersDir, { recursive: true, force: true });
+      }
+    }
+  } catch {
+    // Ignored if .posters doesn't exist
+  }
+
+  // 3. Remove original stored media file
+  try {
+    const origPath = getGalleryOriginalPath(galleryId, mediaId);
+    if (fs.existsSync(origPath)) {
+      const stat = fs.lstatSync(origPath);
+      if (stat.isSymbolicLink() || !stat.isFile()) {
+        try {
+          fs.unlinkSync(origPath);
+        } catch {
+          // Ignored
+        }
+      } else {
+        fs.unlinkSync(origPath);
+      }
+    }
+  } catch {
+    // Ignored if file does not exist or invalid path
+  }
+}
