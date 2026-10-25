@@ -100,13 +100,40 @@ export function cleanTypography(str: string | null | undefined, lang: "fr" | "en
   return s;
 }
 
+/**
+ * Normalizes the studio commercial name to "Studio LM", replacing editorial occurrences
+ * of "LS studio", "LS Studio", "ls studio" and case variants.
+ */
+export function cleanStudioName(str: string | null | undefined): string {
+  if (!str || typeof str !== "string") return "";
+  return str.replace(/\bLS\s+studio\b/gi, "Studio LM");
+}
+
+/**
+ * Removes test artifacts from the public home hero subtitle (such as "- Test Vérifié Lot 2",
+ * case variants, and unaccented versions), preserving custom text and cleaning useless separators.
+ */
+export function cleanHeroSubtitle(str: string | null | undefined): string {
+  if (!str || typeof str !== "string") return "";
+  let cleaned = str.replace(
+    /\s*[-–—]\s*(?:test\s*v[eé]rifi[eé]\s*lot\s*2|lot\s*2\s*verified\s*test|test\s*v[eé]rifi[eé]|test\s*verifie)\b/gi,
+    ""
+  );
+  cleaned = cleaned.replace(
+    /\b(?:test\s*v[eé]rifi[eé]\s*lot\s*2|lot\s*2\s*verified\s*test)\s*[-–—]?\s*/gi,
+    ""
+  );
+  cleaned = cleaned.replace(/\s*[-–—]\s*$/, "").trim();
+  return cleaned;
+}
+
 export function cleanLocalizedString(loc: LocalizedString | null | undefined): LocalizedString {
   if (!loc || typeof loc !== "object") {
     return { fr: "", en: "" };
   }
   return {
-    fr: cleanTypography(loc.fr, "fr"),
-    en: cleanTypography(loc.en, "en"),
+    fr: cleanStudioName(cleanTypography(loc.fr, "fr")),
+    en: cleanStudioName(cleanTypography(loc.en, "en")),
   };
 }
 
@@ -148,7 +175,13 @@ export function cleanHomeContent<T extends object>(home: T): T {
   if (hero) {
     if (hero.badge) hero.badge = cleanLocalizedString(hero.badge as LocalizedString);
     if (hero.title) hero.title = cleanLocalizedString(hero.title as LocalizedString);
-    if (hero.subtitle) hero.subtitle = cleanLocalizedString(hero.subtitle as LocalizedString);
+    if (hero.subtitle) {
+      const loc = hero.subtitle as LocalizedString;
+      hero.subtitle = {
+        fr: cleanHeroSubtitle(cleanStudioName(cleanTypography(loc.fr, "fr"))),
+        en: cleanHeroSubtitle(cleanStudioName(cleanTypography(loc.en, "en"))),
+      };
+    }
   }
   const showreel = clone.showreel as Record<string, unknown> | undefined;
   if (showreel) {

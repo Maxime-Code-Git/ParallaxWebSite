@@ -16,7 +16,7 @@ export function Header({ common, lang, currentRoute, alternateUrls }: HeaderProp
   const homeHref = `/${lang}`;
   const studioHref = `/${lang}/studio`;
   const contactHref = `/${lang}/contact`;
-  const sempraHref = currentRoute === "home" ? "#sempra" : `/${lang}#sempra`;
+  const sempraHref = "https://sempra.be/";
   const portfolioHref = lang === "fr" ? "/fr/projets" : "/en/projects";
   const clientAreaHref = lang === "fr" ? "/fr/espace-client" : "/en/client-area";
 

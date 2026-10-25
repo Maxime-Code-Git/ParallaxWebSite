@@ -751,6 +751,8 @@ export function isRpmOnlyParagraph(text: string): boolean {
 
 import {
   cleanTypography,
+  cleanStudioName,
+  cleanHeroSubtitle,
   cleanLocalizedString,
   cleanCommonContent,
   cleanHomeContent,
@@ -762,6 +764,8 @@ import {
 
 export {
   cleanTypography,
+  cleanStudioName,
+  cleanHeroSubtitle,
   cleanLocalizedString,
   cleanCommonContent,
   cleanHomeContent,

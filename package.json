@@ -31,7 +31,8 @@
     "favicons:generate": "node scripts/generate-favicons.js",
     "typography:adapt": "node scripts/adapt-typography.js",
     "backup": "node scripts/backup.js",
-    "restore": "node scripts/restore.js"
+    "restore": "node scripts/restore.js",
+    "content:remediate": "node scripts/remediate-editorial-content.js"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
