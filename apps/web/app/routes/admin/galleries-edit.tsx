@@ -7,6 +7,7 @@ import {
   useLoaderData,
   useNavigation,
   useRevalidator,
+  useSubmit,
   type ActionFunctionArgs,
   type LoaderFunctionArgs,
 } from "react-router";
@@ -18,13 +19,16 @@ import { constantTimeEqual } from "../../lib/auth.server";
 import { validateOrigin, readStrictFormUrlEncoded } from "../../lib/security.server";
 import {
   getGalleryById,
-  getGalleryDecryptedCode,
+  getGalleryAccessCodeState,
   updateGallery,
   rotateGalleryCode,
   publishGallery,
   unpublishGallery,
   archiveGallery,
   setCoverPhoto,
+  deleteGalleryPhoto,
+  moveGalleryPhoto,
+  reorderGalleryPhotos,
   getGalleryMediaList,
   GalleryConflictError,
   GalleryValidationError,
@@ -45,8 +49,11 @@ import styles from "./galleries.module.css";
 
 interface LoaderData {
   gallery: Gallery;
-  accessCode: string;
+  accessCode: string | null;
   codeVersion: number;
+  codeStatus: "available" | "unavailable";
+  codeWarning: string | null;
+  codeReason?: "not_found" | "decryption_failed";
   folders: string[];
   importRootPath: string;
   csrfToken: string;
@@ -82,7 +89,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     throw new Response("Galerie introuvable", { status: 404, headers: createAdminHeaders() });
   }
 
-  const { code: accessCode, version: codeVersion } = getGalleryDecryptedCode(gallery.id);
+  const codeState = getGalleryAccessCodeState(gallery.id);
   const folders = getAvailableImportFolders();
   const importRootPath = ENV.GALLERY_IMPORT_PATH;
   const csrfToken = session.get("csrfToken") || "";
@@ -99,8 +106,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   return Response.json(
     {
       gallery,
-      accessCode,
-      codeVersion,
+      accessCode: codeState.code,
+      codeVersion: codeState.version,
+      codeStatus: codeState.status,
+      codeWarning: codeState.warning,
+      codeReason: codeState.reason,
       folders,
       importRootPath,
       csrfToken,
@@ -130,7 +140,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
   let body: URLSearchParams;
   try {
-    body = await readStrictFormUrlEncoded(request, 8192);
+    body = await readStrictFormUrlEncoded(request, 65536);
   } catch (err: unknown) {
     if (err instanceof Error && err.message === "Payload Too Large") {
       return Response.json({ error: "Requête trop volumineuse." }, { status: 413, headers: createAdminHeaders() });
@@ -233,6 +243,39 @@ export async function action({ request, params }: ActionFunctionArgs) {
       return Response.json({ success: "Photo de couverture mise à jour.", intent }, { headers: createAdminHeaders() });
     }
 
+    if (intent === "delete_photo") {
+      const mediaId = (body.get("mediaId") || "").trim();
+      const revision = parseInt(body.get("revision") || "0", 10);
+      const res = deleteGalleryPhoto(gallery.id, mediaId, revision);
+      const successMessage = res.unpublishNotice
+        ? `La photo « ${res.deletedFilename} » a été retirée. La galerie ne contenant plus aucun média, elle a été basculée automatiquement en brouillon.`
+        : `La photo « ${res.deletedFilename} » a été supprimée de la galerie.`;
+      return Response.json({ success: successMessage, intent }, { headers: createAdminHeaders() });
+    }
+
+    if (intent === "move_photo") {
+      const mediaId = (body.get("mediaId") || "").trim();
+      const direction = (body.get("direction") || "").trim() as "up" | "down";
+      const revision = parseInt(body.get("revision") || "0", 10);
+      moveGalleryPhoto(gallery.id, mediaId, direction, revision);
+      return Response.json({ success: "Ordre des photos mis à jour.", intent }, { headers: createAdminHeaders() });
+    }
+
+    if (intent === "reorder_photos") {
+      const rawOrdered = (body.get("orderedMediaIds") || "").trim();
+      const revision = parseInt(body.get("revision") || "0", 10);
+      let orderedIds: string[];
+      try {
+        orderedIds = rawOrdered.startsWith("[")
+          ? (JSON.parse(rawOrdered) as string[])
+          : rawOrdered.split(",").map((s) => s.trim()).filter(Boolean);
+      } catch {
+        return Response.json({ error: "Format d'ordre des photos invalide.", intent }, { status: 400, headers: createAdminHeaders() });
+      }
+      reorderGalleryPhotos(gallery.id, orderedIds, revision);
+      return Response.json({ success: "Ordre des photos mis à jour.", intent }, { headers: createAdminHeaders() });
+    }
+
     if (intent === "delete_gallery") {
       const confirmTitle = (body.get("confirmTitle") || "").trim();
       if (confirmTitle !== gallery.title) {
@@ -269,11 +312,75 @@ export async function action({ request, params }: ActionFunctionArgs) {
   }
 }
 
+function AdminPhotoThumbnail({
+  galleryId,
+  photo,
+}: {
+  galleryId: string;
+  photo: GalleryMediaRow;
+}) {
+  const [status, setStatus] = useState<"loading" | "loaded" | "error">("loading");
+  const [errorStatus, setErrorStatus] = useState<number | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
+
+  const src = `/api/admin/galleries/${galleryId}/media/${photo.id}?width=480${retryCount > 0 ? `&retry=${retryCount}` : ""}`;
+
+  const handleError = async () => {
+    try {
+      const res = await fetch(src, { method: "HEAD" });
+      setErrorStatus(res.status);
+    } catch {
+      setErrorStatus(0);
+    }
+    setStatus("error");
+  };
+
+  const handleRetry = () => {
+    setStatus("loading");
+    setErrorStatus(null);
+    setRetryCount((c) => c + 1);
+  };
+
+  if (status === "error") {
+    let msg = "Erreur de chargement";
+    if (errorStatus === 404) msg = "Fichier original introuvable (404)";
+    else if (errorStatus === 503) msg = "Traitement occupé (503)";
+
+    return (
+      <div className={styles.mediaThumbError} data-testid={`thumb-error-${photo.id}`}>
+        <p className={styles.mediaThumbErrorText}>{msg}</p>
+        <button
+          type="button"
+          onClick={handleRetry}
+          className={`${styles.btn} ${styles.btnSecondary} ${styles.mediaThumbRetryBtn}`}
+          aria-label={`Réessayer le chargement de ${photo.original_filename}`}
+        >
+          Réessayer
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={src}
+      alt={photo.original_filename}
+      loading="lazy"
+      className={styles.mediaThumbImg}
+      onLoad={() => setStatus("loaded")}
+      onError={handleError}
+    />
+  );
+}
+
 export default function AdminGalleryEditPage() {
   const {
     gallery,
     accessCode,
     codeVersion,
+    codeStatus,
+    codeWarning,
+    codeReason,
     folders,
     importRootPath,
     csrfToken,
@@ -284,7 +391,19 @@ export default function AdminGalleryEditPage() {
   const actionData = useActionData<ActionData>();
   const navigation = useNavigation();
   const revalidator = useRevalidator();
+  const submit = useSubmit();
   const isSubmitting = navigation.state === "submitting";
+
+  const [confirmDeletePhotoId, setConfirmDeletePhotoId] = useState<string | null>(null);
+
+  const handleDirectReorder = (newOrder: string[]) => {
+    const formData = new FormData();
+    formData.set("csrfToken", csrfToken);
+    formData.set("intent", "reorder_photos");
+    formData.set("revision", String(gallery.revision));
+    formData.set("orderedMediaIds", newOrder.join(","));
+    submit(formData, { method: "post", encType: "application/x-www-form-urlencoded" });
+  };
 
   // Code reveal/copy state
   const [showCode, setShowCode] = useState(false);
@@ -353,6 +472,10 @@ export default function AdminGalleryEditPage() {
   const [deleteConfirmationText, setDeleteConfirmationText] = useState("");
 
   const copyCodeToClipboard = async () => {
+    if (!accessCode) {
+      setFeedback({ type: "error", message: "Le code d'accès n'est pas disponible pour la copie." });
+      return;
+    }
     try {
       await navigator.clipboard.writeText(accessCode);
       setCopiedCode(true);
@@ -588,13 +711,35 @@ export default function AdminGalleryEditPage() {
             <span className={styles.codeMeta}>Version : v{codeVersion}</span>
           </h2>
 
+          {codeStatus === "unavailable" && (
+            <div className={styles.alertError} role="alert">
+              <strong>Code indisponible :</strong> {codeWarning}
+            </div>
+          )}
+
+          {gallery.status !== "published" && (
+            <div className={styles.alertWarning} role="alert">
+              <strong>Code inactif :</strong> cette galerie est actuellement en statut « {gallery.status === "draft" ? "Brouillon" : "Archivée"} ». Le code d'accès restera inactif sur l'espace client tant que la galerie n'est pas publiée (nécessite au moins 1 média prêt et une date d'expiration valide).
+            </div>
+          )}
+
           <div className={styles.codeBox}>
             <div>
-              <div className={styles.codeDisplay}>
-                {showCode ? accessCode : "•••••••••••••••••••••"}
+              <div
+                className={`${styles.codeDisplay} ${codeStatus === "unavailable" ? styles.codeDisplayUnavailable : ""}`}
+              >
+                {codeStatus === "unavailable"
+                  ? "Code indisponible"
+                  : showCode && accessCode
+                  ? accessCode
+                  : "•••••••••••••••••••••"}
               </div>
               <p className={`${styles.codeMeta} ${styles.codeMetaTop6}`}>
-                Ce code unique donne accès à la galerie. Le renouveler révoque immédiatement tous les anciens accès.
+                {codeStatus === "unavailable"
+                  ? codeReason === "not_found"
+                    ? "Aucun code d'accès n'est enregistré pour cette galerie. Vous pouvez générer un nouveau code ci-contre pour ouvrir l'accès."
+                    : "Code impossible à afficher avec la clé active. L'accès client n'est pas déterminé par ce constat ; une régénération est facultative et invalidera explicitement les accès antérieurs."
+                  : "Ce code unique donne accès à la galerie. Le renouveler révoque immédiatement tous les anciens accès."}
               </p>
             </div>
 
@@ -602,6 +747,7 @@ export default function AdminGalleryEditPage() {
               <button
                 type="button"
                 onClick={() => setShowCode(!showCode)}
+                disabled={codeStatus === "unavailable"}
                 className={`${styles.btn} ${styles.btnSecondary} ${styles.btnSmall}`}
               >
                 {showCode ? "Masquer" : "Révéler"}
@@ -610,6 +756,7 @@ export default function AdminGalleryEditPage() {
               <button
                 type="button"
                 onClick={copyCodeToClipboard}
+                disabled={codeStatus === "unavailable"}
                 className={`${styles.btn} ${styles.btnSecondary} ${styles.btnSmall}`}
               >
                 {copiedCode ? "Copié !" : "Copier"}
@@ -1020,35 +1167,181 @@ export default function AdminGalleryEditPage() {
           {photos.length > 0 && (
             <div>
               <h3 className={styles.sectionSubHeading}>
-                Photos (cliquez pour définir comme photo de couverture)
+                Photos ({photos.length}) : Réorganisez l'ordre d'affichage ou gérez chaque photo
               </h3>
               <div className={styles.mediaGrid}>
-                {photos.map((p) => {
+                {photos.map((p, idx) => {
                   const isCover = gallery.cover_media_id === p.id;
+                  const isConfirmingDelete = confirmDeletePhotoId === p.id;
+
                   return (
-                    <div key={p.id} className={styles.mediaThumbCard}>
+                    <div
+                      key={p.id}
+                      className={styles.mediaThumbCard}
+                      draggable={!isSubmitting}
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData("text/plain", p.id);
+                        e.dataTransfer.effectAllowed = "move";
+                      }}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = "move";
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        const draggedId = e.dataTransfer.getData("text/plain");
+                        if (draggedId && draggedId !== p.id) {
+                          const currentIds = photos.map((item) => item.id);
+                          const fromIndex = currentIds.indexOf(draggedId);
+                          const toIndex = currentIds.indexOf(p.id);
+                          if (fromIndex !== -1 && toIndex !== -1) {
+                            const newOrder = [...currentIds];
+                            const [moved] = newOrder.splice(fromIndex, 1);
+                            newOrder.splice(toIndex, 0, moved);
+                            handleDirectReorder(newOrder);
+                          }
+                        }
+                      }}
+                    >
                       {isCover && <span className={styles.coverBadge}>Couverture</span>}
-                      <img
-                        src={`/api/gallery/${gallery.public_id}/media/${p.id}?width=480&format=webp`}
-                        alt={p.original_filename}
-                        loading="lazy"
-                        className={styles.mediaThumbImg}
-                      />
-                      <div className={styles.mediaThumbMeta}>{p.original_filename}</div>
-                      {!isCover && (
-                        <Form method="post" className={styles.formPadding}>
-                          <input type="hidden" name="csrfToken" value={csrfToken} />
-                          <input type="hidden" name="intent" value="set_cover" />
-                          <input type="hidden" name="mediaId" value={p.id} />
-                          <input type="hidden" name="revision" value={gallery.revision} />
+                      <span className={styles.photoOrderBadge} title={`Position ${idx + 1} sur ${photos.length}`}>
+                        {idx + 1} / {photos.length}
+                      </span>
+
+                      <AdminPhotoThumbnail galleryId={gallery.id} photo={p} />
+
+                      <div className={styles.mediaThumbMeta} title={p.original_filename}>
+                        {p.original_filename}
+                      </div>
+
+                      <div className={styles.photoCardActions}>
+                        {/* Order controls: Monter / Position select / Descendre */}
+                        <div className={styles.photoOrderControls}>
+                          <Form method="post">
+                            <input type="hidden" name="csrfToken" value={csrfToken} />
+                            <input type="hidden" name="intent" value="move_photo" />
+                            <input type="hidden" name="mediaId" value={p.id} />
+                            <input type="hidden" name="direction" value="up" />
+                            <input type="hidden" name="revision" value={gallery.revision} />
+                            <button
+                              type="submit"
+                              disabled={idx === 0 || isSubmitting}
+                              className={`${styles.btn} ${styles.btnSecondary} ${styles.photoOrderBtn}`}
+                              aria-label={`Monter la photo ${p.original_filename}`}
+                              title="Monter d'une position"
+                            >
+                              ← Monter
+                            </button>
+                          </Form>
+
+                          <Form method="post" className={styles.photoJumpForm}>
+                            <input type="hidden" name="csrfToken" value={csrfToken} />
+                            <input type="hidden" name="intent" value="reorder_photos" />
+                            <input type="hidden" name="revision" value={gallery.revision} />
+                            <select
+                              aria-label={`Position de ${p.original_filename}`}
+                              value={idx + 1}
+                              disabled={isSubmitting || photos.length <= 1}
+                              className={styles.photoJumpSelect}
+                              onChange={(e) => {
+                                const targetPos = parseInt(e.target.value, 10);
+                                if (targetPos >= 1 && targetPos <= photos.length && targetPos !== idx + 1) {
+                                  const targetIdx = targetPos - 1;
+                                  const currentIds = photos.map((item) => item.id);
+                                  const newOrder = [...currentIds];
+                                  const [moved] = newOrder.splice(idx, 1);
+                                  newOrder.splice(targetIdx, 0, moved);
+                                  handleDirectReorder(newOrder);
+                                }
+                              }}
+                            >
+                              {photos.map((_, pIdx) => (
+                                <option key={pIdx + 1} value={pIdx + 1}>
+                                  {pIdx + 1}
+                                </option>
+                              ))}
+                            </select>
+                          </Form>
+
+                          <Form method="post">
+                            <input type="hidden" name="csrfToken" value={csrfToken} />
+                            <input type="hidden" name="intent" value="move_photo" />
+                            <input type="hidden" name="mediaId" value={p.id} />
+                            <input type="hidden" name="direction" value="down" />
+                            <input type="hidden" name="revision" value={gallery.revision} />
+                            <button
+                              type="submit"
+                              disabled={idx === photos.length - 1 || isSubmitting}
+                              className={`${styles.btn} ${styles.btnSecondary} ${styles.photoOrderBtn}`}
+                              aria-label={`Descendre la photo ${p.original_filename}`}
+                              title="Descendre d'une position"
+                            >
+                              Descendre →
+                            </button>
+                          </Form>
+                        </div>
+
+                        {/* Cover selection button */}
+                        {!isCover && (
+                          <Form method="post">
+                            <input type="hidden" name="csrfToken" value={csrfToken} />
+                            <input type="hidden" name="intent" value="set_cover" />
+                            <input type="hidden" name="mediaId" value={p.id} />
+                            <input type="hidden" name="revision" value={gallery.revision} />
+                            <button
+                              type="submit"
+                              disabled={isSubmitting}
+                              className={`${styles.btn} ${styles.btnSecondary} ${styles.btnSmall} ${styles.fullWidthSmall}`}
+                            >
+                              Choisir comme couverture
+                            </button>
+                          </Form>
+                        )}
+
+                        {/* Individual Photo Deletion */}
+                        {!isConfirmingDelete ? (
                           <button
-                            type="submit"
-                            className={`${styles.btn} ${styles.btnSecondary} ${styles.btnSmall} ${styles.fullWidthSmall}`}
+                            type="button"
+                            onClick={() => setConfirmDeletePhotoId(p.id)}
+                            disabled={isSubmitting}
+                            className={`${styles.btn} ${styles.btnDanger} ${styles.photoDeleteBtn}`}
                           >
-                            Choisir comme couverture
+                            Supprimer de la galerie
                           </button>
-                        </Form>
-                      )}
+                        ) : (
+                          <div className={styles.photoDeleteConfirmBox} role="alert">
+                            <p className={styles.photoDeleteConfirmText}>
+                              Supprimer <strong>« {p.original_filename} »</strong> de la galerie ?
+                            </p>
+                            <p className={styles.photoDeleteConfirmSubtext}>
+                              Cette action retire la copie importée de la galerie et révoque ses accès privés. Le fichier source déposé dans le dossier d'importation reste intact.
+                            </p>
+                            <div className={styles.rowGap10}>
+                              <Form method="post">
+                                <input type="hidden" name="csrfToken" value={csrfToken} />
+                                <input type="hidden" name="intent" value="delete_photo" />
+                                <input type="hidden" name="mediaId" value={p.id} />
+                                <input type="hidden" name="revision" value={gallery.revision} />
+                                <button
+                                  type="submit"
+                                  disabled={isSubmitting}
+                                  className={`${styles.btn} ${styles.btnDanger} ${styles.btnSmall}`}
+                                >
+                                  Confirmer le retrait
+                                </button>
+                              </Form>
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDeletePhotoId(null)}
+                                disabled={isSubmitting}
+                                className={`${styles.btn} ${styles.btnSecondary} ${styles.btnSmall}`}
+                              >
+                                Annuler
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   );
                 })}

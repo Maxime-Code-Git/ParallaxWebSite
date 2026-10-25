@@ -58,29 +58,64 @@ export function encryptGalleryCode(code: string): string {
   return `${iv.toString("hex")}:${encrypted.toString("hex")}:${authTag.toString("hex")}`;
 }
 
+export class GalleryCodeDecryptionError extends Error {
+  constructor(message = "Impossible de déchiffrer le code d'accès de la galerie.", options?: ErrorOptions) {
+    super(message, options);
+    this.name = "GalleryCodeDecryptionError";
+  }
+}
+
+const STRICT_HEX_REGEX = /^[0-9a-fA-F]+$/;
+
 /**
  * AES-256-GCM decryption of an encrypted gallery code.
+ * Throws GalleryCodeDecryptionError if the format is invalid or decryption fails (e.g. wrong key, corrupted tag).
+ * Throws CRITICAL configuration errors directly if GALLERY_CODE_ENCRYPTION_KEY is invalid.
  */
 export function decryptGalleryCode(encryptedStr: string): string {
+  // 1. Retrieve encryption key FIRST outside of decryption try/catch.
+  // Configuration errors must propagate and not be disguised as data decryption errors.
+  const key = getAesKey();
+
+  if (typeof encryptedStr !== "string" || !encryptedStr) {
+    throw new GalleryCodeDecryptionError("Données de code chiffré manquantes ou invalides.");
+  }
   const parts = encryptedStr.split(":");
   if (parts.length !== 3) {
-    throw new Error("Invalid encrypted code format");
+    throw new GalleryCodeDecryptionError("Format du code chiffré invalide (segments iv:ciphertext:tag attendus).");
   }
   const [ivHex, ciphertextHex, authTagHex] = parts;
   if (!ivHex || !ciphertextHex || !authTagHex) {
-    throw new Error("Invalid encrypted code format");
+    throw new GalleryCodeDecryptionError("Format du code chiffré incomplet.");
   }
+
+  // 2. Strict hexadecimal validation (Buffer.from does not validate non-hex or odd-length characters)
+  if (ivHex.length !== 24 || !STRICT_HEX_REGEX.test(ivHex)) {
+    throw new GalleryCodeDecryptionError("Format d'IV invalide (exactement 24 caractères hexadécimaux requis).");
+  }
+  if (authTagHex.length !== 32 || !STRICT_HEX_REGEX.test(authTagHex)) {
+    throw new GalleryCodeDecryptionError("Format de tag d'authentification invalide (exactement 32 caractères hexadécimaux requis).");
+  }
+  if (ciphertextHex.length < 2 || ciphertextHex.length % 2 !== 0 || !STRICT_HEX_REGEX.test(ciphertextHex)) {
+    throw new GalleryCodeDecryptionError("Format de texte chiffré invalide (hexadécimal de longueur paire non vide requis).");
+  }
+
   const iv = Buffer.from(ivHex, "hex");
   const ciphertext = Buffer.from(ciphertextHex, "hex");
   const authTag = Buffer.from(authTagHex, "hex");
-  if (iv.length !== 12 || authTag.length !== 16) {
-    throw new Error("Invalid IV or auth tag length");
-  }
 
-  const decipher = crypto.createDecipheriv("aes-256-gcm", getAesKey(), iv);
-  decipher.setAuthTag(authTag);
-  const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-  return decrypted.toString("utf8");
+  // 3. Perform AES-256-GCM decryption and catch only cipher / authentication failure
+  try {
+    const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+    decipher.setAuthTag(authTag);
+    const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+    return decrypted.toString("utf8");
+  } catch (err: unknown) {
+    throw new GalleryCodeDecryptionError(
+      "Échec du déchiffrement AES-GCM : clé incompatible ou données altérées.",
+      { cause: err }
+    );
+  }
 }
 
 /**
@@ -256,12 +291,21 @@ export async function requireGalleryAccess(
     throw await handleUnauthorized("Galerie expirée", "expired");
   }
 
-  // Verify code version in database (revokes immediately after rotation!)
-  const codeRow = db.prepare("SELECT version FROM gallery_codes WHERE gallery_id = ?").get(gallery.id) as
-    | { version: number }
+  // The durable generation changes on every rotation, independently of clock resolution.
+  // Legacy galleries have NULL until explicitly rotated, preserving their valid sessions.
+  const codeRow = db.prepare(`
+    SELECT c.version, g.code_generation
+    FROM gallery_codes c JOIN galleries g ON g.id = c.gallery_id
+    WHERE c.gallery_id = ?
+  `).get(gallery.id) as
+    | { version: number; code_generation: string | null }
     | undefined;
 
-  if (!codeRow || codeRow.version !== sessionCodeVersion) {
+  if (
+    !codeRow ||
+    codeRow.version !== sessionCodeVersion ||
+    (codeRow.code_generation != null && session.get("codeGeneration") !== codeRow.code_generation)
+  ) {
     throw await handleUnauthorized("Code d'accès renouvelé, veuillez vous reconnecter", "expired");
   }
 
@@ -323,14 +367,15 @@ export async function authenticateGalleryCode(
     checkRateLimit(ip, "gallery");
   } catch (err) {
     if (err instanceof RateLimitExceededError) {
+      const minutes = Math.ceil(err.retryAfter / 60);
       return {
         success: false,
         status: 429,
         retryAfter: err.retryAfter,
         error:
           lang === "fr"
-            ? `Trop de tentatives. Veuillez réessayer dans ${err.retryAfter} secondes.`
-            : `Too many attempts. Please try again in ${err.retryAfter} seconds.`,
+            ? `Trop de tentatives. Veuillez réessayer dans ${minutes > 1 ? `environ ${minutes} minutes` : `${err.retryAfter} secondes`}.`
+            : `Too many attempts. Please try again in ${minutes > 1 ? `approximately ${minutes} minutes` : `${err.retryAfter} seconds`}.`,
       };
     }
     return {
@@ -348,8 +393,12 @@ export async function authenticateGalleryCode(
       ? "Code d'accès incorrect ou galerie non disponible."
       : "Incorrect access code or gallery unavailable.";
 
-  const codeRow = db.prepare("SELECT gallery_id, version FROM gallery_codes WHERE code_hash = ?").get(codeHash) as
-    | { gallery_id: string; version: number }
+  const codeRow = db.prepare(`
+    SELECT c.gallery_id, c.version, g.code_generation
+    FROM gallery_codes c JOIN galleries g ON g.id = c.gallery_id
+    WHERE c.code_hash = ?
+  `).get(codeHash) as
+    | { gallery_id: string; version: number; code_generation: string | null }
     | undefined;
 
   if (!codeRow) {
@@ -400,6 +449,7 @@ export async function authenticateGalleryCode(
   // Set authenticated session attributes
   session.set("galleryId", gallery.id);
   session.set("codeVersion", codeRow.version);
+  session.set("codeGeneration", codeRow.code_generation);
   session.set("issuedAt", now);
   session.set("expiresAt", sessionExpiresAt);
   session.set("csrfToken", createGalleryCsrfToken());

@@ -153,9 +153,17 @@
   background: rgba(30, 158, 255, 0.08);
 }
 
+.tableResponsiveWrapper {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin-bottom: 24px;
+}
+
 /* Projects Table / List */
 .projectsTable {
   width: 100%;
+  min-width: 680px;
   border-collapse: separate;
   border-spacing: 0 12px;
 }
@@ -176,6 +184,12 @@
   vertical-align: middle;
 }
 
+.tableCellThumbnail {
+  width: 80px;
+  min-width: 80px;
+  padding: 12px 16px;
+}
+
 .tableCell:first-child {
   border-top-left-radius: 12px;
   border-bottom-left-radius: 12px;
@@ -189,11 +203,49 @@
 .projectThumb {
   width: 64px;
   height: 48px;
+  min-width: 64px;
+  max-width: 64px;
+  min-height: 48px;
+  max-height: 48px;
   border-radius: 6px;
-  object-fit: cover;
+  overflow: hidden;
   background: #141822;
   border: 0.5px solid #232B3A;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+
+.projectThumb picture {
+  width: 100%;
+  height: 100%;
   display: block;
+}
+
+.projectThumb img {
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.projectThumbPlaceholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #6B7280;
+  font-size: 11px;
+  font-weight: 500;
+  background: #141822;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
 .projectTitleCell {

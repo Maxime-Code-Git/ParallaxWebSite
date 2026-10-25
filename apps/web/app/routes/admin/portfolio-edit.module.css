@@ -212,45 +212,76 @@
 }
 
 /* Gallery Grid */
+/* Gallery Grid & Cards */
 .galleryGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 16px;
   margin-top: 16px;
 }
 
-.galleryItem {
-  position: relative;
-  aspect-ratio: 1 / 1;
-  border-radius: 8px;
-  overflow: hidden;
-  border: 0.5px solid #232B3A;
+.galleryCard {
   background: #141822;
+  border: 0.5px solid #232B3A;
+  border-radius: 10px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
-.galleryItem img {
+.galleryThumbWrapper {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #0C0F17;
+  width: 100%;
+}
+
+.galleryThumbWrapper img {
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
 }
 
-.galleryItemRemove {
+.galleryOrderBadge {
   position: absolute;
-  top: 4px;
-  right: 4px;
-  background: rgba(0, 0, 0, 0.7);
-  border: none;
-  color: #ff4757;
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  font-weight: bold;
+  top: 6px;
+  left: 6px;
+  background: rgba(12, 15, 23, 0.85);
+  border: 0.5px solid rgba(255, 255, 255, 0.2);
+  color: #F5F6F7;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.galleryCoverBadge {
+  position: absolute;
+  bottom: 6px;
+  left: 6px;
+  background: rgba(30, 158, 255, 0.9);
+  color: #0C0F17;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.galleryCoverNotice {
+  font-size: 11px;
+  color: #8A92A6;
+  line-height: 1.3;
+  margin: 0;
 }
 
 .saveBar {
@@ -362,10 +393,9 @@
 
 .galleryActionsBar {
   display: flex;
-  gap: 6px;
-  margin-top: 6px;
   align-items: center;
   justify-content: space-between;
+  gap: 6px;
 }
 
 .reorderBtnGroup {
@@ -377,18 +407,27 @@
   background: rgba(255, 255, 255, 0.1);
   border: 0.5px solid rgba(255, 255, 255, 0.2);
   color: #fff;
-  border-radius: 4px;
-  padding: 2px 6px;
-  font-size: 11px;
+  border-radius: 6px;
+  min-width: 32px;
+  min-height: 32px;
+  padding: 4px 8px;
+  font-size: 13px;
+  font-weight: bold;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
 .reorderBtn:hover:not(:disabled) {
   background: #1E9EFF;
+  border-color: #1E9EFF;
+  color: #0C0F17;
 }
 
 .reorderBtn:disabled {
-  opacity: 0.3;
+  opacity: 0.25;
   cursor: not-allowed;
 }
 
@@ -397,9 +436,18 @@
   border: none;
   color: #ff4757;
   font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
   text-decoration: underline;
-  padding: 0;
+  padding: 6px 4px;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  transition: color 0.15s ease;
+}
+
+.removeBtnText:hover {
+  color: #ff6b81;
 }
 
 .saveRevisionHint {
