@@ -291,15 +291,20 @@ export async function requireGalleryAccess(
     throw await handleUnauthorized("Galerie expirée", "expired");
   }
 
-  // Verify code version and creation timestamp in database (revokes immediately after rotation!)
-  const codeRow = db.prepare("SELECT version, updated_at FROM gallery_codes WHERE gallery_id = ?").get(gallery.id) as
-    | { version: number; updated_at: number }
+  // The durable generation changes on every rotation, independently of clock resolution.
+  // Legacy galleries have NULL until explicitly rotated, preserving their valid sessions.
+  const codeRow = db.prepare(`
+    SELECT c.version, g.code_generation
+    FROM gallery_codes c JOIN galleries g ON g.id = c.gallery_id
+    WHERE c.gallery_id = ?
+  `).get(gallery.id) as
+    | { version: number; code_generation: string | null }
     | undefined;
 
   if (
     !codeRow ||
     codeRow.version !== sessionCodeVersion ||
-    (typeof codeRow.updated_at === "number" && issuedAt < codeRow.updated_at)
+    (codeRow.code_generation != null && session.get("codeGeneration") !== codeRow.code_generation)
   ) {
     throw await handleUnauthorized("Code d'accès renouvelé, veuillez vous reconnecter", "expired");
   }
@@ -388,8 +393,12 @@ export async function authenticateGalleryCode(
       ? "Code d'accès incorrect ou galerie non disponible."
       : "Incorrect access code or gallery unavailable.";
 
-  const codeRow = db.prepare("SELECT gallery_id, version FROM gallery_codes WHERE code_hash = ?").get(codeHash) as
-    | { gallery_id: string; version: number }
+  const codeRow = db.prepare(`
+    SELECT c.gallery_id, c.version, g.code_generation
+    FROM gallery_codes c JOIN galleries g ON g.id = c.gallery_id
+    WHERE c.code_hash = ?
+  `).get(codeHash) as
+    | { gallery_id: string; version: number; code_generation: string | null }
     | undefined;
 
   if (!codeRow) {
@@ -440,6 +449,7 @@ export async function authenticateGalleryCode(
   // Set authenticated session attributes
   session.set("galleryId", gallery.id);
   session.set("codeVersion", codeRow.version);
+  session.set("codeGeneration", codeRow.code_generation);
   session.set("issuedAt", now);
   session.set("expiresAt", sessionExpiresAt);
   session.set("csrfToken", createGalleryCsrfToken());

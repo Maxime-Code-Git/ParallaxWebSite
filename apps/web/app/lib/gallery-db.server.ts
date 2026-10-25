@@ -329,6 +329,17 @@ export function openGalleryDb(dbPath: string): DatabaseSync {
       `).run(Date.now());
     }
 
+    // V4 binds sessions to an opaque generation after explicit code rotation.
+    // NULL preserves legacy sessions until their gallery's code is rotated.
+    const v4Row = db.prepare("SELECT version FROM gallery_schema WHERE version = 4").get();
+    if (!v4Row) {
+      const galleryCols = (db.prepare("PRAGMA table_info(galleries)").all() as { name: string }[]).map((c) => c.name);
+      if (!galleryCols.includes("code_generation")) {
+        db.exec("ALTER TABLE galleries ADD COLUMN code_generation TEXT;");
+      }
+      db.prepare("INSERT INTO gallery_schema (version, name, applied_at) VALUES (4, 'parallax_gallery_v4', ?)").run(Date.now());
+    }
+
     db.exec("COMMIT;");
   } catch (err) {
     try {

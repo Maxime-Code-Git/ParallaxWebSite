@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -208,6 +208,7 @@ describe("Gallery Schema V3 Migration & Historical V2 Resilience", () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     closeGalleryDb();
     if (fs.existsSync(tmpDir)) {
       fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -277,11 +278,13 @@ describe("Gallery Schema V3 Migration & Historical V2 Resilience", () => {
   });
 
   it("2. safely migrates gallery with missing code row and rejects ancient version 2 cookie after explicit recovery", async () => {
+    // Equality deliberately defeats an issuedAt < code.updated_at-only guard.
+    vi.spyOn(Date, "now").mockReturnValue(Date.now());
     // Setup historical V2 database with a gallery whose code row was deleted in V2
     const rawDb = createHistoricalV2Database(testDbPath);
     const galId = crypto.randomUUID();
     const pubId = "pub-v2-deleted-code";
-    const tAncient = Date.now() - 7200000; // 2 hours ago
+    const tAncient = Date.now();
 
     rawDb.prepare(`
       INSERT INTO galleries (
@@ -361,11 +364,34 @@ describe("Gallery Schema V3 Migration & Historical V2 Resilience", () => {
     expect(authResult.success).toBe(true);
 
     if (authResult.success) {
+      const generation = getGalleryById(galId)?.code_generation;
+      expect(generation).toMatch(/^[0-9a-f-]{36}$/);
+      const freshSession = await clientStorage.getSession(authResult.sessionCookie);
+      expect(freshSession.get("codeGeneration")).toBe(generation);
       const accessReqNew = new Request(`http://127.0.0.1:3000/fr/galerie/${pubId}`, {
         headers: { Cookie: authResult.sessionCookie },
       });
       const accessResult = await requireGalleryAccess(accessReqNew, pubId, undefined, true);
       expect(accessResult.gallery.id).toBe(galId);
+
+      // The generation survives reopening, and two rotations in the same millisecond differ.
+      closeGalleryDb();
+      expect(getGalleryById(galId)?.code_generation).toBe(generation);
+      const rotation2 = rotateGalleryCode(galId);
+      const generation2 = getGalleryById(galId)?.code_generation;
+      expect(generation2).not.toBe(generation);
+      await expect(requireGalleryAccess(accessReqNew, pubId, undefined, true)).rejects.toSatisfy(
+        (err: unknown) => err instanceof Response && err.status === 401
+      );
+      const secondSession = await clientStorage.getSession();
+      const csrf2 = createGalleryCsrfToken();
+      secondSession.set("csrfToken", csrf2);
+      const auth2 = await authenticateGalleryCode(clientLoginReq, rotation2.code, csrf2, secondSession);
+      expect(auth2.success).toBe(true);
+      if (auth2.success) {
+        const req2 = new Request(`http://127.0.0.1:3000/fr/galerie/${pubId}`, { headers: { Cookie: auth2.sessionCookie } });
+        expect((await requireGalleryAccess(req2, pubId, undefined, true)).gallery.id).toBe(galId);
+      }
     }
   });
 
@@ -513,10 +539,11 @@ describe("Gallery Schema V3 Migration & Historical V2 Resilience", () => {
       version: number;
       name: string;
     }[];
-    expect(freshSchema.length).toBe(3);
+    expect(freshSchema.length).toBe(4);
     expect(freshSchema[0].version).toBe(1);
     expect(freshSchema[1].version).toBe(2);
     expect(freshSchema[2].version).toBe(3);
+    expect(freshSchema[3].version).toBe(4);
     freshDb.close();
 
     // 6b. Pure V1 database (only Schema V1)
@@ -561,12 +588,61 @@ describe("Gallery Schema V3 Migration & Historical V2 Resilience", () => {
     // Migrate pure V1 -> runs V2 then V3
     const migratedV1 = openGalleryDb(v1DbPath);
     const v1Schema = migratedV1.prepare("SELECT version FROM gallery_schema ORDER BY version").all() as { version: number }[];
-    expect(v1Schema.map((s) => s.version)).toEqual([1, 2, 3]);
+    expect(v1Schema.map((s) => s.version)).toEqual([1, 2, 3, 4]);
 
     const galCols = (migratedV1.prepare("PRAGMA table_info(galleries)").all() as { name: string }[]).map((c) => c.name);
     expect(galCols).toContain("retention_exempt");
     expect(galCols).toContain("code_version");
     migratedV1.close();
+  });
+
+  it("7. migrates an existing V3 database to V4 atomically and idempotently", () => {
+    const raw = createHistoricalV2Database(testDbPath);
+    raw.exec("ALTER TABLE galleries ADD COLUMN code_version INTEGER NOT NULL DEFAULT 1;");
+    raw.exec("INSERT INTO gallery_schema VALUES (3, 'parallax_gallery_v3', 1700000002000);");
+    const retentionBefore = raw.prepare("SELECT * FROM retention_settings").all();
+    raw.exec(`
+      CREATE TRIGGER fail_v4 BEFORE INSERT ON gallery_schema WHEN NEW.version = 4
+      BEGIN SELECT RAISE(ABORT, 'injected V4 failure'); END;
+    `);
+    raw.close();
+
+    expect(() => openGalleryDb(testDbPath)).toThrow();
+    const verify = new DatabaseSync(testDbPath);
+    expect(verify.prepare("SELECT version FROM gallery_schema WHERE version = 4").get()).toBeUndefined();
+    expect((verify.prepare("PRAGMA table_info(galleries)").all() as { name: string }[]).some((c) => c.name === "code_generation")).toBe(false);
+    expect(verify.prepare("SELECT * FROM retention_settings").all()).toEqual(retentionBefore);
+    verify.exec("DROP TRIGGER fail_v4;");
+    verify.close();
+
+    const migrated = openGalleryDb(testDbPath);
+    expect((migrated.prepare("PRAGMA table_info(galleries)").all() as { name: string }[]).some((c) => c.name === "code_generation")).toBe(true);
+    const snapshot = migrated.prepare("SELECT * FROM gallery_schema ORDER BY version").all();
+    expect(snapshot).toHaveLength(4);
+    migrated.close();
+    const reopened = openGalleryDb(testDbPath);
+    expect(reopened.prepare("SELECT * FROM gallery_schema ORDER BY version").all()).toEqual(snapshot);
+    expect(reopened.prepare("SELECT * FROM retention_settings").all()).toEqual(retentionBefore);
+    reopened.close();
+  });
+
+  it("8. rolls back generation and version together when code rotation fails", () => {
+    const { gallery } = createGallery({ title: "Rotation atomique", clientName: "Fixture", projectDate: "2026-10-25" });
+    rotateGalleryCode(gallery.id);
+    const db = openGalleryDb(testDbPath);
+    const beforeGallery = db.prepare("SELECT * FROM galleries WHERE id = ?").get(gallery.id);
+    const beforeCode = db.prepare("SELECT * FROM gallery_codes WHERE gallery_id = ?").get(gallery.id);
+    db.exec(`
+      CREATE TRIGGER fail_code_rotation BEFORE UPDATE ON gallery_codes
+      BEGIN SELECT RAISE(ABORT, 'injected code rotation failure'); END;
+    `);
+    expect(() => rotateGalleryCode(gallery.id)).toThrow();
+    expect(db.prepare("SELECT * FROM galleries WHERE id = ?").get(gallery.id)).toEqual(beforeGallery);
+    expect(db.prepare("SELECT * FROM gallery_codes WHERE gallery_id = ?").get(gallery.id)).toEqual(beforeCode);
+    db.exec("DROP TRIGGER fail_code_rotation;");
+    rotateGalleryCode(gallery.id);
+    expect(getGalleryById(gallery.id)?.code_generation).not.toBe((beforeGallery as { code_generation: string }).code_generation);
+    db.close();
   });
 });
 

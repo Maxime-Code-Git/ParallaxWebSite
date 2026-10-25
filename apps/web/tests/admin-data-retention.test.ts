@@ -61,7 +61,7 @@ describe("Admin Data Retention & Settings (/admin/data-retention)", () => {
       version: number;
       name: string;
     }[];
-    expect(versions.length).toBe(3);
+    expect(versions.length).toBe(4);
     expect(versions[0]).toEqual({ version: 1, name: "parallax_gallery_v1" });
     expect(versions[1]).toEqual({ version: 2, name: "parallax_gallery_v2" });
     expect(versions[2]).toEqual({ version: 3, name: "parallax_gallery_v3" });

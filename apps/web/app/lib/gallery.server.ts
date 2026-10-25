@@ -41,6 +41,7 @@ export interface Gallery {
   cover_media_id: string | null;
   revision: number;
   code_version?: number;
+  code_generation?: string | null;
   retention_exempt?: number;
   retention_exempt_reason?: string | null;
   created_at: number;
@@ -423,7 +424,8 @@ export function rotateGalleryCode(galleryId: string): { code: string; version: n
     const previousVersion = Math.max(galRow?.code_version ?? 0, currentCode?.version ?? 0);
     const newVersion = previousVersion + 1;
 
-    db.prepare("UPDATE galleries SET code_version = ?, updated_at = ? WHERE id = ?").run(newVersion, now, galleryId);
+    const newGeneration = crypto.randomUUID();
+    db.prepare("UPDATE galleries SET code_version = ?, code_generation = ?, updated_at = ? WHERE id = ?").run(newVersion, newGeneration, now, galleryId);
 
     db.prepare(`
       INSERT INTO gallery_codes (gallery_id, code_hash, code_encrypted, version, updated_at)
