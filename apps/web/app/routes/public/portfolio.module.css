@@ -135,6 +135,8 @@
 .textCard,
 .textContent {
   max-width: 500px;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .categoryTag {
@@ -170,7 +172,8 @@
   font-size: clamp(15px, 1.4vw, 18px);
   color: #F5F6F7;
   text-decoration: none;
-  white-space: nowrap;
+  max-width: 100%;
+  box-sizing: border-box;
   transition: transform 0.18s ease, border-color 0.18s ease;
 }
 
@@ -181,19 +184,23 @@
 }
 
 .seeMoreBtnLeft {
-  padding: 8px 8px 8px 30px;
+  padding: 10px 10px 10px clamp(18px, 2.5vw, 28px);
+  text-align: left;
 }
 
 .seeMoreBtnRight {
-  padding: 8px 30px 8px 8px;
+  padding: 10px clamp(18px, 2.5vw, 28px) 10px 10px;
+  text-align: left;
 }
 
 .btnLabel,
 .btnLabelDesktop {
   font-size: clamp(15px, 1.4vw, 18px);
+  line-height: 1.35;
   color: #F5F6F7;
-  display: inline;
-  white-space: nowrap;
+  display: inline-block;
+  word-break: normal;
+  overflow-wrap: break-word;
 }
 
 .btnLabelMobile {
@@ -202,6 +209,7 @@
 
 .circleIcon {
   flex: none;
+  flex-shrink: 0;
   width: 44px;
   height: 44px;
   border-radius: 50%;
@@ -210,6 +218,7 @@
   align-items: center;
   justify-content: center;
   color: #F5F6F7;
+  align-self: center;
 }
 
 /* -------------------------------------------------------------
