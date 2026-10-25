@@ -10,8 +10,14 @@ import { loader as editLoader, action as editAction } from "../app/routes/admin/
 import { loader as previewLoader } from "../app/routes/admin/galleries-preview";
 import {
   closeGalleryDb,
+  getGalleryDb,
 } from "../app/lib/gallery-db.server";
 import { createGallery, getGalleryById } from "../app/lib/gallery.server";
+import {
+  authenticateGalleryCode,
+  getGallerySessionStorage,
+  createGalleryCsrfToken,
+} from "../app/lib/gallery-auth.server";
 import { getSession, commitSession } from "../app/lib/session.server";
 import { computeCredentialVersion } from "../app/lib/auth.server";
 
@@ -393,6 +399,359 @@ describe("Admin Galleries Management (CRUD, Code Rotation, Concurrency, Quaranti
       expect(data.gallery.title).toBe("Galerie Preview Admin");
       expect(data.gallery.publicId).toBe(gallery.public_id);
       expect(data.galleryId).toBe(gallery.id);
+    });
+  });
+
+  describe("Gallery Access Code Unavailability Resilience and Explicit Rotation", () => {
+    it("opens edit page with available code when key and code are valid", async () => {
+      const { gallery, plainCode } = createGallery({
+        title: "Galerie Code Valide",
+        clientName: "Client Valide",
+        projectDate: "2026-07-01",
+      });
+
+      const request = new Request(`http://127.0.0.1:3000/admin/galleries/${gallery.id}`, {
+        headers: { Cookie: adminCookie },
+      });
+
+      const response = await editLoader(createRouteArgs(request, { id: gallery.id }));
+      expect(response.status).toBe(200);
+
+      const data = await response.json();
+      expect(data.codeStatus).toBe("available");
+      expect(data.accessCode).toBe(plainCode);
+      expect(data.codeVersion).toBe(1);
+      expect(data.codeWarning).toBeNull();
+      expect(data.gallery.title).toBe("Galerie Code Valide");
+    });
+
+    it("opens edit page with unavailable code when encryption key is changed, without mutating database", async () => {
+      const { gallery } = createGallery({
+        title: "Galerie Clé Modifiée",
+        clientName: "Client Clé",
+        projectDate: "2026-07-01",
+      });
+
+      // Switch encryption key to simulate copied database or key rotation in environment
+      const originalKey = process.env.GALLERY_CODE_ENCRYPTION_KEY;
+      process.env.GALLERY_CODE_ENCRYPTION_KEY = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+      try {
+        const db = getGalleryDb();
+        const codeRowBefore = db.prepare("SELECT * FROM gallery_codes WHERE gallery_id = ?").get(gallery.id);
+        const galleryRowBefore = db.prepare("SELECT * FROM galleries WHERE id = ?").get(gallery.id);
+
+        const request = new Request(`http://127.0.0.1:3000/admin/galleries/${gallery.id}`, {
+          headers: { Cookie: adminCookie },
+        });
+
+        const response = await editLoader(createRouteArgs(request, { id: gallery.id }));
+        expect(response.status).toBe(200);
+
+        const data = await response.json();
+        expect(data.codeStatus).toBe("unavailable");
+        expect(data.accessCode).toBeNull();
+        expect(data.codeVersion).toBe(1);
+        expect(data.codeWarning).toContain("Le code d'accès actuel ne peut pas être déchiffré avec la clé active");
+        expect(data.gallery.title).toBe("Galerie Clé Modifiée");
+
+        // Verify zero mutation in database during GET
+        const codeRowAfter = db.prepare("SELECT * FROM gallery_codes WHERE gallery_id = ?").get(gallery.id);
+        const galleryRowAfter = db.prepare("SELECT * FROM galleries WHERE id = ?").get(gallery.id);
+        expect(codeRowAfter).toEqual(codeRowBefore);
+        expect(galleryRowAfter).toEqual(galleryRowBefore);
+      } finally {
+        process.env.GALLERY_CODE_ENCRYPTION_KEY = originalKey;
+      }
+    });
+
+    it("opens edit page with unavailable code when encrypted code string is malformed or corrupted", async () => {
+      const { gallery } = createGallery({
+        title: "Galerie Code Corrompu",
+        clientName: "Client Corrompu",
+        projectDate: "2026-07-01",
+      });
+
+      const db = getGalleryDb();
+      db.prepare("UPDATE gallery_codes SET code_encrypted = 'invalid-hex-corrupted' WHERE gallery_id = ?").run(gallery.id);
+
+      const request = new Request(`http://127.0.0.1:3000/admin/galleries/${gallery.id}`, {
+        headers: { Cookie: adminCookie },
+      });
+
+      const response = await editLoader(createRouteArgs(request, { id: gallery.id }));
+      expect(response.status).toBe(200);
+
+      const data = await response.json();
+      expect(data.codeStatus).toBe("unavailable");
+      expect(data.accessCode).toBeNull();
+      expect(data.codeWarning).toBeTruthy();
+    });
+
+    it("opens edit page with unavailable code when gallery_codes row is completely absent", async () => {
+      const { gallery } = createGallery({
+        title: "Galerie Sans Ligne Code",
+        clientName: "Client Sans Code",
+        projectDate: "2026-07-01",
+      });
+
+      const db = getGalleryDb();
+      db.prepare("DELETE FROM gallery_codes WHERE gallery_id = ?").run(gallery.id);
+
+      const request = new Request(`http://127.0.0.1:3000/admin/galleries/${gallery.id}`, {
+        headers: { Cookie: adminCookie },
+      });
+
+      const response = await editLoader(createRouteArgs(request, { id: gallery.id }));
+      expect(response.status).toBe(200);
+
+      const data = await response.json();
+      expect(data.codeStatus).toBe("unavailable");
+      expect(data.accessCode).toBeNull();
+      expect(data.codeVersion).toBe(0);
+      expect(data.codeWarning).toContain("Aucun code d'accès n'est enregistré pour cette galerie");
+    });
+
+    it("executes standard GET and .data GET requests without any mutation of galleries, codes, revisions, or media", async () => {
+      const { gallery } = createGallery({
+        title: "Galerie Immuable GET",
+        clientName: "Client Immuable",
+        projectDate: "2026-07-01",
+      });
+
+      const db = getGalleryDb();
+      const snapBefore = {
+        gallery: db.prepare("SELECT * FROM galleries WHERE id = ?").get(gallery.id),
+        code: db.prepare("SELECT * FROM gallery_codes WHERE gallery_id = ?").get(gallery.id),
+        mediaCount: (db.prepare("SELECT COUNT(*) as count FROM gallery_media WHERE gallery_id = ?").get(gallery.id) as { count: number }).count,
+      };
+
+      // Standard GET
+      const standardReq = new Request(`http://127.0.0.1:3000/admin/galleries/${gallery.id}`, {
+        headers: { Cookie: adminCookie },
+      });
+      const standardRes = await editLoader(createRouteArgs(standardReq, { id: gallery.id }));
+      expect(standardRes.status).toBe(200);
+
+      // .data GET
+      const dataReq = new Request(`http://127.0.0.1:3000/admin/galleries/${gallery.id}.data`, {
+        headers: { Cookie: adminCookie },
+      });
+      const dataRes = await editLoader(createRouteArgs(dataReq, { id: gallery.id }));
+      expect(dataRes.status).toBe(200);
+
+      const snapAfter = {
+        gallery: db.prepare("SELECT * FROM galleries WHERE id = ?").get(gallery.id),
+        code: db.prepare("SELECT * FROM gallery_codes WHERE gallery_id = ?").get(gallery.id),
+        mediaCount: (db.prepare("SELECT COUNT(*) as count FROM gallery_media WHERE gallery_id = ?").get(gallery.id) as { count: number }).count,
+      };
+
+      expect(snapAfter).toEqual(snapBefore);
+    });
+
+    it("allows editorial updates via update_info even when the access code is unavailable", async () => {
+      const { gallery } = createGallery({
+        title: "Titre Avant Modif",
+        clientName: "Client Avant Modif",
+        projectDate: "2026-07-01",
+      });
+
+      // Break code to simulate unavailable state
+      const db = getGalleryDb();
+      db.prepare("UPDATE gallery_codes SET code_encrypted = 'corrupted:ciphertext:tag' WHERE gallery_id = ?").run(gallery.id);
+
+      const body = new URLSearchParams({
+        csrfToken,
+        intent: "update_info",
+        revision: String(gallery.revision),
+        title: "Titre Après Modif Sans Code",
+        clientName: "Client Modifié Avec Succès",
+        projectDate: "2026-07-02",
+        location: "Namur",
+      });
+
+      const request = new Request(`http://127.0.0.1:3000/admin/galleries/${gallery.id}`, {
+        method: "POST",
+        headers: {
+          Cookie: adminCookie,
+          Origin: "http://127.0.0.1:3000",
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: body.toString(),
+      });
+
+      const response = await editAction(createRouteArgs(request, { id: gallery.id }));
+      expect(response.status).toBe(200);
+
+      const updated = getGalleryById(gallery.id);
+      expect(updated?.title).toBe("Titre Après Modif Sans Code");
+      expect(updated?.client_name).toBe("Client Modifié Avec Succès");
+      expect(updated?.location).toBe("Namur");
+      expect(updated?.revision).toBe(gallery.revision + 1);
+    });
+
+    it("rotates code explicitly on demand: restores availability, issues valid client code, revokes old access, and increments version", async () => {
+      const { gallery } = createGallery({
+        title: "Galerie Pour Régénération",
+        clientName: "Client Rotation",
+        projectDate: "2026-07-01",
+      });
+
+      // Break current code in DB
+      const db = getGalleryDb();
+      db.prepare("UPDATE gallery_codes SET code_encrypted = 'bad:cipher:tag' WHERE gallery_id = ?").run(gallery.id);
+
+      // Verify loader sees it as unavailable
+      const checkReq1 = new Request(`http://127.0.0.1:3000/admin/galleries/${gallery.id}`, {
+        headers: { Cookie: adminCookie },
+      });
+      const checkRes1 = await editLoader(createRouteArgs(checkReq1, { id: gallery.id }));
+      const checkData1 = await checkRes1.json();
+      expect(checkData1.codeStatus).toBe("unavailable");
+
+      // Request rotation explicitly via rotate_code
+      const body = new URLSearchParams({
+        csrfToken,
+        intent: "rotate_code",
+      });
+
+      const rotateReq = new Request(`http://127.0.0.1:3000/admin/galleries/${gallery.id}`, {
+        method: "POST",
+        headers: {
+          Cookie: adminCookie,
+          Origin: "http://127.0.0.1:3000",
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: body.toString(),
+      });
+
+      const rotateRes = await editAction(createRouteArgs(rotateReq, { id: gallery.id }));
+      expect(rotateRes.status).toBe(200);
+      const rotateData = await rotateRes.json();
+      expect(rotateData.success).toMatch(/Nouveau code généré : (PARALLAX-[A-Z0-9-]+)\. Les anciennes sessions ont été révoquées\./);
+
+      const match = rotateData.success.match(/PARALLAX-[A-Z0-9-]+/);
+      const newPlainCode = match![0];
+
+      // Re-query loader: code is now available, plaintext matches, version incremented
+      const checkReq2 = new Request(`http://127.0.0.1:3000/admin/galleries/${gallery.id}`, {
+        headers: { Cookie: adminCookie },
+      });
+      const checkRes2 = await editLoader(createRouteArgs(checkReq2, { id: gallery.id }));
+      const checkData2 = await checkRes2.json();
+      expect(checkData2.codeStatus).toBe("available");
+      expect(checkData2.accessCode).toBe(newPlainCode);
+      expect(checkData2.codeVersion).toBe(2);
+      expect(checkData2.codeWarning).toBeNull();
+
+      // Publish gallery with future expiration to verify client authentication with newly generated code
+      db.prepare("UPDATE galleries SET status = 'published', expires_at = ? WHERE id = ?").run(
+        Date.now() + 24 * 3600 * 1000,
+        gallery.id
+      );
+
+      // Test that client authentication succeeds with the newly generated code
+      const clientStorage = getGallerySessionStorage();
+      const clientSession = await clientStorage.getSession();
+      const clientCsrf = createGalleryCsrfToken();
+      clientSession.set("csrfToken", clientCsrf);
+
+      const authReq = new Request("http://127.0.0.1:3000/fr/espace-client", {
+        headers: {
+          Origin: "http://127.0.0.1:3000",
+          "x-forwarded-for": "127.0.0.1",
+        },
+      });
+      const authResult = await authenticateGalleryCode(authReq, newPlainCode, clientCsrf, clientSession);
+      if (!authResult.success) {
+        throw new Error(`Authentication failed unexpectedly: ${authResult.error}`);
+      }
+      expect(authResult.publicId).toBe(gallery.public_id);
+      expect(authResult.sessionCookie).toBeTruthy();
+    });
+
+    it("rejects unauthenticated requests to edit loader and action", async () => {
+      const { gallery } = createGallery({
+        title: "Galerie Protégée",
+        clientName: "Client Protégé",
+        projectDate: "2026-07-01",
+      });
+
+      const unauthLoaderReq = new Request(`http://127.0.0.1:3000/admin/galleries/${gallery.id}`);
+      await expect(editLoader(createRouteArgs(unauthLoaderReq, { id: gallery.id }))).rejects.toSatisfy((err: unknown) => {
+        if (err instanceof Response) {
+          return err.status === 303 || err.status === 401;
+        }
+        return false;
+      });
+
+      const body = new URLSearchParams({
+        csrfToken: "fake-csrf",
+        intent: "rotate_code",
+      });
+      const unauthActionReq = new Request(`http://127.0.0.1:3000/admin/galleries/${gallery.id}`, {
+        method: "POST",
+        headers: {
+          Origin: "http://127.0.0.1:3000",
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: body.toString(),
+      });
+      await expect(editAction(createRouteArgs(unauthActionReq, { id: gallery.id }))).rejects.toSatisfy((err: unknown) => {
+        if (err instanceof Response) {
+          return err.status === 303 || err.status === 401;
+        }
+        return false;
+      });
+    });
+
+    it("rejects rotate_code action requests with invalid Origin or invalid CSRF without any mutation", async () => {
+      const { gallery } = createGallery({
+        title: "Galerie Sécurité Action",
+        clientName: "Client Sécurité",
+        projectDate: "2026-07-01",
+      });
+
+      const db = getGalleryDb();
+      const codeRowBefore = db.prepare("SELECT * FROM gallery_codes WHERE gallery_id = ?").get(gallery.id);
+
+      // 1. Invalid Origin
+      const bodyValidCsrf = new URLSearchParams({
+        csrfToken,
+        intent: "rotate_code",
+      });
+      const badOriginReq = new Request(`http://127.0.0.1:3000/admin/galleries/${gallery.id}`, {
+        method: "POST",
+        headers: {
+          Cookie: adminCookie,
+          Origin: "http://evil-attacker.com",
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: bodyValidCsrf.toString(),
+      });
+      const badOriginRes = await editAction(createRouteArgs(badOriginReq, { id: gallery.id }));
+      expect(badOriginRes.status).toBe(403);
+
+      // 2. Invalid CSRF
+      const bodyBadCsrf = new URLSearchParams({
+        csrfToken: "invalid-csrf-token",
+        intent: "rotate_code",
+      });
+      const badCsrfReq = new Request(`http://127.0.0.1:3000/admin/galleries/${gallery.id}`, {
+        method: "POST",
+        headers: {
+          Cookie: adminCookie,
+          Origin: "http://127.0.0.1:3000",
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: bodyBadCsrf.toString(),
+      });
+      const badCsrfRes = await editAction(createRouteArgs(badCsrfReq, { id: gallery.id }));
+      expect(badCsrfRes.status).toBe(403);
+
+      // Verify database unchanged
+      const codeRowAfter = db.prepare("SELECT * FROM gallery_codes WHERE gallery_id = ?").get(gallery.id);
+      expect(codeRowAfter).toEqual(codeRowBefore);
     });
   });
 });

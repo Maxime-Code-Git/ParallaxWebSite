@@ -5,7 +5,25 @@ import {
   hashGalleryCode,
   encryptGalleryCode,
   decryptGalleryCode,
+  GalleryCodeDecryptionError,
 } from "./gallery-auth.server";
+
+export class GalleryCodeNotFoundError extends Error {
+  constructor(message = "Code d'accès introuvable pour cette galerie.", options?: ErrorOptions) {
+    super(message, options);
+    this.name = "GalleryCodeNotFoundError";
+  }
+}
+
+export { GalleryCodeDecryptionError };
+
+export interface GalleryAccessCodeState {
+  status: "available" | "unavailable";
+  code: string | null;
+  version: number;
+  warning: string | null;
+  reason?: "not_found" | "decryption_failed";
+}
 
 export interface Gallery {
   id: string;
@@ -147,20 +165,61 @@ export function getGalleryByPublicId(publicId: string): Gallery | undefined {
 }
 
 /**
- * Returns decrypted access code for administrative display.
+ * Returns the access code state for administrative display.
+ * Distinguishes available code from expected unavailability (missing row, decryption failure)
+ * without masking SQLite database errors.
  */
-export function getGalleryDecryptedCode(galleryId: string): { code: string; version: number } {
+export function getGalleryAccessCodeState(galleryId: string): GalleryAccessCodeState {
   const db = getGalleryDb();
   const row = db.prepare("SELECT code_encrypted, version FROM gallery_codes WHERE gallery_id = ?").get(galleryId) as
     | { code_encrypted: string; version: number }
     | undefined;
 
   if (!row) {
-    throw new Error("Code introuvable pour cette galerie");
+    return {
+      status: "unavailable",
+      code: null,
+      version: 0,
+      reason: "not_found",
+      warning: "Aucun code d'accès n'est enregistré pour cette galerie. Vous pouvez générer un nouveau code ci-dessous pour permettre l'accès client.",
+    };
   }
 
-  const decrypted = decryptGalleryCode(row.code_encrypted);
-  return { code: decrypted, version: row.version };
+  try {
+    const decrypted = decryptGalleryCode(row.code_encrypted);
+    return {
+      status: "available",
+      code: decrypted,
+      version: row.version,
+      warning: null,
+    };
+  } catch (err: unknown) {
+    if (err instanceof GalleryCodeDecryptionError) {
+      return {
+        status: "unavailable",
+        code: null,
+        version: row.version,
+        reason: "decryption_failed",
+        warning: "Le code d'accès actuel ne peut pas être déchiffré avec la clé active (clé de chiffrement différente ou données altérées). Les clients ne peuvent pas se connecter avec ce code. Vous pouvez régénérer un nouveau code ci-dessous pour rétablir l'accès.",
+      };
+    }
+    throw err;
+  }
+}
+
+/**
+ * Returns decrypted access code for administrative display.
+ * Throws GalleryCodeNotFoundError if missing, or GalleryCodeDecryptionError if decryption fails.
+ */
+export function getGalleryDecryptedCode(galleryId: string): { code: string; version: number } {
+  const state = getGalleryAccessCodeState(galleryId);
+  if (state.status === "unavailable") {
+    if (state.reason === "not_found") {
+      throw new GalleryCodeNotFoundError(state.warning || "Code d'accès introuvable.");
+    }
+    throw new GalleryCodeDecryptionError(state.warning || "Impossible de déchiffrer le code d'accès.");
+  }
+  return { code: state.code!, version: state.version };
 }
 
 /**
@@ -334,6 +393,11 @@ export function updateGallery(
  * Rotates the access code: increments version, generates fresh code, revokes old client sessions.
  */
 export function rotateGalleryCode(galleryId: string): { code: string; version: number } {
+  const currentGallery = getGalleryById(galleryId);
+  if (!currentGallery) {
+    throw new GalleryValidationError("Galerie introuvable.");
+  }
+
   const db = getGalleryDb();
   const plainCode = generateGalleryCode();
   const codeHash = hashGalleryCode(plainCode);

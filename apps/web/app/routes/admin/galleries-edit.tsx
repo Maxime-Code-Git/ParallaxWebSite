@@ -18,7 +18,7 @@ import { constantTimeEqual } from "../../lib/auth.server";
 import { validateOrigin, readStrictFormUrlEncoded } from "../../lib/security.server";
 import {
   getGalleryById,
-  getGalleryDecryptedCode,
+  getGalleryAccessCodeState,
   updateGallery,
   rotateGalleryCode,
   publishGallery,
@@ -45,8 +45,10 @@ import styles from "./galleries.module.css";
 
 interface LoaderData {
   gallery: Gallery;
-  accessCode: string;
+  accessCode: string | null;
   codeVersion: number;
+  codeStatus: "available" | "unavailable";
+  codeWarning: string | null;
   folders: string[];
   importRootPath: string;
   csrfToken: string;
@@ -82,7 +84,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     throw new Response("Galerie introuvable", { status: 404, headers: createAdminHeaders() });
   }
 
-  const { code: accessCode, version: codeVersion } = getGalleryDecryptedCode(gallery.id);
+  const codeState = getGalleryAccessCodeState(gallery.id);
   const folders = getAvailableImportFolders();
   const importRootPath = ENV.GALLERY_IMPORT_PATH;
   const csrfToken = session.get("csrfToken") || "";
@@ -99,8 +101,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   return Response.json(
     {
       gallery,
-      accessCode,
-      codeVersion,
+      accessCode: codeState.code,
+      codeVersion: codeState.version,
+      codeStatus: codeState.status,
+      codeWarning: codeState.warning,
       folders,
       importRootPath,
       csrfToken,
@@ -274,6 +278,8 @@ export default function AdminGalleryEditPage() {
     gallery,
     accessCode,
     codeVersion,
+    codeStatus,
+    codeWarning,
     folders,
     importRootPath,
     csrfToken,
@@ -353,6 +359,10 @@ export default function AdminGalleryEditPage() {
   const [deleteConfirmationText, setDeleteConfirmationText] = useState("");
 
   const copyCodeToClipboard = async () => {
+    if (!accessCode) {
+      setFeedback({ type: "error", message: "Le code d'accès n'est pas disponible pour la copie." });
+      return;
+    }
     try {
       await navigator.clipboard.writeText(accessCode);
       setCopiedCode(true);
@@ -588,6 +598,12 @@ export default function AdminGalleryEditPage() {
             <span className={styles.codeMeta}>Version : v{codeVersion}</span>
           </h2>
 
+          {codeStatus === "unavailable" && (
+            <div className={styles.alertError} role="alert">
+              <strong>Code indisponible :</strong> {codeWarning}
+            </div>
+          )}
+
           {gallery.status !== "published" && (
             <div className={styles.alertWarning} role="alert">
               <strong>Code inactif :</strong> cette galerie est actuellement en statut « {gallery.status === "draft" ? "Brouillon" : "Archivée"} ». Le code d'accès restera inactif sur l'espace client tant que la galerie n'est pas publiée (nécessite au moins 1 média prêt et une date d'expiration valide).
@@ -596,11 +612,19 @@ export default function AdminGalleryEditPage() {
 
           <div className={styles.codeBox}>
             <div>
-              <div className={styles.codeDisplay}>
-                {showCode ? accessCode : "•••••••••••••••••••••"}
+              <div
+                className={`${styles.codeDisplay} ${codeStatus === "unavailable" ? styles.codeDisplayUnavailable : ""}`}
+              >
+                {codeStatus === "unavailable"
+                  ? "Code indisponible"
+                  : showCode && accessCode
+                  ? accessCode
+                  : "•••••••••••••••••••••"}
               </div>
               <p className={`${styles.codeMeta} ${styles.codeMetaTop6}`}>
-                Ce code unique donne accès à la galerie. Le renouveler révoque immédiatement tous les anciens accès.
+                {codeStatus === "unavailable"
+                  ? "Le code ne peut pas être déchiffré. Pour rétablir l'accès client, régénérez un nouveau code ci-contre."
+                  : "Ce code unique donne accès à la galerie. Le renouveler révoque immédiatement tous les anciens accès."}
               </p>
             </div>
 
@@ -608,6 +632,7 @@ export default function AdminGalleryEditPage() {
               <button
                 type="button"
                 onClick={() => setShowCode(!showCode)}
+                disabled={codeStatus === "unavailable"}
                 className={`${styles.btn} ${styles.btnSecondary} ${styles.btnSmall}`}
               >
                 {showCode ? "Masquer" : "Révéler"}
@@ -616,6 +641,7 @@ export default function AdminGalleryEditPage() {
               <button
                 type="button"
                 onClick={copyCodeToClipboard}
+                disabled={codeStatus === "unavailable"}
                 className={`${styles.btn} ${styles.btnSecondary} ${styles.btnSmall}`}
               >
                 {copiedCode ? "Copié !" : "Copier"}

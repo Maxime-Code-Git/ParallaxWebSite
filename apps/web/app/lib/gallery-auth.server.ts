@@ -58,29 +58,54 @@ export function encryptGalleryCode(code: string): string {
   return `${iv.toString("hex")}:${encrypted.toString("hex")}:${authTag.toString("hex")}`;
 }
 
+export class GalleryCodeDecryptionError extends Error {
+  constructor(message = "Impossible de déchiffrer le code d'accès de la galerie.", options?: ErrorOptions) {
+    super(message, options);
+    this.name = "GalleryCodeDecryptionError";
+  }
+}
+
 /**
  * AES-256-GCM decryption of an encrypted gallery code.
+ * Throws GalleryCodeDecryptionError if the format is invalid or decryption fails (e.g. wrong key, corrupted tag).
  */
 export function decryptGalleryCode(encryptedStr: string): string {
+  if (typeof encryptedStr !== "string" || !encryptedStr) {
+    throw new GalleryCodeDecryptionError("Données de code chiffré manquantes ou invalides.");
+  }
   const parts = encryptedStr.split(":");
   if (parts.length !== 3) {
-    throw new Error("Invalid encrypted code format");
+    throw new GalleryCodeDecryptionError("Format du code chiffré invalide (segments iv:ciphertext:tag attendus).");
   }
   const [ivHex, ciphertextHex, authTagHex] = parts;
   if (!ivHex || !ciphertextHex || !authTagHex) {
-    throw new Error("Invalid encrypted code format");
+    throw new GalleryCodeDecryptionError("Format du code chiffré incomplet.");
   }
-  const iv = Buffer.from(ivHex, "hex");
-  const ciphertext = Buffer.from(ciphertextHex, "hex");
-  const authTag = Buffer.from(authTagHex, "hex");
+  let iv: Buffer;
+  let ciphertext: Buffer;
+  let authTag: Buffer;
+  try {
+    iv = Buffer.from(ivHex, "hex");
+    ciphertext = Buffer.from(ciphertextHex, "hex");
+    authTag = Buffer.from(authTagHex, "hex");
+  } catch (err: unknown) {
+    throw new GalleryCodeDecryptionError("Décodage hexadécimal du code chiffré impossible.", { cause: err });
+  }
   if (iv.length !== 12 || authTag.length !== 16) {
-    throw new Error("Invalid IV or auth tag length");
+    throw new GalleryCodeDecryptionError("Longueur d'IV (12 octets) ou de tag d'authentification (16 octets) invalide.");
   }
 
-  const decipher = crypto.createDecipheriv("aes-256-gcm", getAesKey(), iv);
-  decipher.setAuthTag(authTag);
-  const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-  return decrypted.toString("utf8");
+  try {
+    const decipher = crypto.createDecipheriv("aes-256-gcm", getAesKey(), iv);
+    decipher.setAuthTag(authTag);
+    const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+    return decrypted.toString("utf8");
+  } catch (err: unknown) {
+    throw new GalleryCodeDecryptionError(
+      `Échec du déchiffrement AES-GCM : clé incompatible ou données altérées (${err instanceof Error ? err.message : String(err)}).`,
+      { cause: err }
+    );
+  }
 }
 
 /**
