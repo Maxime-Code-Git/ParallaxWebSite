@@ -291,12 +291,16 @@ export async function requireGalleryAccess(
     throw await handleUnauthorized("Galerie expirée", "expired");
   }
 
-  // Verify code version in database (revokes immediately after rotation!)
-  const codeRow = db.prepare("SELECT version FROM gallery_codes WHERE gallery_id = ?").get(gallery.id) as
-    | { version: number }
+  // Verify code version and creation timestamp in database (revokes immediately after rotation!)
+  const codeRow = db.prepare("SELECT version, updated_at FROM gallery_codes WHERE gallery_id = ?").get(gallery.id) as
+    | { version: number; updated_at: number }
     | undefined;
 
-  if (!codeRow || codeRow.version !== sessionCodeVersion) {
+  if (
+    !codeRow ||
+    codeRow.version !== sessionCodeVersion ||
+    (typeof codeRow.updated_at === "number" && issuedAt < codeRow.updated_at)
+  ) {
     throw await handleUnauthorized("Code d'accès renouvelé, veuillez vous reconnecter", "expired");
   }
 

@@ -270,21 +270,6 @@ export function openGalleryDb(dbPath: string): DatabaseSync {
       if (!galleryCols.includes("retention_exempt_reason")) {
         db.exec("ALTER TABLE galleries ADD COLUMN retention_exempt_reason TEXT;");
       }
-      if (!galleryCols.includes("code_version")) {
-        db.exec("ALTER TABLE galleries ADD COLUMN code_version INTEGER NOT NULL DEFAULT 1;");
-        db.exec(`
-          UPDATE galleries
-          SET code_version = (
-            SELECT COALESCE(MAX(version), 1)
-            FROM gallery_codes
-            WHERE gallery_codes.gallery_id = galleries.id
-          )
-          WHERE EXISTS (
-            SELECT 1 FROM gallery_codes WHERE gallery_codes.gallery_id = galleries.id
-          );
-        `);
-      }
-
       const deletionCols = (
         db.prepare("PRAGMA table_info(gallery_deletion_jobs)").all() as { name: string }[]
       ).map((c) => c.name);
@@ -308,6 +293,39 @@ export function openGalleryDb(dbPath: string): DatabaseSync {
       db.prepare(`
         INSERT INTO gallery_schema (version, name, applied_at)
         VALUES (2, 'parallax_gallery_v2', ?)
+      `).run(Date.now());
+    }
+
+    // Parallax Gallery Schema V3 Migration (Durable gallery code version)
+    const v3Row = db
+      .prepare("SELECT version FROM gallery_schema WHERE version = 3")
+      .get() as { version: number } | undefined;
+
+    if (!v3Row) {
+      const galleryCols = (
+        db.prepare("PRAGMA table_info(galleries)").all() as { name: string }[]
+      ).map((c) => c.name);
+
+      if (!galleryCols.includes("code_version")) {
+        db.exec("ALTER TABLE galleries ADD COLUMN code_version INTEGER NOT NULL DEFAULT 1;");
+      }
+
+      // Initialize durable code_version from existing gallery_codes without ever lowering an already superior durable version
+      db.exec(`
+        UPDATE galleries
+        SET code_version = (
+          SELECT MAX(COALESCE(c.version, 1), COALESCE(galleries.code_version, 1))
+          FROM gallery_codes c
+          WHERE c.gallery_id = galleries.id
+        )
+        WHERE EXISTS (
+          SELECT 1 FROM gallery_codes WHERE gallery_codes.gallery_id = galleries.id
+        );
+      `);
+
+      db.prepare(`
+        INSERT INTO gallery_schema (version, name, applied_at)
+        VALUES (3, 'parallax_gallery_v3', ?)
       `).run(Date.now());
     }
 
