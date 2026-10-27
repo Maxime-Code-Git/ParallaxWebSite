@@ -147,6 +147,17 @@ export function GalleryBrowserUpload({
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, []);
 
+function generateUploadUUID(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
   const addFilesToQueue = (files: FileList | File[], defaultTarget: UploadTarget) => {
     if (queueRef.current.length + files.length > MAX_BATCH_FILES) {
       setBatchError(`Limite dépassée : un lot ne peut pas contenir plus de ${MAX_BATCH_FILES} fichiers.`);
@@ -167,8 +178,10 @@ export function GalleryBrowserUpload({
         target = "videos";
       }
 
+      const uploadId = generateUploadUUID();
       newItems.push({
-        id: `${file.name}-${file.size}-${Date.now()}-${Math.random()}`,
+        id: uploadId,
+        uploadId,
         file,
         target,
         status: "pending",
@@ -199,59 +212,59 @@ export function GalleryBrowserUpload({
       )
     );
 
-    let uploadId = item.uploadId;
-    let uploadedChunks: number[];
+    const uploadId = item.uploadId || generateUploadUUID();
+    item.uploadId = uploadId;
 
-    // Step 1: Init or check existing session
-    if (!uploadId) {
-      const initRes = await fetchWithRetry(
-        `/api/admin/gallery-upload/${galleryId}?action=init`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-CSRF-Token": csrfToken,
-          },
-          body: JSON.stringify({
-            action: "init",
-            target,
-            fileName: file.name,
-            fileSize: file.size,
-            totalChunks,
-            chunkSize: CHUNK_SIZE,
-          }),
+    // Step 1: Init or check existing session idempotently with stable uploadId
+    const initRes = await fetchWithRetry(
+      `/api/admin/gallery-upload/${galleryId}?action=init`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": csrfToken,
         },
-        "init"
-      );
+        body: JSON.stringify({
+          action: "init",
+          uploadId,
+          target,
+          fileName: file.name,
+          fileSize: file.size,
+          totalChunks,
+          chunkSize: CHUNK_SIZE,
+        }),
+      },
+      "init"
+    );
 
-      const initData = (await initRes.json()) as { uploadId: string; uploadedChunks: number[] };
-      uploadId = initData.uploadId;
-      item.uploadId = uploadId;
-      uploadedChunks = initData.uploadedChunks || [];
+    const initData = (await initRes.json()) as {
+      uploadId: string;
+      uploadedChunks?: number[];
+      finalized?: boolean;
+    };
 
+    if (initData.finalized) {
+      item.status = "completed";
+      item.progress = 100;
+      item.error = undefined;
       setQueue((prev) =>
-        prev.map((q) => (q.id === item.id ? { ...q, uploadId } : q))
+        prev.map((q) =>
+          q.id === item.id
+            ? { ...q, status: "completed", progress: 100, error: undefined }
+            : q
+        )
       );
-    } else {
-      item.phase = "status";
-      setQueue((prev) =>
-        prev.map((q) => (q.id === item.id ? { ...q, phase: "status" } : q))
-      );
-
-      const statusRes = await fetchWithRetry(
-        `/api/admin/gallery-upload/${galleryId}?action=status&uploadId=${uploadId}`,
-        {
-          headers: {
-            "X-CSRF-Token": csrfToken,
-          },
-        },
-        "status"
-      );
-      const statusData = (await statusRes.json()) as { uploadedChunks: number[] };
-      uploadedChunks = statusData.uploadedChunks || [];
+      return;
     }
 
+    const uploadedChunks = initData.uploadedChunks || [];
     const uploadedSet = new Set(uploadedChunks);
+
+    const initialProgress = totalChunks > 0 ? Math.round((uploadedSet.size / totalChunks) * 100) : 0;
+    item.progress = initialProgress;
+    setQueue((prev) =>
+      prev.map((q) => (q.id === item.id ? { ...q, uploadId, progress: initialProgress } : q))
+    );
 
     // Step 2: Upload chunks
     item.phase = "chunk";

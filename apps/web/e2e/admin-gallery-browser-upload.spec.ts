@@ -167,15 +167,29 @@ test.describe("Gallery Browser Upload E2E Scenarios", () => {
       expect(fs.existsSync(path.join(photosDir, base)), `Fichier ${base} doit exister dans photos/`).toBe(true);
     }
 
-    // 11. Verify absence of .part, .tmp and orphan sessions
+    // 11. Verify absence of .part, .tmp, residual chunks, and distinguish finalized receipts from orphan sessions
     for (const f of fs.readdirSync(photosDir)) {
       expect(f.endsWith(".part"), `Aucun .part résiduel dans photos/ (${f})`).toBe(false);
       expect(f.endsWith(".tmp"), `Aucun .tmp résiduel dans photos/ (${f})`).toBe(false);
     }
     const tempDir = path.join(createdGalleryFolder, ".tmp_uploads");
     if (fs.existsSync(tempDir)) {
-      const orphanSessions = fs.readdirSync(tempDir);
-      expect(orphanSessions.length, "Aucune session d'upload orpheline").toBe(0);
+      const sessionEntries = fs.readdirSync(tempDir);
+      for (const s of sessionEntries) {
+        const sessionPath = path.join(tempDir, s);
+        if (!fs.statSync(sessionPath).isDirectory()) continue;
+        const receiptPath = path.join(sessionPath, "finalized.json");
+        // Must be a preserved finalized receipt, not an orphan active session
+        expect(fs.existsSync(receiptPath), `La session ${s} doit être un reçu finalisé conservé`).toBe(true);
+
+        // Verify absence of residual temporary chunks or assembly files
+        const sessionFiles = fs.readdirSync(sessionPath);
+        for (const file of sessionFiles) {
+          expect(file.startsWith("chunk_"), `Aucun morceau résiduel (${file}) dans ${s}`).toBe(false);
+          expect(file.endsWith(".part"), `Aucun .part résiduel (${file}) dans ${s}`).toBe(false);
+          expect(file.endsWith(".tmp"), `Aucun .tmp résiduel (${file}) dans ${s}`).toBe(false);
+        }
+      }
     }
 
     // 12. Verify automatic analysis: 6 photos, 0 video

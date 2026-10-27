@@ -143,7 +143,18 @@ export async function action({ request, params }: ActionFunctionArgs) {
         }
       }
 
+      let uploadId: string | undefined;
+      if (body.uploadId) {
+        const rawUploadId = String(body.uploadId).trim();
+        if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawUploadId)) {
+          uploadId = rawUploadId;
+        } else {
+          return Response.json({ error: "Identifiant d'upload invalide." }, { status: 400, headers: createAdminHeaders() });
+        }
+      }
+
       const res = initUploadSession(id, {
+        uploadId,
         target,
         fileName,
         fileSize,
