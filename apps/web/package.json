@@ -7,6 +7,7 @@
     "dev": "react-router dev",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "node scripts/run-e2e.js",
     "lint": "eslint .",
     "start": "node scripts/validate-startup.js && react-router-serve ./build/server/index.js",
     "preview:local": "node scripts/preview-local.js",

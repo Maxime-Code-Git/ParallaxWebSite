@@ -14,8 +14,8 @@ import {
 } from "./gallery-retention.server";
 
 export const MAX_MEDIA_COUNT = 2000;
-export const MAX_PHOTO_FILE_SIZE = 50 * 1024 * 1024; // 50 MiB
-export const MAX_VIDEO_FILE_SIZE = 5 * 1024 * 1024 * 1024; // 5 GiB
+export const MAX_PHOTO_FILE_SIZE = 100 * 1024 * 1024; // 100 MiB
+export const MAX_VIDEO_FILE_SIZE = 20 * 1024 * 1024 * 1024; // 20 GiB
 export const MAX_TOTAL_IMPORT_SIZE = 100 * 1024 * 1024 * 1024; // 100 GiB
 export const MAX_IMAGE_DIMENSION = 12000;
 export const MAX_IMAGE_PIXELS = 80_000_000; // 80 MP
@@ -66,7 +66,7 @@ export function getAvailableImportFolders(): string[] {
   const entries = fs.readdirSync(base, { withFileTypes: true });
   return entries
     .filter((e) => {
-      if (!e.isDirectory()) return false;
+      if (!e.isDirectory() || e.name.startsWith(".")) return false;
       const fullPath = path.join(base, e.name);
       try {
         const stat = fs.lstatSync(fullPath);
@@ -151,6 +151,16 @@ function scanSubFolder(
   const results: ScannedCandidate[] = [];
 
   for (const entry of entries) {
+    if (
+      entry.name.startsWith(".") ||
+      entry.name.endsWith(".part") ||
+      entry.name.endsWith(".tmp") ||
+      entry.name === "assembled.tmp" ||
+      entry.name === ".tmp_uploads"
+    ) {
+      continue;
+    }
+
     const fullPath = path.join(subDir, entry.name);
     const relativeName = `${subName}/${entry.name}`;
 

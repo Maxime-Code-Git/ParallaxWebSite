@@ -61,10 +61,12 @@ describe("Admin Data Retention & Settings (/admin/data-retention)", () => {
       version: number;
       name: string;
     }[];
-    expect(versions.length).toBe(4);
+    expect(versions.length).toBe(5);
     expect(versions[0]).toEqual({ version: 1, name: "parallax_gallery_v1" });
     expect(versions[1]).toEqual({ version: 2, name: "parallax_gallery_v2" });
     expect(versions[2]).toEqual({ version: 3, name: "parallax_gallery_v3" });
+    expect(versions[3]).toEqual({ version: 4, name: "parallax_gallery_v4" });
+    expect(versions[4]).toEqual({ version: 5, name: "parallax_gallery_v5" });
   });
 
   it("migrates existing V1 database idempotently without losing existing galleries", () => {

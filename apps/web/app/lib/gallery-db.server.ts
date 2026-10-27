@@ -340,6 +340,16 @@ export function openGalleryDb(dbPath: string): DatabaseSync {
       db.prepare("INSERT INTO gallery_schema (version, name, applied_at) VALUES (4, 'parallax_gallery_v4', ?)").run(Date.now());
     }
 
+    // V5 adds upload_folder for stable, dedicated browser and controlled import directory
+    const v5Row = db.prepare("SELECT version FROM gallery_schema WHERE version = 5").get();
+    if (!v5Row) {
+      const galleryCols = (db.prepare("PRAGMA table_info(galleries)").all() as { name: string }[]).map((c) => c.name);
+      if (!galleryCols.includes("upload_folder")) {
+        db.exec("ALTER TABLE galleries ADD COLUMN upload_folder TEXT;");
+      }
+      db.prepare("INSERT INTO gallery_schema (version, name, applied_at) VALUES (5, 'parallax_gallery_v5', ?)").run(Date.now());
+    }
+
     db.exec("COMMIT;");
   } catch (err) {
     try {

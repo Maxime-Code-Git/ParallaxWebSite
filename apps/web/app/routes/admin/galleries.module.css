@@ -814,3 +814,319 @@
   padding: 2px 4px;
   border-radius: 4px;
 }
+
+/* Browser Upload Section */
+.uploadSection {
+  margin-top: 16px;
+  padding: 24px;
+  background: rgba(20, 24, 34, 0.6);
+  border: 1px dashed var(--px-line, #1B2230);
+  border-radius: 12px;
+  box-sizing: border-box;
+  transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+
+.uploadSectionDragging {
+  border-color: #1E9EFF;
+  background: rgba(30, 158, 255, 0.08);
+}
+
+.uploadButtonsRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.uploadPhotosBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border-radius: var(--r-pill, 999px);
+  font-family: var(--font-parallax, 'Space Grotesk', sans-serif);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  background: #1E9EFF;
+  color: #0C0F17;
+  border: 0.5px solid #1E9EFF;
+  transition: background 0.18s ease, transform 0.18s ease;
+}
+
+.uploadPhotosBtn:hover:not(:disabled) {
+  background: #5FB8FF;
+  border-color: #5FB8FF;
+  transform: scale(1.02);
+}
+
+.uploadPhotosBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.uploadVideosBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border-radius: var(--r-pill, 999px);
+  font-family: var(--font-parallax, 'Space Grotesk', sans-serif);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  background: rgba(30, 158, 255, 0.08);
+  color: #5FB8FF;
+  border: 0.5px solid #1E9EFF;
+  transition: background 0.18s ease, transform 0.18s ease;
+}
+
+.uploadVideosBtn:hover:not(:disabled) {
+  background: rgba(30, 158, 255, 0.16);
+  transform: scale(1.02);
+}
+
+.uploadVideosBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.retryAllBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: var(--r-pill, 999px);
+  font-family: var(--font-parallax, 'Space Grotesk', sans-serif);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  background: #EF4444;
+  color: #FFFFFF;
+  border: 0.5px solid #DC2626;
+  transition: background 0.18s ease;
+}
+
+.retryAllBtn:hover {
+  background: #DC2626;
+}
+
+.helperText {
+  font-size: 13px;
+  color: var(--px-muted, #AEB6C6);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.uploadStatusContainer {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 0.5px solid var(--px-line, #1B2230);
+}
+
+.uploadSummaryRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+  font-size: 14px;
+  color: #F5F6F7;
+}
+
+.currentUploadingBox {
+  margin-bottom: 12px;
+}
+
+.currentUploadingText {
+  margin: 0 0 6px;
+  font-size: 13px;
+  color: #AEB6C6;
+}
+
+.targetBadge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  background: rgba(30, 158, 255, 0.15);
+  color: #5FB8FF;
+}
+
+.uploadProgressBar {
+  width: 100%;
+  height: 8px;
+  border-radius: 4px;
+  border: none;
+  background: #1B2230;
+  overflow: hidden;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.uploadProgressBar::-webkit-progress-bar {
+  background-color: #1B2230;
+  border-radius: 4px;
+}
+
+.uploadProgressBar::-webkit-progress-value {
+  background-color: #1E9EFF;
+  border-radius: 4px;
+  transition: width 0.2s ease;
+}
+
+.uploadProgressBar::-moz-progress-bar {
+  background-color: #1E9EFF;
+  border-radius: 4px;
+}
+
+.uploadQueueList {
+  list-style: none;
+  margin: 16px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.uploadQueueItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  background: #141822;
+  border: 0.5px solid var(--px-line, #1B2230);
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.uploadItemName {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #F5F6F7;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.uploadItemStatus {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.uploadItemPending {
+  color: var(--px-muted, #AEB6C6);
+}
+
+.uploadItemUploading {
+  color: #5FB8FF;
+}
+
+.uploadItemSuccess {
+  color: #10B981;
+  font-weight: 500;
+}
+
+.uploadItemError {
+  color: #EF4444;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.retryBtn {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-family: inherit;
+  background: #EF4444;
+  color: #FFFFFF;
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.retryBtn:hover {
+  background: #DC2626;
+}
+
+.cancelBtn {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-family: inherit;
+  background: #1B2230;
+  color: #AEB6C6;
+  border: 0.5px solid #2D3748;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.cancelBtn:hover {
+  background: #232B3D;
+  color: #F5F6F7;
+}
+
+/* Collapsible Advanced Import Details */
+.advancedImportDetails {
+  margin-top: 24px;
+  padding: 16px 20px;
+  background: #141822;
+  border: 0.5px solid var(--px-line, #1B2230);
+  border-radius: 10px;
+  box-sizing: border-box;
+}
+
+.advancedImportSummary {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--px-muted, #AEB6C6);
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.18s ease;
+}
+
+.advancedImportSummary:hover {
+  color: #5FB8FF;
+}
+
+.advancedImportSummary:focus-visible {
+  outline: 2px solid #1E9EFF;
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .uploadSection,
+  .uploadPhotosBtn,
+  .uploadVideosBtn,
+  .retryAllBtn,
+  .retryBtn,
+  .cancelBtn,
+  .uploadProgressBar::-webkit-progress-value {
+    transition: none !important;
+    transform: none !important;
+  }
+}

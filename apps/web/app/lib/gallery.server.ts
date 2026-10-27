@@ -8,6 +8,7 @@ import {
   GalleryCodeDecryptionError,
 } from "./gallery-auth.server";
 import { deleteStoredGalleryMediaFiles } from "./gallery-preview.server";
+import { computeGalleryFolderName, createGalleryFolderOnDisk } from "./gallery-folder.server";
 
 export class GalleryCodeNotFoundError extends Error {
   constructor(message = "Code d'accès introuvable pour cette galerie.", options?: ErrorOptions) {
@@ -43,6 +44,7 @@ export interface Gallery {
   revision: number;
   code_version?: number;
   code_generation?: string | null;
+  upload_folder?: string | null;
   retention_exempt?: number;
   retention_exempt_reason?: string | null;
   created_at: number;
@@ -266,14 +268,17 @@ export function createGallery(data: {
   const signatureFr = data.signatureFr ? data.signatureFr.trim() : "Maxime & Ludovic";
   const signatureEn = data.signatureEn ? data.signatureEn.trim() : "Maxime & Ludovic";
 
+  const uploadFolder = computeGalleryFolderName(id, title || clientName);
+  createGalleryFolderOnDisk(uploadFolder);
+
   db.exec("BEGIN EXCLUSIVE TRANSACTION;");
   try {
     db.prepare(`
       INSERT INTO galleries (
         id, public_id, title, client_name, project_date, location,
         intro_fr, intro_en, signature_fr, signature_en,
-        status, expires_at, cover_media_id, revision, code_version, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, NULL, 1, 1, ?, ?)
+        status, expires_at, cover_media_id, revision, code_version, upload_folder, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, NULL, 1, 1, ?, ?, ?)
     `).run(
       id,
       publicId,
@@ -286,6 +291,7 @@ export function createGallery(data: {
       signatureFr,
       signatureEn,
       data.expiresAt || null,
+      uploadFolder,
       now,
       now
     );

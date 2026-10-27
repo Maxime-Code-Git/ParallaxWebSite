@@ -75,6 +75,8 @@ export default [
   route("api/gallery/:publicId/download", "routes/api/gallery-download.ts"),
 
   // Admin Gallery APIs
+  route("api/admin/gallery-upload/:id", "routes/api/admin-gallery-upload.ts", { id: "api-gallery-upload" }),
+  route("api/admin/galleries/:id/upload", "routes/api/admin-gallery-upload.ts", { id: "api-galleries-id-upload" }),
   route("api/admin/galleries/:id/import", "routes/api/admin-gallery-import.ts"),
   route("api/admin/galleries/:id/imports/:importId", "routes/api/admin-gallery-import-status.ts"),
   route("api/admin/galleries/:id/media/:mediaId/poster", "routes/api/admin-gallery-media-poster.ts"),

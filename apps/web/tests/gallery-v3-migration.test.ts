@@ -539,11 +539,12 @@ describe("Gallery Schema V3 Migration & Historical V2 Resilience", () => {
       version: number;
       name: string;
     }[];
-    expect(freshSchema.length).toBe(4);
+    expect(freshSchema.length).toBe(5);
     expect(freshSchema[0].version).toBe(1);
     expect(freshSchema[1].version).toBe(2);
     expect(freshSchema[2].version).toBe(3);
     expect(freshSchema[3].version).toBe(4);
+    expect(freshSchema[4].version).toBe(5);
     freshDb.close();
 
     // 6b. Pure V1 database (only Schema V1)
@@ -588,7 +589,7 @@ describe("Gallery Schema V3 Migration & Historical V2 Resilience", () => {
     // Migrate pure V1 -> runs V2 then V3
     const migratedV1 = openGalleryDb(v1DbPath);
     const v1Schema = migratedV1.prepare("SELECT version FROM gallery_schema ORDER BY version").all() as { version: number }[];
-    expect(v1Schema.map((s) => s.version)).toEqual([1, 2, 3, 4]);
+    expect(v1Schema.map((s) => s.version)).toEqual([1, 2, 3, 4, 5]);
 
     const galCols = (migratedV1.prepare("PRAGMA table_info(galleries)").all() as { name: string }[]).map((c) => c.name);
     expect(galCols).toContain("retention_exempt");
@@ -618,7 +619,7 @@ describe("Gallery Schema V3 Migration & Historical V2 Resilience", () => {
     const migrated = openGalleryDb(testDbPath);
     expect((migrated.prepare("PRAGMA table_info(galleries)").all() as { name: string }[]).some((c) => c.name === "code_generation")).toBe(true);
     const snapshot = migrated.prepare("SELECT * FROM gallery_schema ORDER BY version").all();
-    expect(snapshot).toHaveLength(4);
+    expect(snapshot).toHaveLength(5);
     migrated.close();
     const reopened = openGalleryDb(testDbPath);
     expect(reopened.prepare("SELECT * FROM gallery_schema ORDER BY version").all()).toEqual(snapshot);

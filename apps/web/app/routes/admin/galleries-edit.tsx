@@ -44,6 +44,8 @@ import {
   getAvailableImportFolders,
   type RejectedFileItem,
 } from "../../lib/gallery-import.server";
+import { ensureGalleryImportFolder } from "../../lib/gallery-folder.server";
+import { GalleryBrowserUpload } from "../../components/admin/GalleryBrowserUpload";
 import { ENV } from "../../lib/env.server";
 import styles from "./galleries.module.css";
 
@@ -56,6 +58,7 @@ interface LoaderData {
   codeReason?: "not_found" | "decryption_failed";
   folders: string[];
   importRootPath: string;
+  galleryFolderName: string;
   csrfToken: string;
   media: GalleryMediaRow[];
   activeImportJob: {
@@ -92,6 +95,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const codeState = getGalleryAccessCodeState(gallery.id);
   const folders = getAvailableImportFolders();
   const importRootPath = ENV.GALLERY_IMPORT_PATH;
+  const importFolderInfo = ensureGalleryImportFolder(gallery.id);
+  const galleryFolderName = importFolderInfo.folderName;
   const csrfToken = session.get("csrfToken") || "";
   const media = getGalleryMediaList(gallery.id);
 
@@ -113,6 +118,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       codeReason: codeState.reason,
       folders,
       importRootPath,
+      galleryFolderName,
       csrfToken,
       media,
       activeImportJob: activeJob || null,
@@ -383,6 +389,7 @@ export default function AdminGalleryEditPage() {
     codeReason,
     folders,
     importRootPath,
+    galleryFolderName,
     csrfToken,
     media,
     activeImportJob,
@@ -450,9 +457,10 @@ export default function AdminGalleryEditPage() {
   const [feedback, setFeedback] = useState<{ type: "error" | "success"; message: string } | null>(null);
 
   // Import state
-  const [selectedFolder, setSelectedFolder] = useState(folders[0] || "");
+  const [selectedFolder, setSelectedFolder] = useState(galleryFolderName || folders[0] || "");
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<{
+    folderName: string;
     validPhotosCount: number;
     validVideosCount: number;
     totalSize: number;
@@ -487,8 +495,8 @@ export default function AdminGalleryEditPage() {
   };
 
   // Analyze import folder
-  const handleAnalyzeFolder = async () => {
-    if (!selectedFolder) return;
+  const triggerAnalyzeFolder = async (folderName: string) => {
+    if (!folderName) return;
     setAnalyzing(true);
     setAnalysisResult(null);
     setFeedback(null);
@@ -499,7 +507,7 @@ export default function AdminGalleryEditPage() {
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({
           intent: "analyze",
-          folderName: selectedFolder,
+          folderName,
           csrfToken,
         }),
       });
@@ -516,6 +524,15 @@ export default function AdminGalleryEditPage() {
     } finally {
       setAnalyzing(false);
     }
+  };
+
+  const handleAnalyzeFolder = () => {
+    void triggerAnalyzeFolder(selectedFolder);
+  };
+
+  const handleUploadBatchComplete = (folderName: string) => {
+    setSelectedFolder(folderName);
+    void triggerAnalyzeFolder(folderName);
   };
 
   const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -579,7 +596,8 @@ export default function AdminGalleryEditPage() {
 
   // Start import
   const handleStartImport = async () => {
-    if (!selectedFolder) return;
+    const targetFolder = selectedFolder || galleryFolderName;
+    if (!targetFolder) return;
     setFeedback(null);
 
     try {
@@ -588,7 +606,7 @@ export default function AdminGalleryEditPage() {
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({
           intent: "start",
-          folderName: selectedFolder,
+          folderName: targetFolder,
           csrfToken,
         }),
       });
@@ -1003,83 +1021,15 @@ export default function AdminGalleryEditPage() {
         {/* Media Import Section */}
         <section className={styles.sectionCard}>
           <h2 className={styles.sectionTitle}>
-            <span>Importation depuis un dossier contrôlé</span>
+            <span>Importation de photos et vidéos</span>
           </h2>
 
-          <div className={styles.importPathCard}>
-            <div className={styles.pathRow}>
-              <code className={styles.pathCode}>{importRootPath}</code>
-              <button
-                type="button"
-                onClick={handleCopyImportPath}
-                className={`${styles.btn} ${styles.btnSecondary} ${styles.btnSmall}`}
-                aria-label="Copier le chemin absolu du dossier d'import"
-              >
-                {copiedImportPath ? "✓ Chemin copié" : "Copier le chemin"}
-              </button>
-            </div>
-            {copyImportPathStatus && (
-              <p role="status" className={styles.copyStatusNotice}>
-                {copyImportPathStatus}
-              </p>
-            )}
-            <p className={styles.pathInstruction}>
-              <strong>Organisation :</strong> créez un sous-dossier par galerie (ex. <code>mariage-alice-bob/</code>) contenant un dossier <code>photos/</code> pour les images et un dossier <code>videos/</code> pour les films.
-            </p>
-            <p className={styles.pathInstruction}>
-              <strong>Astuce Finder (Mac) :</strong> ouvrez le Finder, appuyez sur <kbd>⌘ Cmd</kbd> + <kbd>Maj ⇧</kbd> + <kbd>G</kbd> (Aller au dossier...), collez le chemin ci-dessus et validez.
-            </p>
-          </div>
-
-          <div className={styles.rowGap12Align} style={{ marginTop: "16px" }}>
-            <select
-              value={selectedFolder}
-              onChange={(e) => setSelectedFolder(e.target.value)}
-              className={`${styles.select} ${styles.selectMaxWidth}`}
-            >
-              {folders.length === 0 && <option value="">Aucun sous-dossier disponible</option>}
-              {folders.map((f) => (
-                <option key={f} value={f}>
-                  📁 {f}
-                </option>
-              ))}
-            </select>
-
-            <button
-              type="button"
-              disabled={analyzing || !selectedFolder}
-              onClick={handleAnalyzeFolder}
-              className={`${styles.btn} ${styles.btnSecondary} ${styles.btnSmall}`}
-            >
-              {analyzing ? "Analyse..." : "Analyser le dossier"}
-            </button>
-
-            <button
-              type="button"
-              disabled={!selectedFolder || importStatus === "importing"}
-              onClick={handleStartImport}
-              className={`${styles.btn} ${styles.btnPrimary} ${styles.btnSmall}`}
-            >
-              {importStatus === "importing" ? "Importation en cours..." : "Démarrer l'import"}
-            </button>
-          </div>
-
-          {/* Import Progress Bar */}
-          {importStatus === "importing" && (
-            <div className={styles.boxTop16}>
-              <div className={styles.progressInfo}>
-                <span>Progression de l'import :</span>
-                <span>
-                  {importProgress.current} / {importProgress.total} fichiers
-                </span>
-              </div>
-              <progress
-                value={importProgress.current}
-                max={importProgress.total}
-                className={styles.progressBar}
-              />
-            </div>
-          )}
+          <GalleryBrowserUpload
+            galleryId={gallery.id}
+            csrfToken={csrfToken}
+            galleryFolderName={galleryFolderName}
+            onUploadBatchComplete={handleUploadBatchComplete}
+          />
 
           {/* Analysis Result Box */}
           {analysisResult && (
@@ -1111,8 +1061,102 @@ export default function AdminGalleryEditPage() {
                   </ul>
                 </div>
               )}
+
+              {(analysisResult.validPhotosCount > 0 || analysisResult.validVideosCount > 0) && importStatus !== "importing" && (
+                <div className={styles.boxTop16}>
+                  <button
+                    type="button"
+                    onClick={handleStartImport}
+                    className={`${styles.btn} ${styles.btnPrimary}`}
+                  >
+                    Démarrer l'import
+                  </button>
+                </div>
+              )}
             </div>
           )}
+
+          {/* Import Progress Bar */}
+          {importStatus === "importing" && (
+            <div className={styles.boxTop16}>
+              <div className={styles.progressInfo}>
+                <span>Progression de l'import :</span>
+                <span>
+                  {importProgress.current} / {importProgress.total} fichiers
+                </span>
+              </div>
+              <progress
+                value={importProgress.current}
+                max={importProgress.total}
+                className={styles.progressBar}
+              />
+            </div>
+          )}
+
+          {/* Collapsible Advanced Import from Controlled Folder */}
+          <details className={styles.advancedImportDetails}>
+            <summary className={styles.advancedImportSummary}>
+              Méthode avancée : Importation depuis un dossier contrôlé
+            </summary>
+
+            <div className={styles.importPathCard}>
+              <div className={styles.pathRow}>
+                <code className={styles.pathCode}>{importRootPath}</code>
+                <button
+                  type="button"
+                  onClick={handleCopyImportPath}
+                  className={`${styles.btn} ${styles.btnSecondary} ${styles.btnSmall}`}
+                  aria-label="Copier le chemin absolu du dossier d'import"
+                >
+                  {copiedImportPath ? "✓ Chemin copié" : "Copier le chemin"}
+                </button>
+              </div>
+              {copyImportPathStatus && (
+                <p role="status" className={styles.copyStatusNotice}>
+                  {copyImportPathStatus}
+                </p>
+              )}
+              <p className={styles.pathInstruction}>
+                <strong>Organisation :</strong> créez un sous-dossier par galerie (ex. <code>mariage-alice-bob/</code>) contenant un dossier <code>photos/</code> pour les images et un dossier <code>videos/</code> pour les films.
+              </p>
+              <p className={styles.pathInstruction}>
+                <strong>Astuce Finder (Mac) :</strong> ouvrez le Finder, appuyez sur <kbd>⌘ Cmd</kbd> + <kbd>Maj ⇧</kbd> + <kbd>G</kbd> (Aller au dossier...), collez le chemin ci-dessus et validez.
+              </p>
+            </div>
+
+            <div className={styles.rowGap12Align}>
+              <select
+                value={selectedFolder}
+                onChange={(e) => setSelectedFolder(e.target.value)}
+                className={`${styles.select} ${styles.selectMaxWidth}`}
+              >
+                {folders.length === 0 && <option value="">Aucun sous-dossier disponible</option>}
+                {folders.map((f) => (
+                  <option key={f} value={f}>
+                    📁 {f}
+                  </option>
+                ))}
+              </select>
+
+              <button
+                type="button"
+                disabled={analyzing || !selectedFolder}
+                onClick={handleAnalyzeFolder}
+                className={`${styles.btn} ${styles.btnSecondary} ${styles.btnSmall}`}
+              >
+                {analyzing ? "Analyse..." : "Analyser le dossier"}
+              </button>
+
+              <button
+                type="button"
+                disabled={!selectedFolder || importStatus === "importing"}
+                onClick={handleStartImport}
+                className={`${styles.btn} ${styles.btnPrimary} ${styles.btnSmall}`}
+              >
+                {importStatus === "importing" ? "Importation en cours..." : "Démarrer l'import"}
+              </button>
+            </div>
+          </details>
         </section>
 
         {/* Media Management (Cover Photo & Video Posters) */}
