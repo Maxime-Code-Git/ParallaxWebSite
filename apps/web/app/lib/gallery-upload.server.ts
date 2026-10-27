@@ -183,7 +183,42 @@ export interface UploadMetadata {
   createdAt: number;
   updatedAt: number;
   status?: "active" | "finalized";
+  finalFileName?: string;
+  alreadyExists?: boolean;
+  finalizedAt?: number;
 }
+
+export const receiptWriter = {
+  writeReceipt(uploadDir: string, receipt: FinalizeReceipt): void {
+    const receiptPath = path.join(uploadDir, "finalized.json");
+    const tmpReceiptPath = path.join(
+      uploadDir,
+      `finalized.${process.pid}.${Date.now()}.${crypto.randomBytes(4).toString("hex")}.tmp`
+    );
+    fs.writeFileSync(tmpReceiptPath, JSON.stringify(receipt, null, 2), { mode: 0o600 });
+    try {
+      const fd = fs.openSync(tmpReceiptPath, "r");
+      try {
+        fs.fsyncSync(fd);
+      } finally {
+        fs.closeSync(fd);
+      }
+    } catch {
+      // fsync optional
+    }
+    fs.renameSync(tmpReceiptPath, receiptPath);
+  },
+};
+
+const ongoingFinalizations = new Map<
+  string,
+  Promise<{
+    success: boolean;
+    fileName: string;
+    target: UploadTarget;
+    alreadyExists?: boolean;
+  }>
+>();
 
 function writeMetadataAtomic(uploadDir: string, meta: UploadMetadata): void {
   const metaPath = path.join(uploadDir, "meta.json");
@@ -520,6 +555,27 @@ export function initUploadSession(
       }
     }
 
+    if (fs.existsSync(metaPath)) {
+      try {
+        const meta = JSON.parse(fs.readFileSync(metaPath, "utf-8")) as UploadMetadata;
+        if (meta.galleryId === galleryId && meta.finalFileName) {
+          const recordedDest = path.join(folder.folderPath, config.folder, meta.finalFileName);
+          if (meta.alreadyExists || fs.existsSync(recordedDest)) {
+            return {
+              uploadId,
+              chunkSize: meta.chunkSize,
+              totalChunks: meta.totalChunks,
+              uploadedChunks: Array.from({ length: meta.totalChunks }, (_, i) => i),
+              target: meta.target,
+              finalized: true,
+            };
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+
     // Idempotent resume: if session is already active with matching parameters
     if (fs.existsSync(metaPath)) {
       try {
@@ -766,6 +822,21 @@ export function getUploadStatus(
     throw new UploadValidationError("L'upload n'appartient pas à cette galerie.", 403);
   }
 
+  const config = UPLOAD_TARGETS[meta.target];
+  if (config && meta.finalFileName) {
+    const recordedDest = path.join(folder.folderPath, config.folder, meta.finalFileName);
+    if (meta.alreadyExists || fs.existsSync(recordedDest)) {
+      return {
+        uploadId,
+        totalChunks: meta.totalChunks,
+        uploadedChunks: meta.uploadedChunks,
+        fileName: meta.finalFileName,
+        target: meta.target,
+        finalized: true,
+      };
+    }
+  }
+
   const existingChunks: number[] = [];
   for (let i = 0; i < meta.totalChunks; i++) {
     const chunkPath = path.join(uploadDir, `chunk_${i}`);
@@ -803,11 +874,35 @@ export async function finalizeUpload(
     throw new UploadValidationError("Identifiant d'upload invalide.", 400);
   }
 
+  const lockKey = `${galleryId}:${uploadId}`;
+  const existing = ongoingFinalizations.get(lockKey);
+  if (existing) {
+    return await existing;
+  }
+
+  const finalizePromise = executeFinalizeUpload(galleryId, uploadId);
+  ongoingFinalizations.set(lockKey, finalizePromise);
+  try {
+    return await finalizePromise;
+  } finally {
+    ongoingFinalizations.delete(lockKey);
+  }
+}
+
+async function executeFinalizeUpload(
+  galleryId: string,
+  uploadId: string
+): Promise<{
+  success: boolean;
+  fileName: string;
+  target: UploadTarget;
+  alreadyExists?: boolean;
+}> {
   const folder = ensureGalleryImportFolder(galleryId);
   const uploadDir = path.join(getUploadsBaseDir(folder.folderPath), uploadId);
   const receiptPath = path.join(uploadDir, "finalized.json");
 
-  // Idempotent finalization: return cached receipt if already finalized
+  // 1. Idempotent finalization: return cached receipt if already finalized
   if (fs.existsSync(receiptPath)) {
     try {
       const receipt = JSON.parse(fs.readFileSync(receiptPath, "utf-8")) as FinalizeReceipt;
@@ -838,6 +933,37 @@ export async function finalizeUpload(
     throw new UploadValidationError("Cible d'upload inconnue dans les métadonnées.", 400);
   }
 
+  const destDir = path.join(folder.folderPath, config.folder);
+  if (!fs.existsSync(destDir)) {
+    fs.mkdirSync(destDir, { recursive: true, mode: 0o700 });
+  }
+
+  // 2. Recovery check: Was the file already published before a failure/crash while writing receipt?
+  if (meta.finalFileName) {
+    const recordedDest = path.join(destDir, meta.finalFileName);
+    if (meta.alreadyExists || fs.existsSync(recordedDest)) {
+      const receipt: FinalizeReceipt = {
+        success: true,
+        fileName: meta.finalFileName,
+        target: meta.target,
+        alreadyExists: meta.alreadyExists ? true : undefined,
+        finalizedAt: meta.finalizedAt || Date.now(),
+      };
+      receiptWriter.writeReceipt(uploadDir, receipt);
+      meta.status = "finalized";
+      meta.updatedAt = Date.now();
+      writeMetadataAtomic(uploadDir, meta);
+      cleanUploadChunks(uploadDir);
+      return {
+        success: true,
+        fileName: meta.finalFileName,
+        target: meta.target,
+        alreadyExists: meta.alreadyExists ? true : undefined,
+      };
+    }
+  }
+
+  // 3. Normal finalization path
   // Disk space check right before finalize for assembled file
   const importBase = path.dirname(folder.folderPath);
   checkDiskSpace(folder.folderPath, meta.fileSize, importBase, uploadId);
@@ -951,12 +1077,6 @@ export async function finalizeUpload(
     throw new UploadValidationError(`Le fichier envoyé n'est pas ${expectedTypeLabel}.`, 415);
   }
 
-  // Canonical destination folder based on target
-  const destDir = path.join(folder.folderPath, config.folder);
-  if (!fs.existsSync(destDir)) {
-    fs.mkdirSync(destDir, { recursive: true, mode: 0o700 });
-  }
-
   let finalFileName = meta.fileName;
   let destFilePath = path.join(destDir, finalFileName);
   let alreadyExists = false;
@@ -994,34 +1114,40 @@ export async function finalizeUpload(
       }
       finalFileName = `${parsed.name} (${counter})${parsed.ext}`;
       destFilePath = path.join(destDir, finalFileName);
-      // Atomic move to final destination
-      fs.renameSync(assembledPath, destFilePath);
-      fs.chmodSync(destFilePath, 0o600);
     }
-  } else {
-    // Atomic move to final destination
+  }
+
+  // 4. MEMORIZE chosen destination in metadata BEFORE moving or deleting chunks
+  meta.finalFileName = finalFileName;
+  meta.alreadyExists = alreadyExists ? true : undefined;
+  meta.finalizedAt = Date.now();
+  meta.updatedAt = Date.now();
+  writeMetadataAtomic(uploadDir, meta);
+
+  // 5. Publish file to final destination
+  if (!alreadyExists) {
     fs.renameSync(assembledPath, destFilePath);
     fs.chmodSync(destFilePath, 0o600);
   }
 
-  // Clean chunks and temporary assembly files
-  cleanUploadChunks(uploadDir);
-
-  // Write finalized receipt
+  // 6. Write durable finalized receipt
   const receipt: FinalizeReceipt = {
     success: true,
     fileName: finalFileName,
     target: meta.target,
     alreadyExists: alreadyExists ? true : undefined,
-    finalizedAt: Date.now(),
+    finalizedAt: meta.finalizedAt,
   };
 
-  fs.writeFileSync(receiptPath, JSON.stringify(receipt, null, 2), { mode: 0o600 });
+  receiptWriter.writeReceipt(uploadDir, receipt);
 
-  // Update meta.status
+  // 7. Update status to finalized
   meta.status = "finalized";
   meta.updatedAt = Date.now();
   writeMetadataAtomic(uploadDir, meta);
+
+  // 8. ONLY NOW clean chunks after receipt has been secured
+  cleanUploadChunks(uploadDir);
 
   return {
     success: true,
@@ -1032,7 +1158,11 @@ export async function finalizeUpload(
 }
 
 export function cancelUpload(galleryId: string, uploadId: string): void {
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(uploadId)) {
+  if (!UUID_REGEX.test(uploadId)) {
+    return;
+  }
+  const lockKey = `${galleryId}:${uploadId}`;
+  if (ongoingFinalizations.has(lockKey)) {
     return;
   }
   try {

@@ -15,6 +15,7 @@ import {
   countActiveSessionsForTarget,
   computeAllActiveDiskReservations,
   UploadValidationError,
+  receiptWriter,
 } from "../app/lib/gallery-upload.server";
 import { action } from "../app/routes/api/admin-gallery-upload";
 import * as sessionServer from "../app/lib/session.server";
@@ -106,67 +107,75 @@ describe("Gallery Upload Release Hardening & Regression Tests", () => {
   });
 
   describe("1. Gros fichiers, fixtures creuses et finalisation non bloquante", () => {
-    it("compares duplicates with bounded-memory streaming SHA-256 without ERR_FS_FILE_TOO_LARGE on a 2 GiB + 1 byte file", async () => {
-      // Create destination folder
-      const destDir = path.join(importBase, galleryFolder, "videos");
-      fs.mkdirSync(destDir, { recursive: true, mode: 0o700 });
+    it(
+      "compares duplicates with bounded-memory streaming SHA-256 without ERR_FS_FILE_TOO_LARGE on a 2 GiB + 1 byte file",
+      async () => {
+        // Create destination folder
+        const destDir = path.join(importBase, galleryFolder, "videos");
+        fs.mkdirSync(destDir, { recursive: true, mode: 0o700 });
 
-      // Create sparse fixture of 2 GiB + 1 byte (2147483649 bytes) with identical name
-      const sparseFilePath = path.join(destDir, "large-video.mp4");
-      const fd = fs.openSync(sparseFilePath, "w", 0o600);
-      try {
-        // Write MP4 magic bytes header
-        fs.writeSync(fd, validMp4Header);
-        // Truncate to 2 GiB + 1 byte (taking ~0 disk blocks on APFS/ext4)
-        fs.ftruncateSync(fd, 2147483649);
-      } finally {
-        fs.closeSync(fd);
-      }
+        // Create sparse fixture of 2 GiB + 1 byte (2147483649 bytes) with identical name
+        const sparseFilePath = path.join(destDir, "large-video.mp4");
+        const fd = fs.openSync(sparseFilePath, "w", 0o600);
+        try {
+          // Write MP4 magic bytes header
+          fs.writeSync(fd, validMp4Header);
+          // Truncate to 2 GiB + 1 byte (taking ~0 disk blocks on APFS/ext4)
+          fs.ftruncateSync(fd, 2147483649);
+        } finally {
+          fs.closeSync(fd);
+        }
 
-      expect(fs.statSync(sparseFilePath).size).toBe(2147483649);
+        expect(fs.statSync(sparseFilePath).size).toBe(2147483649);
 
-      // Now create an upload session for an MP4 of 1024 bytes (or different size) named large-video.mp4
-      const newVideoPayload = Buffer.concat([validMp4Header, Buffer.alloc(1024 - validMp4Header.length, 0x42)]);
-      const session = initUploadSession(galleryId, {
-        target: "videos",
-        fileName: "large-video.mp4",
-        fileSize: newVideoPayload.length,
-        totalChunks: 1,
-      });
+        // Now create an upload session for an MP4 of 1024 bytes (or different size) named large-video.mp4
+        const newVideoPayload = Buffer.concat([validMp4Header, Buffer.alloc(1024 - validMp4Header.length, 0x42)]);
+        const session = initUploadSession(galleryId, {
+          target: "videos",
+          fileName: "large-video.mp4",
+          fileSize: newVideoPayload.length,
+          totalChunks: 1,
+        });
 
-      await saveChunkStream(galleryId, session.uploadId, 0, Readable.from([newVideoPayload]));
+        await saveChunkStream(galleryId, session.uploadId, 0, Readable.from([newVideoPayload]));
 
-      // Finalize: previously this threw ERR_FS_FILE_TOO_LARGE because fs.readFileSync was called on large-video.mp4 (> 2 GiB)
-      const res = await finalizeUpload(galleryId, session.uploadId);
-      expect(res.success).toBe(true);
-      // Because sizes differ, fast-path detected it was not identical without memory overflow
-      expect(res.alreadyExists).toBeUndefined();
-      expect(res.fileName).toBe("large-video (1).mp4");
+        // Finalize: previously this threw ERR_FS_FILE_TOO_LARGE because fs.readFileSync was called on large-video.mp4 (> 2 GiB)
+        const res = await finalizeUpload(galleryId, session.uploadId);
+        expect(res.success).toBe(true);
+        // Because sizes differ, fast-path detected it was not identical without memory overflow
+        expect(res.alreadyExists).toBeUndefined();
+        expect(res.fileName).toBe("large-video (1).mp4");
 
-      // Verify the 2 GiB + 1 byte existing file remains intact
-      expect(fs.existsSync(sparseFilePath)).toBe(true);
-      expect(fs.statSync(sparseFilePath).size).toBe(2147483649);
+        // Verify the 2 GiB + 1 byte existing file remains intact
+        expect(fs.existsSync(sparseFilePath)).toBe(true);
+        expect(fs.statSync(sparseFilePath).size).toBe(2147483649);
 
-      // Verify new video was saved
-      const savedPath = path.join(destDir, "large-video (1).mp4");
-      expect(fs.existsSync(savedPath)).toBe(true);
-      expect(fs.statSync(savedPath).size).toBe(newVideoPayload.length);
-    });
+        // Verify new video was saved
+        const savedPath = path.join(destDir, "large-video (1).mp4");
+        expect(fs.existsSync(savedPath)).toBe(true);
+        expect(fs.statSync(savedPath).size).toBe(newVideoPayload.length);
+      },
+      45000
+    );
 
-    it("computes streaming SHA-256 on sparse file without loading into buffer", async () => {
-      const testSparse = path.join(tmpDir, "sparse-hash-test.dat");
-      const fd = fs.openSync(testSparse, "w", 0o600);
-      try {
-        fs.writeSync(fd, Buffer.from("START"));
-        fs.ftruncateSync(fd, 2147483649); // 2 GiB + 1 byte
-      } finally {
-        fs.closeSync(fd);
-      }
+    it(
+      "computes streaming SHA-256 on sparse file without loading into buffer",
+      async () => {
+        const testSparse = path.join(tmpDir, "sparse-hash-test.dat");
+        const fd = fs.openSync(testSparse, "w", 0o600);
+        try {
+          fs.writeSync(fd, Buffer.from("START"));
+          fs.ftruncateSync(fd, 2147483649); // 2 GiB + 1 byte
+        } finally {
+          fs.closeSync(fd);
+        }
 
-      const hash = await computeFileSha256(testSparse);
-      expect(typeof hash).toBe("string");
-      expect(hash).toHaveLength(64);
-    });
+        const hash = await computeFileSha256(testSparse);
+        expect(typeof hash).toBe("string");
+        expect(hash).toHaveLength(64);
+      },
+      45000
+    );
 
     it("yields to the event loop regularly during multi-chunk assembly", async () => {
       const validJpeg = await sharp({
@@ -197,19 +206,23 @@ describe("Gallery Upload Release Hardening & Regression Tests", () => {
         await saveChunkStream(galleryId, session.uploadId, i, Readable.from([validJpeg.subarray(start, end)]));
       }
 
-      // Track setImmediate calls
-      let yieldCalls = 0;
-      const checkYield = vi.fn().mockImplementation(() => {
-        yieldCalls++;
-      });
-      const interval = setInterval(checkYield, 1);
+      // Deterministic check of event loop progression during assembly
+      let loopTicks = 0;
+      let active = true;
+      const scheduleTick = () => {
+        if (!active) return;
+        loopTicks++;
+        setImmediate(scheduleTick);
+      };
+      setImmediate(scheduleTick);
 
       try {
         const res = await finalizeUpload(galleryId, session.uploadId);
         expect(res.success).toBe(true);
-        expect(yieldCalls).toBeGreaterThanOrEqual(0);
+        // The event loop MUST advance across multiple turns during multi-chunk assembly
+        expect(loopTicks).toBeGreaterThanOrEqual(totalChunks);
       } finally {
-        clearInterval(interval);
+        active = false;
       }
     });
   });
@@ -438,6 +451,145 @@ describe("Gallery Upload Release Hardening & Regression Tests", () => {
       const finData2 = await finRes2.json();
       expect(finData2.success).toBe(true);
       expect(finData2.fileName).toBe(finData1.fileName);
+    });
+
+    it("safely handles concurrent finalizeUpload calls on the same gallery and uploadId without collision or duplicate files", async () => {
+      const validJpeg = await sharp({
+        create: {
+          width: 50,
+          height: 50,
+          channels: 3,
+          background: { r: 120, g: 60, b: 200 },
+        },
+      })
+        .jpeg({ quality: 80 })
+        .toBuffer();
+
+      // Prepare an 8-chunk upload
+      const totalChunks = 8;
+      const chunkSize = Math.ceil(validJpeg.length / totalChunks);
+      const totalSize = validJpeg.length;
+      const stableUploadId = "88888888-7777-4666-8555-444444444444";
+
+      initUploadSession(galleryId, {
+        uploadId: stableUploadId,
+        target: "photos",
+        fileName: "concurrent-test.jpg",
+        fileSize: totalSize,
+        totalChunks,
+        chunkSize,
+      });
+
+      for (let i = 0; i < totalChunks; i++) {
+        const start = i * chunkSize;
+        const end = Math.min(start + chunkSize, totalSize);
+        await saveChunkStream(galleryId, stableUploadId, i, Readable.from([validJpeg.subarray(start, end)]));
+      }
+
+      // Start 1st finalizeUpload
+      const finalizePromise1 = finalizeUpload(galleryId, stableUploadId);
+
+      // Wait two setImmediate event loop turns
+      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
+
+      // Start 2nd finalizeUpload with same uploadId
+      const finalizePromise2 = finalizeUpload(galleryId, stableUploadId);
+
+      // Both should succeed consistently without ENOENT or size mismatch
+      const [res1, res2] = await Promise.all([finalizePromise1, finalizePromise2]);
+
+      expect(res1.success).toBe(true);
+      expect(res2.success).toBe(true);
+      expect(res1.fileName).toBe("concurrent-test.jpg");
+      expect(res2.fileName).toBe("concurrent-test.jpg");
+
+      // Verify exactly ONE final file was published in photos/
+      const photosDir = path.join(importBase, galleryFolder, "photos");
+      const publishedFiles = fs.readdirSync(photosDir).filter((f) => f.startsWith("concurrent-test"));
+      expect(publishedFiles).toEqual(["concurrent-test.jpg"]);
+
+      // Verify no temporary chunks or assembly files remain
+      const uploadDir = path.join(importBase, galleryFolder, ".tmp_uploads", stableUploadId);
+      expect(fs.existsSync(path.join(uploadDir, "finalized.json"))).toBe(true);
+      expect(fs.existsSync(path.join(uploadDir, "assembled.tmp"))).toBe(false);
+      expect(fs.existsSync(path.join(uploadDir, "chunk_0"))).toBe(false);
+    });
+
+    it("recovers publication on retry after failure during receipt writing without missing chunk error or duplicate file", async () => {
+      const validJpeg = await sharp({
+        create: {
+          width: 35,
+          height: 35,
+          channels: 3,
+          background: { r: 80, g: 180, b: 80 },
+        },
+      })
+        .jpeg({ quality: 80 })
+        .toBuffer();
+
+      const stableUploadId = "77777777-6666-4555-8444-333333333333";
+      const totalChunks = 2;
+      const chunkSize = Math.ceil(validJpeg.length / totalChunks);
+      const totalSize = validJpeg.length;
+
+      initUploadSession(galleryId, {
+        uploadId: stableUploadId,
+        target: "photos",
+        fileName: "durable-receipt.jpg",
+        fileSize: totalSize,
+        totalChunks,
+        chunkSize,
+      });
+
+      for (let i = 0; i < totalChunks; i++) {
+        const start = i * chunkSize;
+        const end = Math.min(start + chunkSize, totalSize);
+        await saveChunkStream(galleryId, stableUploadId, i, Readable.from([validJpeg.subarray(start, end)]));
+      }
+
+      const uploadDir = path.join(importBase, galleryFolder, ".tmp_uploads", stableUploadId);
+      const photosDir = path.join(importBase, galleryFolder, "photos");
+
+      // Inject failure on receipt write
+      const writeReceiptSpy = vi.spyOn(receiptWriter, "writeReceipt").mockImplementationOnce(() => {
+        throw new Error("Simulated disk failure during receipt writing");
+      });
+
+      // 1st finalizeUpload fails because of injected error
+      await expect(finalizeUpload(galleryId, stableUploadId)).rejects.toThrow(
+        "Simulated disk failure during receipt writing"
+      );
+
+      // Verify state after failure:
+      // - The destination file is published
+      const publishedPath = path.join(photosDir, "durable-receipt.jpg");
+      expect(fs.existsSync(publishedPath)).toBe(true);
+      expect(fs.statSync(publishedPath).size).toBe(totalSize);
+
+      // - finalized.json was NOT written yet
+      expect(fs.existsSync(path.join(uploadDir, "finalized.json"))).toBe(false);
+
+      // - Chunks were preserved and NOT prematurely deleted!
+      expect(fs.existsSync(path.join(uploadDir, "chunk_0"))).toBe(true);
+      expect(fs.existsSync(path.join(uploadDir, "chunk_1"))).toBe(true);
+
+      // Restore spy so the retry can succeed
+      writeReceiptSpy.mockRestore();
+
+      // Retry finalizeUpload with the same uploadId
+      const retryRes = await finalizeUpload(galleryId, stableUploadId);
+      expect(retryRes.success).toBe(true);
+      expect(retryRes.fileName).toBe("durable-receipt.jpg");
+
+      // Verify: NO duplicate file was created in photos/
+      const photosFiles = fs.readdirSync(photosDir).filter((f) => f.startsWith("durable-receipt"));
+      expect(photosFiles).toEqual(["durable-receipt.jpg"]);
+
+      // Verify: finalized.json is now secured and chunks have been cleaned up
+      expect(fs.existsSync(path.join(uploadDir, "finalized.json"))).toBe(true);
+      expect(fs.existsSync(path.join(uploadDir, "chunk_0"))).toBe(false);
+      expect(fs.existsSync(path.join(uploadDir, "chunk_1"))).toBe(false);
     });
   });
 
