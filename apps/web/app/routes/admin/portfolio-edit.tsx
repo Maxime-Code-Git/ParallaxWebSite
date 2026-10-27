@@ -17,6 +17,7 @@ import {
   type PortfolioCategoryItem,
   type PortfolioMediaItem,
   type PortfolioContent,
+  MAX_PORTFOLIO_PROJECT_GALLERY_PHOTOS,
   slugify,
   resolveProjectPresentationMode,
 } from "../../lib/portfolio-content.shared";
@@ -175,6 +176,13 @@ export async function action({ request, params }: ActionFunctionArgs) {
   if (!Array.isArray(galleryImageIds)) {
     return Response.json(
       { error: "La liste des photos de la galerie doit être un tableau." },
+      { status: 422, headers: createAdminHeaders() }
+    );
+  }
+
+  if (galleryImageIds.length > MAX_PORTFOLIO_PROJECT_GALLERY_PHOTOS) {
+    return Response.json(
+      { error: `Un projet ne peut pas comporter plus de ${MAX_PORTFOLIO_PROJECT_GALLERY_PHOTOS} photos dans sa galerie.` },
       { status: 422, headers: createAdminHeaders() }
     );
   }
@@ -518,9 +526,12 @@ export default function AdminPortfolioEditPage() {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
 
-    const MAX_GALLERY_FILES = 20;
-    if (files.length > MAX_GALLERY_FILES) {
-      setUploadError(`Veuillez sélectionner au maximum ${MAX_GALLERY_FILES} fichiers à la fois.`);
+    const MAX_GALLERY_FILES = MAX_PORTFOLIO_PROJECT_GALLERY_PHOTOS;
+    if (
+      files.length > MAX_GALLERY_FILES ||
+      galleryImageIds.length + files.length > MAX_GALLERY_FILES
+    ) {
+      setUploadError(`Un projet ne peut pas comporter plus de ${MAX_GALLERY_FILES} photos dans sa galerie.`);
       if (galleryInputRef.current) galleryInputRef.current.value = "";
       return;
     }
@@ -861,15 +872,19 @@ export default function AdminPortfolioEditPage() {
                 </label>
                 <div className={styles.uploaderBox}>
                   <p className={styles.metaSubSm}>
-                    Ajoutez jusqu'à 20 photos à la galerie. Elles seront importées séquentiellement.
+                    Ajoutez jusqu'à {MAX_PORTFOLIO_PROJECT_GALLERY_PHOTOS} photos à la galerie. Elles seront importées séquentiellement.
                   </p>
                   <button
                     type="button"
                     className={styles.uploadBtn}
                     onClick={() => galleryInputRef.current?.click()}
-                    disabled={isUploadingGallery}
+                    disabled={isUploadingGallery || galleryImageIds.length >= MAX_PORTFOLIO_PROJECT_GALLERY_PHOTOS}
                   >
-                    {isUploadingGallery ? galleryUploadProgress || "Téléversement..." : "+ Ajouter des photos"}
+                    {galleryImageIds.length >= MAX_PORTFOLIO_PROJECT_GALLERY_PHOTOS
+                      ? `Limite de ${MAX_PORTFOLIO_PROJECT_GALLERY_PHOTOS} photos atteinte`
+                      : isUploadingGallery
+                      ? galleryUploadProgress || "Téléversement..."
+                      : "+ Ajouter des photos"}
                   </button>
                   <input
                     ref={galleryInputRef}

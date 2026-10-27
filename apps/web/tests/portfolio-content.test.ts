@@ -271,6 +271,89 @@ describe("Portfolio Content & Editorial Model (Lot 3)", () => {
 
       expect(portfolioContentSchema.safeParse(content).success).toBe(true);
     });
+
+    it("accepts a project with up to 21 gallery photos", () => {
+      const content = createDefaultPortfolioContent();
+      const projId = crypto.randomUUID();
+      const coverId = crypto.randomUUID();
+      content.media[coverId] = createValidMediaItem(coverId, "project", projId, "cover");
+
+      const galleryIds: string[] = [];
+      for (let i = 0; i < 21; i++) {
+        const gId = crypto.randomUUID();
+        galleryIds.push(gId);
+        content.media[gId] = createValidMediaItem(gId, "project", projId, "gallery");
+      }
+
+      content.projects.push({
+        id: projId,
+        category: "documentary",
+        slugFr: "projet-21-photos",
+        slugEn: "project-21-photos",
+        title: { fr: "21 Photos", en: "21 Photos" },
+        summary: { fr: "Résumé", en: "Summary" },
+        description: [{ type: "paragraph", text: { fr: "Description", en: "Description" } }],
+        seo: { title: { fr: "SEO", en: "SEO" }, description: { fr: "Desc", en: "Desc" } },
+        coverImageId: coverId,
+        coverAlt: { fr: "Couverture", en: "Cover" },
+        galleryImageIds: galleryIds,
+        video: null,
+        showcase: false,
+        side: "auto",
+        order: 0,
+        status: "published",
+        archived: false,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+
+      const result = portfolioContentSchema.safeParse(content);
+      expect(result.success).toBe(true);
+    });
+
+    it("rejects a project with 22 gallery photos with a clear error", () => {
+      const content = createDefaultPortfolioContent();
+      const projId = crypto.randomUUID();
+      const coverId = crypto.randomUUID();
+      content.media[coverId] = createValidMediaItem(coverId, "project", projId, "cover");
+
+      const galleryIds: string[] = [];
+      for (let i = 0; i < 22; i++) {
+        const gId = crypto.randomUUID();
+        galleryIds.push(gId);
+        content.media[gId] = createValidMediaItem(gId, "project", projId, "gallery");
+      }
+
+      content.projects.push({
+        id: projId,
+        category: "documentary",
+        slugFr: "projet-22-photos",
+        slugEn: "project-22-photos",
+        title: { fr: "22 Photos", en: "22 Photos" },
+        summary: { fr: "Résumé", en: "Summary" },
+        description: [{ type: "paragraph", text: { fr: "Description", en: "Description" } }],
+        seo: { title: { fr: "SEO", en: "SEO" }, description: { fr: "Desc", en: "Desc" } },
+        coverImageId: coverId,
+        coverAlt: { fr: "Couverture", en: "Cover" },
+        galleryImageIds: galleryIds,
+        video: null,
+        showcase: false,
+        side: "auto",
+        order: 0,
+        status: "published",
+        archived: false,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+
+      const result = portfolioContentSchema.safeParse(content);
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        const galleryErr = result.error.errors.find((e) => e.path.includes("galleryImageIds"));
+        expect(galleryErr).toBeDefined();
+        expect(galleryErr?.message).toContain("21 photos");
+      }
+    });
   });
 
   describe("Alternating Showcase & Side Calculation", () => {

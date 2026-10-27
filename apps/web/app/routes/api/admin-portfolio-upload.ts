@@ -12,6 +12,7 @@ import {
   PORTFOLIO_MEDIA_OWNER_TYPES,
   PORTFOLIO_MEDIA_SLOTS,
   UUID_REGEX,
+  MAX_PORTFOLIO_PROJECT_GALLERY_PHOTOS,
   type PortfolioMediaOwnerType,
   type PortfolioMediaSlot,
   type PortfolioMediaItem,
@@ -299,9 +300,18 @@ export async function action({ request }: ActionFunctionArgs) {
     if (!UUID_REGEX.test(ownerId)) {
       return jsonError("Identifiant de projet invalide (UUID attendu).", 400);
     }
-    const projectExists = currentContent.projects.some((p) => p.id === ownerId);
-    if (!projectExists) {
+    const project = currentContent.projects.find((p) => p.id === ownerId);
+    if (!project) {
       return jsonError("Projet introuvable.", 404);
+    }
+    if (
+      mediaSlot === "gallery" &&
+      project.galleryImageIds.length >= MAX_PORTFOLIO_PROJECT_GALLERY_PHOTOS
+    ) {
+      return jsonError(
+        `La galerie photos d'un projet est limitée à un maximum de ${MAX_PORTFOLIO_PROJECT_GALLERY_PHOTOS} photos.`,
+        422
+      );
     }
   }
 
@@ -438,6 +448,13 @@ export async function action({ request }: ActionFunctionArgs) {
           }
         } else if (mediaSlot === "gallery") {
           if (!proj.galleryImageIds.includes(processedResult.imageId)) {
+            if (proj.galleryImageIds.length >= MAX_PORTFOLIO_PROJECT_GALLERY_PHOTOS) {
+              cleanupPublishedPortfolioMedia(ownerType, ownerId, mediaSlot, processedResult.imageId, mediaBasePath);
+              return jsonError(
+                `La galerie photos d'un projet est limitée à un maximum de ${MAX_PORTFOLIO_PROJECT_GALLERY_PHOTOS} photos.`,
+                422
+              );
+            }
             proj.galleryImageIds.push(processedResult.imageId);
           }
         }

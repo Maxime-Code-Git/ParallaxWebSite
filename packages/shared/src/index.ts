@@ -658,6 +658,7 @@ export type PortfolioVariantName = (typeof PORTFOLIO_VARIANT_NAMES)[number];
 export const SLUG_REGEX = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 export const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const CATEGORY_ID_REGEX = /^[a-zA-Z0-9_-]{2,64}$/;
+export const MAX_PORTFOLIO_PROJECT_GALLERY_PHOTOS = 21;
 
 export interface DetailedBlock {
   type: "paragraph" | "heading";
@@ -1374,6 +1375,13 @@ export function validatePortfolioProject(
     errors.push({ path: [...pPath, "galleryImageIds"], message: "La galerie doit être un tableau" });
     valid = false;
   } else {
+    if (val.galleryImageIds.length > MAX_PORTFOLIO_PROJECT_GALLERY_PHOTOS) {
+      errors.push({
+        path: [...pPath, "galleryImageIds"],
+        message: `Un projet ne peut pas comporter plus de ${MAX_PORTFOLIO_PROJECT_GALLERY_PHOTOS} photos dans sa galerie`,
+      });
+      valid = false;
+    }
     const seenGids = new Set<string>();
     for (let gIdx = 0; gIdx < val.galleryImageIds.length; gIdx++) {
       const gid = val.galleryImageIds[gIdx];

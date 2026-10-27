@@ -27,6 +27,7 @@ export {
   SLUG_REGEX,
   UUID_REGEX,
   CATEGORY_ID_REGEX,
+  MAX_PORTFOLIO_PROJECT_GALLERY_PHOTOS,
   validatePortfolioLocalizedString as validateLocalizedString,
   validatePortfolioVideo,
   validateDetailedBlocks,
