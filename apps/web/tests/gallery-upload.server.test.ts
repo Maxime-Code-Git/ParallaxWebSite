@@ -311,9 +311,11 @@ describe("Gallery Upload Server Logic", () => {
       expect(fs.existsSync(finalPath)).toBe(true);
       expect(fs.statSync(finalPath).size).toBe(totalSize);
 
-      // Verify no temporary files remain
+      // Verify no temporary chunks remain, and finalized receipt is preserved
       const tmpUploadDir = path.join(importBase, galleryFolder, ".tmp_uploads", session.uploadId);
-      expect(fs.existsSync(tmpUploadDir)).toBe(false);
+      expect(fs.existsSync(path.join(tmpUploadDir, "finalized.json"))).toBe(true);
+      expect(fs.existsSync(path.join(tmpUploadDir, "assembled.tmp"))).toBe(false);
+      expect(fs.existsSync(path.join(tmpUploadDir, "chunk_0"))).toBe(false);
 
       // Second identical upload detects duplicate hash without creating a duplicate file
       const session2 = initUploadSession(galleryId, {

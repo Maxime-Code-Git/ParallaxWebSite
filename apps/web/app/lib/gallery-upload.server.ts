@@ -2,8 +2,92 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import crypto from "node:crypto";
 import { pipeline } from "node:stream/promises";
-import { Readable } from "node:stream";
+import { Readable, Transform, type TransformCallback } from "node:stream";
 import { ensureGalleryImportFolder } from "./gallery-folder.server";
+
+export const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export interface FinalizeReceipt {
+  success: true;
+  fileName: string;
+  target: UploadTarget;
+  alreadyExists?: boolean;
+  finalizedAt: number;
+}
+
+export function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
+export async function computeFileSha256(filePath: string): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const hash = crypto.createHash("sha256");
+    const stream = fs.createReadStream(filePath, { highWaterMark: 64 * 1024 });
+    let bytesSinceYield = 0;
+    const YIELD_THRESHOLD = 32 * 1024 * 1024; // 32 MB threshold to yield event loop
+
+    stream.on("data", (chunk: Buffer | string) => {
+      const buf = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
+      hash.update(buf);
+      bytesSinceYield += buf.length;
+      if (bytesSinceYield >= YIELD_THRESHOLD) {
+        stream.pause();
+        bytesSinceYield = 0;
+        setImmediate(() => {
+          stream.resume();
+        });
+      }
+    });
+
+    stream.on("error", (err) => {
+      reject(err);
+    });
+
+    stream.on("end", () => {
+      resolve(hash.digest("hex"));
+    });
+  });
+}
+
+export class BoundedByteCounter extends Transform {
+  private bytesReceived = 0;
+  constructor(private readonly maxBytes: number) {
+    super();
+  }
+
+  override _transform(chunk: Buffer, _encoding: BufferEncoding, callback: TransformCallback): void {
+    this.bytesReceived += chunk.length;
+    if (this.bytesReceived > this.maxBytes) {
+      const err = new UploadValidationError(
+        `Dépassement de la taille autorisée pour ce morceau (reçu > ${this.maxBytes} octets).`,
+        400
+      );
+      callback(err);
+      return;
+    }
+    callback(null, chunk);
+  }
+
+  getBytesReceived(): number {
+    return this.bytesReceived;
+  }
+}
+
+function cleanUploadChunks(uploadDir: string): void {
+  try {
+    const files = fs.readdirSync(uploadDir);
+    for (const f of files) {
+      if (f === "meta.json" || f === "finalized.json") continue;
+      try {
+        fs.unlinkSync(path.join(uploadDir, f));
+      } catch {
+        // ignore unlink error
+      }
+    }
+  } catch {
+    // ignore
+  }
+}
 
 export const MAX_PHOTO_SIZE = 100 * 1024 * 1024; // 100 MB max for photos
 export const MAX_VIDEO_SIZE = 20 * 1024 * 1024 * 1024; // 20 GB max for videos (21474836480 bytes, safe integer)
@@ -98,6 +182,7 @@ export interface UploadMetadata {
   uploadedChunks: number[];
   createdAt: number;
   updatedAt: number;
+  status?: "active" | "finalized";
 }
 
 function writeMetadataAtomic(uploadDir: string, meta: UploadMetadata): void {
@@ -135,11 +220,15 @@ export function computeAllActiveDiskReservations(basePath: string, excludeUpload
         if (excludeUploadId && uDir.name === excludeUploadId) continue;
 
         const uploadPath = path.join(tmpUploadsDir, uDir.name);
+        const receiptPath = path.join(uploadPath, "finalized.json");
+        if (fs.existsSync(receiptPath)) continue;
+
         const metaPath = path.join(uploadPath, "meta.json");
         if (!fs.existsSync(metaPath)) continue;
 
         try {
           const meta = JSON.parse(fs.readFileSync(metaPath, "utf-8")) as UploadMetadata;
+          if (meta.status === "finalized") continue;
           const lastActive = meta.updatedAt || meta.createdAt;
           if (now - lastActive > maxAgeMs) continue;
 
@@ -202,10 +291,15 @@ export function countActiveSessionsForTarget(
     const entries = fs.readdirSync(tmpUploadsDir, { withFileTypes: true });
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
-      const metaPath = path.join(tmpUploadsDir, entry.name, "meta.json");
+      const uploadPath = path.join(tmpUploadsDir, entry.name);
+      const receiptPath = path.join(uploadPath, "finalized.json");
+      if (fs.existsSync(receiptPath)) continue;
+
+      const metaPath = path.join(uploadPath, "meta.json");
       if (fs.existsSync(metaPath)) {
         try {
           const meta = JSON.parse(fs.readFileSync(metaPath, "utf-8")) as UploadMetadata;
+          if (meta.status === "finalized") continue;
           const lastActive = meta.updatedAt || meta.createdAt;
           if (
             meta.galleryId === galleryId &&
@@ -325,6 +419,7 @@ export function cleanupAbandonedUploads(galleryFolderPath: string, maxAgeMs = AC
 export function initUploadSession(
   galleryId: string,
   params: {
+    uploadId?: string;
     target: UploadTarget;
     fileName: string;
     fileSize: number;
@@ -337,8 +432,18 @@ export function initUploadSession(
   totalChunks: number;
   uploadedChunks: number[];
   target: UploadTarget;
+  finalized?: boolean;
 } {
   return uploadLock.runSync(() => {
+    let uploadId = params.uploadId;
+    if (uploadId !== undefined) {
+      if (typeof uploadId !== "string" || !UUID_REGEX.test(uploadId)) {
+        throw new UploadValidationError("Identifiant d'upload invalide.", 400);
+      }
+    } else {
+      uploadId = crypto.randomUUID();
+    }
+
     if (!isUploadTarget(params.target)) {
       throw new UploadValidationError("Cible d'upload invalide (photos ou videos requis).", 400);
     }
@@ -393,6 +498,58 @@ export function initUploadSession(
     const folder = ensureGalleryImportFolder(galleryId);
     cleanupAbandonedUploads(folder.folderPath);
 
+    const baseDir = getUploadsBaseDir(folder.folderPath);
+    const uploadDir = path.join(baseDir, uploadId);
+    const receiptPath = path.join(uploadDir, "finalized.json");
+    const metaPath = path.join(uploadDir, "meta.json");
+
+    // Idempotent resume: if already finalized with this uploadId
+    if (fs.existsSync(receiptPath)) {
+      try {
+        const receipt = JSON.parse(fs.readFileSync(receiptPath, "utf-8")) as FinalizeReceipt;
+        return {
+          uploadId,
+          chunkSize,
+          totalChunks: calculatedTotalChunks,
+          uploadedChunks: Array.from({ length: calculatedTotalChunks }, (_, i) => i),
+          target: receipt.target || params.target,
+          finalized: true,
+        };
+      } catch {
+        // ignore corrupted receipt
+      }
+    }
+
+    // Idempotent resume: if session is already active with matching parameters
+    if (fs.existsSync(metaPath)) {
+      try {
+        const meta = JSON.parse(fs.readFileSync(metaPath, "utf-8")) as UploadMetadata;
+        if (meta.galleryId === galleryId) {
+          if (
+            meta.target === params.target &&
+            meta.fileName === cleanName &&
+            meta.fileSize === params.fileSize &&
+            meta.totalChunks === calculatedTotalChunks
+          ) {
+            meta.updatedAt = Date.now();
+            writeMetadataAtomic(uploadDir, meta);
+            return {
+              uploadId,
+              chunkSize: meta.chunkSize,
+              totalChunks: meta.totalChunks,
+              uploadedChunks: meta.uploadedChunks,
+              target: meta.target,
+            };
+          } else {
+            throw new UploadValidationError("Une session différente existe déjà avec cet identifiant d'upload.", 409);
+          }
+        }
+      } catch (err) {
+        if (err instanceof UploadValidationError) throw err;
+        // ignore corrupted meta and continue
+      }
+    }
+
     const activeSessions = countActiveSessionsForTarget(folder.folderPath, galleryId, config.target);
     if (activeSessions >= MAX_ACTIVE_SESSIONS_PER_TARGET) {
       throw new UploadValidationError(
@@ -404,10 +561,6 @@ export function initUploadSession(
     // Peak disk space check: chunks on disk + assembled file + safety margin
     const importBase = path.dirname(folder.folderPath);
     checkDiskSpace(folder.folderPath, params.fileSize * 2, importBase);
-
-    const uploadId = crypto.randomUUID();
-    const baseDir = getUploadsBaseDir(folder.folderPath);
-    const uploadDir = path.join(baseDir, uploadId);
 
     fs.mkdirSync(uploadDir, { recursive: true, mode: 0o700 });
 
@@ -423,6 +576,7 @@ export function initUploadSession(
       uploadedChunks: [],
       createdAt: now,
       updatedAt: now,
+      status: "active",
     };
 
     writeMetadataAtomic(uploadDir, metadata);
@@ -443,7 +597,7 @@ export async function saveChunkStream(
   chunkIndex: number,
   chunkStream: NodeJS.ReadableStream | ReadableStream<Uint8Array>
 ): Promise<{ success: boolean; chunkIndex: number; totalUploaded: number }> {
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(uploadId)) {
+  if (!UUID_REGEX.test(uploadId)) {
     throw new UploadValidationError("Identifiant d'upload invalide.", 400);
   }
 
@@ -484,30 +638,69 @@ export async function saveChunkStream(
   );
   const chunkFinalPath = path.join(uploadDir, `chunk_${chunkIndex}`);
 
+  const cleanupPart = () => {
+    try {
+      if (fs.existsSync(chunkPartPath)) {
+        fs.unlinkSync(chunkPartPath);
+      }
+    } catch {
+      // ignore unlink error
+    }
+  };
+
+  // Clean any previous orphan .part files for this specific chunk
+  try {
+    const existing = fs.readdirSync(uploadDir);
+    for (const f of existing) {
+      if (f.startsWith(`chunk_${chunkIndex}.`) && f.endsWith(".part")) {
+        try {
+          fs.unlinkSync(path.join(uploadDir, f));
+        } catch {
+          // ignore
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+
   const nodeStream = "pipe" in chunkStream
     ? (chunkStream as NodeJS.ReadableStream)
     : Readable.fromWeb(chunkStream as import("stream/web").ReadableStream);
 
+  const limiter = new BoundedByteCounter(expectedChunkSize);
   const writeStream = fs.createWriteStream(chunkPartPath, { mode: 0o600 });
-  await pipeline(nodeStream, writeStream);
 
-  if (!writeStream.closed) {
-    await new Promise<void>((resolve) => writeStream.once("close", () => resolve()));
-  }
+  try {
+    await pipeline(nodeStream, limiter, writeStream);
 
-  // Verify exact received chunk size
-  const chunkStat = fs.statSync(chunkPartPath);
-  if (chunkStat.size !== expectedChunkSize) {
-    try {
-      fs.unlinkSync(chunkPartPath);
-    } catch {
-      // ignore unlink error
+    if (!writeStream.closed) {
+      await new Promise<void>((resolve) => writeStream.once("close", () => resolve()));
     }
-    throw new UploadValidationError(`Taille du morceau invalide (reçu ${chunkStat.size} octets, attendu ${expectedChunkSize} octets).`, 400);
-  }
 
-  // Atomic rename to final chunk
-  fs.renameSync(chunkPartPath, chunkFinalPath);
+    // Verify exact received chunk size
+    const chunkStat = fs.statSync(chunkPartPath);
+    if (chunkStat.size !== expectedChunkSize) {
+      cleanupPart();
+      throw new UploadValidationError(
+        `Taille du morceau invalide (reçu ${chunkStat.size} octets, attendu ${expectedChunkSize} octets).`,
+        400
+      );
+    }
+
+    // Atomic rename to final chunk
+    fs.renameSync(chunkPartPath, chunkFinalPath);
+  } catch (err) {
+    try {
+      if (!writeStream.destroyed && !writeStream.closed) {
+        writeStream.destroy();
+      }
+    } catch {
+      // ignore
+    }
+    cleanupPart();
+    throw err;
+  }
 
   // Update meta with updatedAt
   const uploadedSet = new Set(meta.uploadedChunks);
@@ -533,14 +726,35 @@ export function getUploadStatus(
   uploadedChunks: number[];
   fileName: string;
   target: UploadTarget;
+  finalized?: boolean;
 } {
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(uploadId)) {
+  if (!UUID_REGEX.test(uploadId)) {
     throw new UploadValidationError("Identifiant d'upload invalide.", 400);
   }
 
   const folder = ensureGalleryImportFolder(galleryId);
   const uploadDir = path.join(getUploadsBaseDir(folder.folderPath), uploadId);
+  const receiptPath = path.join(uploadDir, "finalized.json");
   const metaPath = path.join(uploadDir, "meta.json");
+
+  if (fs.existsSync(receiptPath)) {
+    try {
+      const receipt = JSON.parse(fs.readFileSync(receiptPath, "utf-8")) as FinalizeReceipt;
+      const meta = fs.existsSync(metaPath)
+        ? (JSON.parse(fs.readFileSync(metaPath, "utf-8")) as UploadMetadata)
+        : null;
+      return {
+        uploadId,
+        totalChunks: meta?.totalChunks ?? 1,
+        uploadedChunks: meta?.uploadedChunks ?? [0],
+        fileName: receipt.fileName,
+        target: receipt.target,
+        finalized: true,
+      };
+    } catch {
+      // ignore
+    }
+  }
 
   if (!fs.existsSync(metaPath)) {
     throw new UploadValidationError("Session d'upload introuvable ou expirée.", 404);
@@ -572,6 +786,7 @@ export function getUploadStatus(
     uploadedChunks: existingChunks,
     fileName: meta.fileName,
     target: meta.target,
+    finalized: meta.status === "finalized",
   };
 }
 
@@ -584,14 +799,30 @@ export async function finalizeUpload(
   target: UploadTarget;
   alreadyExists?: boolean;
 }> {
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(uploadId)) {
+  if (!UUID_REGEX.test(uploadId)) {
     throw new UploadValidationError("Identifiant d'upload invalide.", 400);
   }
 
   const folder = ensureGalleryImportFolder(galleryId);
   const uploadDir = path.join(getUploadsBaseDir(folder.folderPath), uploadId);
-  const metaPath = path.join(uploadDir, "meta.json");
+  const receiptPath = path.join(uploadDir, "finalized.json");
 
+  // Idempotent finalization: return cached receipt if already finalized
+  if (fs.existsSync(receiptPath)) {
+    try {
+      const receipt = JSON.parse(fs.readFileSync(receiptPath, "utf-8")) as FinalizeReceipt;
+      return {
+        success: true,
+        fileName: receipt.fileName,
+        target: receipt.target,
+        alreadyExists: receipt.alreadyExists,
+      };
+    } catch {
+      // unreadable receipt, proceed
+    }
+  }
+
+  const metaPath = path.join(uploadDir, "meta.json");
   if (!fs.existsSync(metaPath)) {
     throw new UploadValidationError("Session d'upload introuvable ou expirée.", 404);
   }
@@ -649,13 +880,23 @@ export async function finalizeUpload(
     }
     fs.copyFileSync(chunkPath, assembledPath);
     fs.chmodSync(assembledPath, 0o600);
+    await yieldToEventLoop();
   } else {
     const assembledFd = fs.openSync(assembledPath, "w", 0o600);
     try {
+      const copyBuffer = Buffer.alloc(64 * 1024);
       for (let i = 0; i < meta.totalChunks; i++) {
         const chunkPath = path.join(uploadDir, `chunk_${i}`);
-        const chunkBuf = fs.readFileSync(chunkPath);
-        fs.writeSync(assembledFd, chunkBuf);
+        const chunkFd = fs.openSync(chunkPath, "r");
+        try {
+          let bytesRead = 0;
+          while ((bytesRead = fs.readSync(chunkFd, copyBuffer, 0, copyBuffer.length, null)) > 0) {
+            fs.writeSync(assembledFd, copyBuffer, 0, bytesRead);
+          }
+        } finally {
+          fs.closeSync(chunkFd);
+        }
+        await yieldToEventLoop();
       }
       fs.fsyncSync(assembledFd);
     } finally {
@@ -718,49 +959,75 @@ export async function finalizeUpload(
 
   let finalFileName = meta.fileName;
   let destFilePath = path.join(destDir, finalFileName);
+  let alreadyExists = false;
 
   // Check for existing file with same name
   if (fs.existsSync(destFilePath)) {
-    const hashAssembled = crypto.createHash("sha256").update(fs.readFileSync(assembledPath)).digest("hex");
-    const hashExisting = crypto.createHash("sha256").update(fs.readFileSync(destFilePath)).digest("hex");
+    const existingStat = fs.statSync(destFilePath);
+    let isIdentical = false;
 
-    if (hashAssembled === hashExisting) {
+    // Fast path: if sizes differ, files cannot be identical
+    if (existingStat.size === assembledStat.size) {
+      await yieldToEventLoop();
+      const hashAssembled = await computeFileSha256(assembledPath);
+      await yieldToEventLoop();
+      const hashExisting = await computeFileSha256(destFilePath);
+      if (hashAssembled === hashExisting) {
+        isIdentical = true;
+      }
+    }
+
+    if (isIdentical) {
       // Exactly the same file content already exists
       try {
         fs.unlinkSync(assembledPath);
       } catch {
         // ignore unlink error
       }
-      fs.rmSync(uploadDir, { recursive: true, force: true });
-      return {
-        success: true,
-        fileName: finalFileName,
-        target: meta.target,
-        alreadyExists: true,
-      };
+      alreadyExists = true;
+    } else {
+      // Different content: generate unique name
+      const parsed = path.parse(meta.fileName);
+      let counter = 1;
+      while (fs.existsSync(path.join(destDir, `${parsed.name} (${counter})${parsed.ext}`))) {
+        counter++;
+      }
+      finalFileName = `${parsed.name} (${counter})${parsed.ext}`;
+      destFilePath = path.join(destDir, finalFileName);
+      // Atomic move to final destination
+      fs.renameSync(assembledPath, destFilePath);
+      fs.chmodSync(destFilePath, 0o600);
     }
-
-    // Different content: generate unique name
-    const parsed = path.parse(meta.fileName);
-    let counter = 1;
-    while (fs.existsSync(path.join(destDir, `${parsed.name} (${counter})${parsed.ext}`))) {
-      counter++;
-    }
-    finalFileName = `${parsed.name} (${counter})${parsed.ext}`;
-    destFilePath = path.join(destDir, finalFileName);
+  } else {
+    // Atomic move to final destination
+    fs.renameSync(assembledPath, destFilePath);
+    fs.chmodSync(destFilePath, 0o600);
   }
 
-  // Atomic move to final destination
-  fs.renameSync(assembledPath, destFilePath);
-  fs.chmodSync(destFilePath, 0o600);
+  // Clean chunks and temporary assembly files
+  cleanUploadChunks(uploadDir);
 
-  // Cleanup upload directory
-  fs.rmSync(uploadDir, { recursive: true, force: true });
+  // Write finalized receipt
+  const receipt: FinalizeReceipt = {
+    success: true,
+    fileName: finalFileName,
+    target: meta.target,
+    alreadyExists: alreadyExists ? true : undefined,
+    finalizedAt: Date.now(),
+  };
+
+  fs.writeFileSync(receiptPath, JSON.stringify(receipt, null, 2), { mode: 0o600 });
+
+  // Update meta.status
+  meta.status = "finalized";
+  meta.updatedAt = Date.now();
+  writeMetadataAtomic(uploadDir, meta);
 
   return {
     success: true,
     fileName: finalFileName,
     target: meta.target,
+    alreadyExists: alreadyExists ? true : undefined,
   };
 }
 
