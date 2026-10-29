@@ -34,7 +34,51 @@ import { useLoaderData, useLocation } from "react-router";
 import PortfolioPage, { loader as publicPortfolioLoader } from "../app/routes/public/portfolio";
 import { ScrollToTop } from "../app/components/public/ScrollToTop";
 import { createDefaultPortfolioContent } from "../app/lib/portfolio-content.server";
+import type { PortfolioMediaItem } from "../app/lib/portfolio-content.shared";
 import defaultSiteContent from "../app/content/default-site-content.json";
+
+function createScrollPortfolioFixture() {
+  const content = createDefaultPortfolioContent();
+  const category = content.categories.find((c) => c.id === "documentary")!;
+  const project = content.projects.find((p) => p.category === category.id)!;
+  const coverId = "44444444-4444-4444-8444-444444444444";
+  const showreelCoverId = "55555555-5555-4555-8555-555555555555";
+  const media = (
+    imageId: string,
+    ownerType: "project" | "section",
+    ownerId: string,
+    mediaSlot: "cover" | "showreel_cover"
+  ): PortfolioMediaItem => ({
+    imageId,
+    ownerType,
+    ownerId,
+    mediaSlot,
+    originalFormat: "webp",
+    originalWidth: 1920,
+    originalHeight: 1080,
+    variants: [{ name: "640p", width: 640, height: 360, webpSize: 1000, avifSize: 800 }],
+    createdAt: 1700000000000,
+  });
+
+  project.status = "published";
+  project.slugFr = "projet-test";
+  project.slugEn = "test-project";
+  project.title = { fr: "Projet de test", en: "Test project" };
+  project.coverImageId = coverId;
+  project.coverAlt = { fr: "Portrait de test", en: "Test portrait" };
+  project.presentationMode = "photo";
+  content.media[coverId] = media(coverId, "project", project.id, "cover");
+  category.status = "published";
+  category.showreelCoverImageId = showreelCoverId;
+  category.showreelVideo = {
+    provider: "youtube",
+    videoId: "dQw4w9WgXcQ",
+    url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    coverImageId: showreelCoverId,
+  };
+  content.media[showreelCoverId] = media(showreelCoverId, "section", category.id, "showreel_cover");
+  return content;
+}
 
 describe("Public ScrollToTop Component & Integration Tests", () => {
   let tempDir: string;
@@ -43,7 +87,7 @@ describe("Public ScrollToTop Component & Integration Tests", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     originalEnv = { ...process.env };
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "parallax-scroll-tests-"));
+    tempDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "parallax-scroll-tests-")));
     const testSiteContent = path.join(tempDir, "site-content.json");
     const testPortfolioContent = path.join(tempDir, "portfolio-content.json");
     window.matchMedia = vi.fn().mockImplementation((query: string) => ({
@@ -59,17 +103,9 @@ describe("Public ScrollToTop Component & Integration Tests", () => {
     window.scrollY = 0;
 
     const testMediaDir = path.join(tempDir, "media");
-    fs.mkdirSync(testMediaDir, { recursive: true });
-
-    if (fs.existsSync("/Users/studiolm/ParallaxDevData/content/portfolio-content.json")) {
-      fs.copyFileSync("/Users/studiolm/ParallaxDevData/content/portfolio-content.json", testPortfolioContent);
-    } else {
-      const portContent = createDefaultPortfolioContent();
-      const docCat = portContent.categories.find((c) => c.id === "documentary") || portContent.categories[0];
-      docCat.status = "published";
-      fs.writeFileSync(testPortfolioContent, JSON.stringify(portContent, null, 2), "utf-8");
-    }
-    fs.writeFileSync(testSiteContent, JSON.stringify(defaultSiteContent, null, 2), "utf-8");
+    fs.mkdirSync(testMediaDir, { recursive: true, mode: 0o700 });
+    fs.writeFileSync(testPortfolioContent, JSON.stringify(createScrollPortfolioFixture(), null, 2), { mode: 0o600 });
+    fs.writeFileSync(testSiteContent, JSON.stringify(defaultSiteContent, null, 2), { mode: 0o600 });
 
     process.env.PORTFOLIO_CONTENT_PATH = testPortfolioContent;
     process.env.PORTFOLIO_MEDIA_PATH = testMediaDir;
@@ -399,17 +435,29 @@ describe("Public ScrollToTop Component & Integration Tests", () => {
       expect(panelScrollToMock).toHaveBeenCalledWith({ top: 0, behavior: "smooth" });
     });
 
-    it("renders exactly one ScrollToTop button inside panel dialog on project sheet (/fr/projets/documentaire/publicite-velo)", async () => {
-      const req = new Request("http://localhost:3000/fr/projets/documentaire/publicite-velo?dir=right");
+    it.each([
+      {
+        pathname: "/fr/projets/documentaire/projet-test",
+        params: { rubrique: "documentaire", slugFr: "projet-test" },
+        label: "Remonter en haut de la page",
+      },
+      {
+        pathname: "/en/projects/documentary/test-project",
+        params: { category: "documentary", slugEn: "test-project" },
+        label: "Back to top",
+      },
+    ])("renders one working arrow in the project dialog and restores it after the lightbox ($pathname)", async ({ pathname, params, label }) => {
+      const req = new Request(`http://localhost:3000${pathname}?dir=right`);
       const res = await publicPortfolioLoader({
         request: req,
-        params: { rubrique: "documentaire", slugFr: "publicite-velo" },
+        params,
       } as unknown as LoaderFunctionArgs);
+      expect(res.status).toBe(200);
       const loaderData = await res.json();
 
       vi.mocked(useLoaderData).mockReturnValue(loaderData);
       vi.mocked(useLocation).mockReturnValue({
-        pathname: "/fr/projets/documentaire/publicite-velo",
+        pathname,
         search: "?dir=right",
         hash: "",
         state: null,
@@ -421,6 +469,7 @@ describe("Public ScrollToTop Component & Integration Tests", () => {
 
       expect(scrollBtns).toHaveLength(1);
       const btn = scrollBtns[0];
+      expect(btn).toHaveAttribute("aria-label", label);
 
       const dialog = container.querySelector("div[role='dialog'][class*='panelOverlay']");
       expect(dialog).toBeTruthy();
@@ -440,6 +489,19 @@ describe("Public ScrollToTop Component & Integration Tests", () => {
 
       fireEvent.click(btn);
       expect(panelScrollToMock).toHaveBeenCalledWith({ top: 0, behavior: "smooth" });
+
+      const enlargePhoto = container.querySelector(
+        'button[aria-label^="Agrandir la photo"], button[aria-label^="Enlarge photo"]'
+      );
+      expect(enlargePhoto).toBeTruthy();
+      fireEvent.click(enlargePhoto!);
+      expect(btn).toBeDisabled();
+      const closeLightbox = container.querySelector(
+        'button[aria-label="Fermer la visionneuse"], button[aria-label="Close photo viewer"]'
+      );
+      expect(closeLightbox).toBeTruthy();
+      fireEvent.click(closeLightbox!);
+      expect(btn).not.toBeDisabled();
     });
 
     it("keyboard focus trap includes ScrollToTop when visible and excludes it when hidden", async () => {
@@ -485,6 +547,10 @@ describe("Public ScrollToTop Component & Integration Tests", () => {
       // Verify user can focus the ScrollToTop button inside dialog
       btn.focus();
       expect(document.activeElement).toBe(btn);
+      fireEvent.keyDown(window, { key: "Tab" });
+      expect(document.activeElement).toBe(backBtn);
+      fireEvent.keyDown(window, { key: "Tab", shiftKey: true });
+      expect(document.activeElement).toBe(btn);
     });
 
     it("hides during VideoModal and recalculates immediately upon closing", async () => {
@@ -515,25 +581,19 @@ describe("Public ScrollToTop Component & Integration Tests", () => {
       });
       expect(btn).not.toBeDisabled();
 
-      // Open Video Modal if showreel button is present, or trigger activeVideoUrl
+      // The isolated fixture always supplies a showreel: this interaction must run.
       const playBtn = container.querySelector("button[class*='playBtn']") as HTMLElement;
-      if (playBtn) {
-        fireEvent.click(playBtn);
-        // Verify arrow hides while modal is open
-        expect(btn).toBeDisabled();
+      expect(playBtn).toBeTruthy();
+      fireEvent.click(playBtn);
+      // Verify arrow hides while modal is open
+      expect(btn).toBeDisabled();
 
-        // Close Video Modal
-        const closeVideoBtn = container.querySelector("button[aria-label='Fermer']") as HTMLElement;
-        if (closeVideoBtn) {
-          fireEvent.click(closeVideoBtn);
-        } else {
-          fireEvent.keyDown(window, { key: "Escape" });
-        }
+      // Close Video Modal
+      fireEvent.keyDown(window, { key: "Escape" });
 
-        // Re-evaluated immediately on modal close: reappears because scrollTop is still 200
-        expect(btn).not.toBeDisabled();
-        expect(btn).toHaveAttribute("tabindex", "0");
-      }
+      // Re-evaluated immediately on modal close: reappears because scrollTop is still 200
+      expect(btn).not.toBeDisabled();
+      expect(btn).toHaveAttribute("tabindex", "0");
     });
   });
 });
