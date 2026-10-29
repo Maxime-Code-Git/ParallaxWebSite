@@ -253,7 +253,7 @@ export default function HomePage() {
       <Footer common={common} lang={lang} theme="sempra" />
 
       {/* Floating scroll to top button */}
-      <ScrollToTop checkSempra={true} />
+      <ScrollToTop checkSempra={true} lang={lang} hidden={showreelOpen} />
 
       {/* Showreel video modal with explicit consent */}
       <VideoModal

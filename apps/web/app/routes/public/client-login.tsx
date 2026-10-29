@@ -11,6 +11,7 @@ import {
 } from "react-router";
 import { Header } from "../../components/public/Header";
 import { Footer } from "../../components/public/Footer";
+import { ScrollToTop } from "../../components/public/ScrollToTop";
 import { getSiteContent } from "../../lib/site-content.server";
 import {
   getGallerySession,
@@ -275,6 +276,7 @@ export default function ClientLoginPage() {
       </main>
 
       <Footer common={common} lang={lang} />
+      <ScrollToTop lang={lang} />
     </div>
   );
 }

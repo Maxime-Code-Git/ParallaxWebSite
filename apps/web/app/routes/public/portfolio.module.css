@@ -250,7 +250,7 @@
 }
 
 .panelOverlay[data-direction="right"][data-state="open"] {
-  transform: translateX(0);
+  transform: none;
   pointer-events: auto;
 }
 
@@ -263,7 +263,7 @@
 }
 
 .panelOverlay[data-direction="left"][data-state="open"] {
-  transform: translateX(0);
+  transform: none;
   pointer-events: auto;
 }
 
@@ -749,8 +749,8 @@
   pointer-events: none;
 }
 
-.portfolioScrollToTop {
-  z-index: 105;
+button.portfolioScrollToTop {
+  z-index: 70;
 }
 
 /* -------------------------------------------------------------

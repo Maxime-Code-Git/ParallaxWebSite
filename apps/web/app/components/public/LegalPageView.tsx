@@ -503,7 +503,7 @@ export function LegalPageView({
       </main>
 
       <Footer common={common} lang={lang} />
-      <ScrollToTop />
+      <ScrollToTop lang={lang} />
     </div>
   );
 }

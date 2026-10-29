@@ -488,7 +488,7 @@ export default function ContactPage() {
       <Footer common={content.common} lang={lang} theme="dark" />
 
       {/* Back to top button */}
-      <ScrollToTop />
+      <ScrollToTop lang={lang} />
     </div>
   );
 }

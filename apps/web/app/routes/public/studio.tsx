@@ -136,7 +136,7 @@ export default function StudioPage() {
       <Footer common={common} lang={lang} theme="dark" />
 
       {/* Floating scroll to top button */}
-      <ScrollToTop />
+      <ScrollToTop lang={lang} />
     </div>
   );
 }

@@ -527,8 +527,15 @@ export default function PortfolioPage() {
       if (e.key !== "Tab") return;
       if (activeVideoUrl || lightboxIndex !== null) return;
 
-      const focusable = panelEl.querySelectorAll<HTMLElement>(
-        'a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'
+      const focusable = Array.from(
+        panelEl.querySelectorAll<HTMLElement>(
+          'a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'
+        )
+      ).filter(
+        (el) =>
+          el.getAttribute("tabindex") !== "-1" &&
+          !el.hasAttribute("disabled") &&
+          el.getAttribute("aria-hidden") !== "true"
       );
       if (focusable.length === 0) return;
 
@@ -1482,15 +1489,27 @@ export default function PortfolioPage() {
             </div>
           ) : null}
         </div>
+
+        {/* Panel ScrollToTop within the modal dialog perimeter */}
+        {phase !== "closed" && (
+          <ScrollToTop
+            targetRef={panelRef}
+            hidden={phase !== "open" || Boolean(activeVideoUrl) || lightboxIndex !== null}
+            className={styles.portfolioScrollToTop}
+            lang={lang}
+            viewKey={location.pathname}
+          />
+        )}
       </div>
 
-      {/* Single, non-transformed ScrollToTop controller */}
-      <ScrollToTop
-        key={phase === "open" ? `panel-${location.pathname}` : "overview"}
-        targetRef={phase === "open" ? panelRef : undefined}
-        hidden={phase === "opening" || phase === "closing" || Boolean(activeVideoUrl) || lightboxIndex !== null}
-        className={styles.portfolioScrollToTop}
-      />
+      {/* Overview ScrollToTop for the public overview page */}
+      {phase === "closed" && (
+        <ScrollToTop
+          className={styles.portfolioScrollToTop}
+          lang={lang}
+          viewKey={location.pathname}
+        />
+      )}
 
       {/* Video Modal with explicit consent */}
       {activeVideoUrl && (

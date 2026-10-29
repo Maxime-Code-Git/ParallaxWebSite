@@ -552,7 +552,7 @@ export default function GalleryPage() {
         </Form>
       </section>
 
-      <ScrollToTop />
+      <ScrollToTop lang={lang} hidden={Boolean(activePhoto)} />
       <Footer common={common} lang={lang} />
     </div>
 

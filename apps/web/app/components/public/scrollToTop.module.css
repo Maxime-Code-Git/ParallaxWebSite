@@ -21,6 +21,11 @@
   transform: scale(1.08);
 }
 
+.btn:disabled {
+  pointer-events: none;
+  cursor: default;
+}
+
 .btnSempra {
   background: rgba(7, 36, 33, 0.72);
   border-color: var(--sp-gold);
@@ -34,6 +39,15 @@
 .hidden {
   opacity: 0;
   pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn {
+    transition: opacity 0.05s linear !important;
+  }
+  .btn:hover {
+    transform: none !important;
+  }
 }
 
 @media (max-width: 900px) {
