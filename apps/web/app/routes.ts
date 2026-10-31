@@ -39,6 +39,7 @@ export default [
   route("admin/dashboard", "routes/admin/dashboard.tsx"),
   route("admin/home", "routes/admin/home.tsx"),
   route("admin/studio", "routes/admin/studio.tsx"),
+  route("admin/studios", "routes/admin/studios.tsx"),
   route("admin/contact", "routes/admin/contact.tsx"),
   route("admin/company", "routes/admin/company.tsx"),
   route("admin/legal", "routes/admin/legal-list.tsx"),

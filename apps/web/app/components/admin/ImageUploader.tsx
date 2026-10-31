@@ -1,7 +1,6 @@
 import { useState, useRef } from "react";
 import {
   type AdminUploadLocation,
-  type AllowedStaticImageId,
   type UploadedMediaMetadata,
   DEFAULT_LOCATION_IMAGES,
   resolveAllowedImage,
@@ -19,7 +18,7 @@ export interface ImageUploaderProps {
   isGlobalUploading: boolean;
   setIsGlobalUploading: (uploading: boolean) => void;
   onSuccess: (newRevision: string, newImageId: string, metadata: UploadedMediaMetadata) => void;
-  onRevertSuccess: (newRevision: string, defaultImageId: AllowedStaticImageId) => void;
+  onRevertSuccess: (newRevision: string, defaultImageId: string) => void;
   label?: string;
   aspect?: "hero" | "portrait" | "standard";
 }
@@ -115,7 +114,9 @@ export function ImageUploader({
 
     setFeedback({
       type: "loading",
-      message: "Rétablissement de l'image de référence...",
+      message: defaultStaticId
+        ? "Rétablissement de l'image de référence..."
+        : "Retrait de l'image en cours...",
     });
     setIsUploading(true);
     setIsGlobalUploading(true);
@@ -136,20 +137,27 @@ export function ImageUploader({
       if (res.ok && data.success) {
         setFeedback({
           type: "success",
-          message:
-            "Image de référence rétablie avec succès. Pensez à enregistrer vos textes si nécessaire.",
+          message: defaultStaticId
+            ? "Image de référence rétablie avec succès. Pensez à enregistrer vos textes si nécessaire."
+            : "Image retirée avec succès. Le panneau affiche désormais son fond coloré pur.",
         });
-        onRevertSuccess(data.newRevision, defaultStaticId);
+        onRevertSuccess(data.newRevision, defaultStaticId || "");
       } else {
         setFeedback({
           type: "error",
-          message: data.error || "Erreur lors du rétablissement de l'image de référence.",
+          message:
+            data.error ||
+            (defaultStaticId
+              ? "Erreur lors du rétablissement de l'image de référence."
+              : "Erreur lors du retrait de l'image."),
         });
       }
     } catch {
       setFeedback({
         type: "error",
-        message: "Erreur de connexion lors du rétablissement de l'image de référence.",
+        message: defaultStaticId
+          ? "Erreur de connexion lors du rétablissement de l'image de référence."
+          : "Erreur de connexion lors du retrait de l'image.",
       });
     } finally {
       setIsUploading(false);
@@ -182,14 +190,22 @@ export function ImageUploader({
             data-testid={`image-preview-${location}`}
           />
         ) : (
-          <div className={styles.fileRequirements}>Aucune image</div>
+          <div className={styles.fileRequirements}>Aucune image (fond coloré seul)</div>
         )}
         <span
           className={`${styles.badge} ${
-            isCustomImage ? styles.badgeCustom : styles.badgeDefault
+            isCustomImage
+              ? styles.badgeCustom
+              : defaultStaticId
+                ? styles.badgeDefault
+                : styles.badgeNone
           }`}
         >
-          {isCustomImage ? "Image importée" : "Image de référence"}
+          {isCustomImage
+            ? "Image importée"
+            : defaultStaticId
+              ? "Image de référence"
+              : "Aucune image"}
         </span>
       </div>
 
@@ -227,9 +243,9 @@ export function ImageUploader({
             onClick={() => void handleRevert()}
             disabled={isDisabled}
             className={styles.revertButton}
-            aria-label={`Revenir à l'image de référence pour ${label}`}
+            aria-label={`${defaultStaticId ? "Revenir à l'image de référence" : "Retirer l'image"} pour ${label}`}
           >
-            Revenir à l'image de référence
+            {defaultStaticId ? "Revenir à l'image de référence" : "Retirer l'image"}
           </button>
         )}
       </div>

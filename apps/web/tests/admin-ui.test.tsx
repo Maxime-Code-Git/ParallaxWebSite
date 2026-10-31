@@ -113,6 +113,7 @@ describe("Admin UI Components", () => {
         "Accueil",
         "Projets et portfolio",
         "Studio",
+        "Passerelle StudioLM",
         "Contact",
         "Paramètres de l'entreprise",
         "Galeries clients",
@@ -125,7 +126,7 @@ describe("Admin UI Components", () => {
       }
 
       const activeBadges = screen.getAllByText("Actif");
-      expect(activeBadges.length).toBe(8);
+      expect(activeBadges.length).toBe(9);
 
       const nextLotBadges = screen.queryAllByText("Lot suivant");
       expect(nextLotBadges.length).toBe(0);

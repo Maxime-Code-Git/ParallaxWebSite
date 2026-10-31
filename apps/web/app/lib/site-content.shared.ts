@@ -26,21 +26,75 @@ export type AdminUploadLocation =
   | "showreel_cover"
   | "duo"
   | "portrait_ludovic"
-  | "portrait_maxime";
+  | "portrait_maxime"
+  | "studios_sempra"
+  | "studios_parallax";
 
 export const ADMIN_UPLOAD_LOCATIONS: readonly AdminUploadLocation[] = [
   "showreel_cover",
   "duo",
   "portrait_ludovic",
   "portrait_maxime",
+  "studios_sempra",
+  "studios_parallax",
 ] as const;
 
-export const DEFAULT_LOCATION_IMAGES: Record<AdminUploadLocation, AllowedStaticImageId> = {
+export const DEFAULT_LOCATION_IMAGES: Partial<Record<AdminUploadLocation, AllowedStaticImageId>> = {
   showreel_cover: "index-showreel",
   duo: "index-duo",
   portrait_ludovic: "studio-ludovic",
   portrait_maxime: "studio-maxime",
 };
+
+export type StudiosFraming = "center" | "top" | "bottom";
+
+export interface StudiosPanelConfig {
+  imageId: string | null;
+  framing: StudiosFraming;
+}
+
+export interface StudiosContent {
+  sempra: StudiosPanelConfig;
+  parallax: StudiosPanelConfig;
+}
+
+export function createDefaultStudiosContent(): StudiosContent {
+  return {
+    sempra: {
+      imageId: null,
+      framing: "center",
+    },
+    parallax: {
+      imageId: null,
+      framing: "center",
+    },
+  };
+}
+
+export function cleanStudiosContent(studios: StudiosContent | null | undefined): StudiosContent {
+  if (!studios) {
+    return createDefaultStudiosContent();
+  }
+  const cleanFraming = (f: unknown): StudiosFraming => {
+    return f === "top" || f === "bottom" ? f : "center";
+  };
+  return {
+    sempra: {
+      imageId:
+        typeof studios.sempra?.imageId === "string" && studios.sempra.imageId.trim()
+          ? studios.sempra.imageId.trim().toLowerCase()
+          : null,
+      framing: cleanFraming(studios.sempra?.framing),
+    },
+    parallax: {
+      imageId:
+        typeof studios.parallax?.imageId === "string" && studios.parallax.imageId.trim()
+          ? studios.parallax.imageId.trim().toLowerCase()
+          : null,
+      framing: cleanFraming(studios.parallax?.framing),
+    },
+  };
+}
 
 export interface MediaVariantInfo {
   name: "640p" | "960p" | "1440p" | "1920p";
@@ -1931,6 +1985,7 @@ export interface SiteContent {
   contactPage: ContactPageContent;
   company: CompanyContent;
   legalPages: LegalPagesContent;
+  studios?: StudiosContent;
   media?: Record<string, UploadedMediaMetadata>;
 }
 

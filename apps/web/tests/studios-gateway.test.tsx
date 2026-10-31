@@ -11,6 +11,7 @@ import StudiosGateway, {
   PARALLAX_URL,
   meta,
   headers,
+  loader as studiosLoader,
 } from "../app/routes/public/studios";
 import { applyStudiosSecurityHeaders } from "../app/entry.server";
 import { loader as sitemapLoader } from "../app/routes/public/sitemap";
@@ -95,6 +96,17 @@ describe("Studios Gateway Route (/studios)", () => {
       expect(container.querySelectorAll("button")).toHaveLength(0);
       expect(container.querySelectorAll("a a")).toHaveLength(0);
       expect(container.querySelectorAll("a button")).toHaveLength(0);
+    });
+
+    it("uses '|' instead of em-dash in accessible labels", () => {
+      const { container } = render(<StudiosGateway />);
+      const sempraLink = container.querySelector(`a[href="${SEMPRA_URL}"]`);
+      const parallaxLink = container.querySelector(`a[href="${PARALLAX_URL}"]`);
+
+      expect(sempraLink?.getAttribute("aria-label")).toBe("SEMPRA | Photographie et vidéo de mariage");
+      expect(parallaxLink?.getAttribute("aria-label")).toBe("Parallax | Photographie et création vidéo");
+      expect(sempraLink?.getAttribute("aria-label")).not.toContain("—");
+      expect(parallaxLink?.getAttribute("aria-label")).not.toContain("—");
     });
   });
 
@@ -204,6 +216,14 @@ describe("Studios Gateway Route (/studios)", () => {
   });
 
   describe("7. Non-Indexation and Technical SEO", () => {
+    it("uses '|' in document title and contains no em-dash", () => {
+      const metaTags = meta({} as Parameters<typeof meta>[0]);
+      const titleTag = metaTags?.find((m) => "title" in m);
+      expect(titleTag).toBeDefined();
+      expect((titleTag as { title: string }).title).toBe("StudioLM | SEMPRA & Parallax");
+      expect((titleTag as { title: string }).title).not.toContain("—");
+    });
+
     it("declares noindex and nofollow in route metadata", () => {
       const metaTags = meta({} as Parameters<typeof meta>[0]);
       expect(metaTags).toBeDefined();
@@ -258,6 +278,27 @@ describe("Studios Gateway Route (/studios)", () => {
       const xml = await res.text();
       expect(xml).not.toContain("/studios");
       expect(xml).not.toContain("studios");
+    });
+  });
+
+  describe("8. Dynamic Media Configuration & Fallback", () => {
+    it("renders NO background <img> when no custom image is configured (pure brand background)", () => {
+      const { container } = render(<StudiosGateway />);
+      // Neither SEMPRA nor Parallax panel should contain an image with class bgImage
+      const bgImages = container.querySelectorAll("img[class*='bgImage']");
+      expect(bgImages).toHaveLength(0);
+    });
+
+    it("public loader exposes only gateway panel image and framing data", async () => {
+      const res = await studiosLoader();
+      expect(res.status).toBe(200);
+      expect(res.headers.get("X-Robots-Tag")).toBe("noindex, nofollow");
+
+      const data = await res.json();
+      expect(data).toHaveProperty("sempra");
+      expect(data).toHaveProperty("parallax");
+      expect(data.sempra).toEqual({ imageId: null, framing: "center" });
+      expect(data.parallax).toEqual({ imageId: null, framing: "center" });
     });
   });
 });

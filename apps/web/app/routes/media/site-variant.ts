@@ -42,6 +42,12 @@ function isMediaReferencedInActiveContent(imageId: string, location: AdminUpload
     ) {
       return true;
     }
+    if (location === "studios_sempra" && content.studios?.sempra?.imageId?.toLowerCase() === lowerId) {
+      return true;
+    }
+    if (location === "studios_parallax" && content.studios?.parallax?.imageId?.toLowerCase() === lowerId) {
+      return true;
+    }
 
     // General match in active media map with matching location
     if (content.media && content.media[lowerId] && content.media[lowerId].location === location) {
@@ -49,7 +55,9 @@ function isMediaReferencedInActiveContent(imageId: string, location: AdminUpload
       if (
         content.home?.showreel?.coverImageId?.toLowerCase() === lowerId ||
         content.home?.duo?.imageId?.toLowerCase() === lowerId ||
-        content.studio?.team?.members?.some((m) => m.imageId?.toLowerCase() === lowerId)
+        content.studio?.team?.members?.some((m) => m.imageId?.toLowerCase() === lowerId) ||
+        content.studios?.sempra?.imageId?.toLowerCase() === lowerId ||
+        content.studios?.parallax?.imageId?.toLowerCase() === lowerId
       ) {
         return true;
       }

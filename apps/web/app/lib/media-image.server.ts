@@ -603,6 +603,12 @@ export function getReferencedMediaIds(
         checkAndAdd(member.imageId);
       }
     }
+    if (content.studios?.sempra?.imageId) {
+      checkAndAdd(content.studios.sempra.imageId);
+    }
+    if (content.studios?.parallax?.imageId) {
+      checkAndAdd(content.studios.parallax.imageId);
+    }
   };
 
   // 1. Inspect currently active content locations

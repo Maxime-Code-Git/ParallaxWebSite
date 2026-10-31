@@ -30,6 +30,9 @@ import {
   cleanStudioContent,
   cleanContactContent,
   cleanLegalDocument,
+  cleanStudiosContent,
+  createDefaultStudiosContent,
+  type StudiosContent,
 } from "./site-content.shared";
 
 export class RevisionConflictError extends Error {
@@ -75,6 +78,7 @@ import {
   migrateSiteContentV1ToV2,
   migrateSiteContentV2ToV3,
   validateSiteContent,
+  validateStudiosContent,
 } from "@parallax/shared";
 
 export {
@@ -101,6 +105,13 @@ export {
   migrateSiteContentV1ToV2,
   migrateSiteContentV2ToV3,
   validateSiteContent,
+  validateStudiosContent,
+};
+
+export {
+  cleanStudiosContent,
+  createDefaultStudiosContent,
+  type StudiosContent,
 };
 
 export function getSiteContentFilePath(): string {
@@ -184,6 +195,30 @@ export function validateReferencedMediaConsistency(
   }
 }
 
+export function collectActiveMediaIds(content: SiteContent): Set<string> {
+  const activeMediaIds = new Set<string>();
+  if (content.home?.showreel?.coverImageId && isUuid(content.home.showreel.coverImageId)) {
+    activeMediaIds.add(content.home.showreel.coverImageId.toLowerCase());
+  }
+  if (content.home?.duo?.imageId && isUuid(content.home.duo.imageId)) {
+    activeMediaIds.add(content.home.duo.imageId.toLowerCase());
+  }
+  if (Array.isArray(content.studio?.team?.members)) {
+    for (const member of content.studio.team.members) {
+      if (member.imageId && isUuid(member.imageId)) {
+        activeMediaIds.add(member.imageId.toLowerCase());
+      }
+    }
+  }
+  if (content.studios?.sempra?.imageId && isUuid(content.studios.sempra.imageId)) {
+    activeMediaIds.add(content.studios.sempra.imageId.toLowerCase());
+  }
+  if (content.studios?.parallax?.imageId && isUuid(content.studios.parallax.imageId)) {
+    activeMediaIds.add(content.studios.parallax.imageId.toLowerCase());
+  }
+  return activeMediaIds;
+}
+
 export function saveHomeContent(newHome: HomeContent, previousRevision: string): string {
   const current = getRawSiteContent();
   if (current.isCorrupted) {
@@ -211,27 +246,6 @@ export function saveHomeContent(newHome: HomeContent, previousRevision: string):
 
   const nextRevision = crypto.randomBytes(16).toString("hex");
 
-  // Prune media registry to retain only currently active locations
-  const activeMediaIds = new Set<string>();
-  if (isUuid(validatedHome.showreel.coverImageId)) {
-    activeMediaIds.add(validatedHome.showreel.coverImageId.toLowerCase());
-  }
-  if (isUuid(validatedHome.duo.imageId)) {
-    activeMediaIds.add(validatedHome.duo.imageId.toLowerCase());
-  }
-  for (const member of current.content.studio.team.members) {
-    if (isUuid(member.imageId)) {
-      activeMediaIds.add(member.imageId.toLowerCase());
-    }
-  }
-
-  const prunedMedia: Record<string, UploadedMediaMetadata> = {};
-  for (const id of activeMediaIds) {
-    if (current.content.media?.[id]) {
-      prunedMedia[id] = current.content.media[id];
-    }
-  }
-
   const updatedCompany = structuredClone(current.content.company);
   updatedCompany.email = validatedHome.contact.email;
   updatedCompany.instagramUrl = validatedHome.contact.instagramUrl;
@@ -243,8 +257,16 @@ export function saveHomeContent(newHome: HomeContent, previousRevision: string):
     updatedAt: new Date().toISOString(),
     home: validatedHome,
     company: updatedCompany,
-    media: prunedMedia,
   };
+
+  const activeMediaIds = collectActiveMediaIds(nextContent);
+  const prunedMedia: Record<string, UploadedMediaMetadata> = {};
+  for (const id of activeMediaIds) {
+    if (current.content.media?.[id]) {
+      prunedMedia[id] = current.content.media[id];
+    }
+  }
+  nextContent.media = prunedMedia;
 
   const fullyValidated = validateSiteContent(nextContent);
   const filePath = getSiteContentFilePath();
@@ -277,34 +299,21 @@ export function saveStudioContent(newStudio: StudioContent, previousRevision: st
 
   const nextRevision = crypto.randomBytes(16).toString("hex");
 
-  // Prune media registry to retain only currently active locations
-  const activeMediaIds = new Set<string>();
-  if (isUuid(current.content.home.showreel.coverImageId)) {
-    activeMediaIds.add(current.content.home.showreel.coverImageId.toLowerCase());
-  }
-  if (isUuid(current.content.home.duo.imageId)) {
-    activeMediaIds.add(current.content.home.duo.imageId.toLowerCase());
-  }
-  for (const member of validatedStudio.team.members) {
-    if (isUuid(member.imageId)) {
-      activeMediaIds.add(member.imageId.toLowerCase());
-    }
-  }
+  const nextContent: SiteContent = {
+    ...current.content,
+    revision: nextRevision,
+    updatedAt: new Date().toISOString(),
+    studio: validatedStudio,
+  };
 
+  const activeMediaIds = collectActiveMediaIds(nextContent);
   const prunedMedia: Record<string, UploadedMediaMetadata> = {};
   for (const id of activeMediaIds) {
     if (current.content.media?.[id]) {
       prunedMedia[id] = current.content.media[id];
     }
   }
-
-  const nextContent: SiteContent = {
-    ...current.content,
-    revision: nextRevision,
-    updatedAt: new Date().toISOString(),
-    studio: validatedStudio,
-    media: prunedMedia,
-  };
+  nextContent.media = prunedMedia;
 
   const fullyValidated = validateSiteContent(nextContent);
   const filePath = getSiteContentFilePath();
@@ -346,24 +355,22 @@ export function saveSiteMediaUpdate(
       throw new ValidationError("Membre studio 'maxime' introuvable.");
     }
     member.imageId = newMedia.imageId;
+  } else if (location === "studios_sempra") {
+    if (!nextContent.studios) {
+      nextContent.studios = createDefaultStudiosContent();
+    }
+    nextContent.studios.sempra.imageId = newMedia.imageId;
+  } else if (location === "studios_parallax") {
+    if (!nextContent.studios) {
+      nextContent.studios = createDefaultStudiosContent();
+    }
+    nextContent.studios.parallax.imageId = newMedia.imageId;
   } else {
     throw new ValidationError(`Emplacement média non supporté: ${String(location)}`);
   }
 
   // Prune media registry to retain only currently active locations
-  const activeMediaIds = new Set<string>();
-  if (isUuid(nextContent.home.showreel.coverImageId)) {
-    activeMediaIds.add(nextContent.home.showreel.coverImageId.toLowerCase());
-  }
-  if (isUuid(nextContent.home.duo.imageId)) {
-    activeMediaIds.add(nextContent.home.duo.imageId.toLowerCase());
-  }
-  for (const member of nextContent.studio.team.members) {
-    if (isUuid(member.imageId)) {
-      activeMediaIds.add(member.imageId.toLowerCase());
-    }
-  }
-
+  const activeMediaIds = collectActiveMediaIds(nextContent);
   const prunedMedia: Record<string, UploadedMediaMetadata> = {};
   for (const id of activeMediaIds) {
     if (id === newMedia.imageId.toLowerCase()) {
@@ -392,8 +399,9 @@ export function saveSiteMediaRevert(
     throw new RevisionConflictError();
   }
 
+  const isStudios = location === "studios_sempra" || location === "studios_parallax";
   const defaultImageId = DEFAULT_LOCATION_IMAGES[location];
-  if (!defaultImageId) {
+  if (!isStudios && !defaultImageId) {
     throw new ValidationError(`Emplacement média non supporté: ${String(location)}`);
   }
 
@@ -403,37 +411,33 @@ export function saveSiteMediaRevert(
   nextContent.updatedAt = new Date().toISOString();
 
   if (location === "showreel_cover") {
-    nextContent.home.showreel.coverImageId = defaultImageId;
+    nextContent.home.showreel.coverImageId = defaultImageId!;
   } else if (location === "duo") {
-    nextContent.home.duo.imageId = defaultImageId;
+    nextContent.home.duo.imageId = defaultImageId!;
   } else if (location === "portrait_ludovic") {
     const member = nextContent.studio.team.members.find((m) => m.id === "ludovic");
     if (!member) {
       throw new ValidationError("Membre studio 'ludovic' introuvable.");
     }
-    member.imageId = defaultImageId;
+    member.imageId = defaultImageId!;
   } else if (location === "portrait_maxime") {
     const member = nextContent.studio.team.members.find((m) => m.id === "maxime");
     if (!member) {
       throw new ValidationError("Membre studio 'maxime' introuvable.");
     }
-    member.imageId = defaultImageId;
-  }
-
-  // Prune media registry to retain only currently active locations
-  const activeMediaIds = new Set<string>();
-  if (isUuid(nextContent.home.showreel.coverImageId)) {
-    activeMediaIds.add(nextContent.home.showreel.coverImageId.toLowerCase());
-  }
-  if (isUuid(nextContent.home.duo.imageId)) {
-    activeMediaIds.add(nextContent.home.duo.imageId.toLowerCase());
-  }
-  for (const member of nextContent.studio.team.members) {
-    if (isUuid(member.imageId)) {
-      activeMediaIds.add(member.imageId.toLowerCase());
+    member.imageId = defaultImageId!;
+  } else if (location === "studios_sempra") {
+    if (nextContent.studios) {
+      nextContent.studios.sempra.imageId = null;
+    }
+  } else if (location === "studios_parallax") {
+    if (nextContent.studios) {
+      nextContent.studios.parallax.imageId = null;
     }
   }
 
+  // Prune media registry to retain only currently active locations
+  const activeMediaIds = collectActiveMediaIds(nextContent);
   const prunedMedia: Record<string, UploadedMediaMetadata> = {};
   for (const id of activeMediaIds) {
     if (current.content.media?.[id]) {
@@ -445,7 +449,7 @@ export function saveSiteMediaRevert(
   const fullyValidated = validateSiteContent(nextContent);
   const filePath = getSiteContentFilePath();
   atomicWriteJson(filePath, fullyValidated);
-  return { newRevision: nextRevision, content: fullyValidated, defaultImageId };
+  return { newRevision: nextRevision, content: fullyValidated, defaultImageId: defaultImageId || "" };
 }
 
 export interface SaveContactCoordinates {
@@ -494,29 +498,6 @@ export function saveContactPageContent(
     }
   }
 
-  const nextRevision = crypto.randomBytes(16).toString("hex");
-
-  // Prune media registry to retain only currently active locations
-  const activeMediaIds = new Set<string>();
-  if (isUuid(updatedHome.showreel.coverImageId)) {
-    activeMediaIds.add(updatedHome.showreel.coverImageId.toLowerCase());
-  }
-  if (isUuid(updatedHome.duo.imageId)) {
-    activeMediaIds.add(updatedHome.duo.imageId.toLowerCase());
-  }
-  for (const member of current.content.studio.team.members) {
-    if (isUuid(member.imageId)) {
-      activeMediaIds.add(member.imageId.toLowerCase());
-    }
-  }
-
-  const prunedMedia: Record<string, UploadedMediaMetadata> = {};
-  for (const id of activeMediaIds) {
-    if (current.content.media?.[id]) {
-      prunedMedia[id] = current.content.media[id];
-    }
-  }
-
   const updatedCompany = structuredClone(current.content.company);
   updatedCompany.phone = validatedContact.card.phone;
   if (canonicalCoordinates) {
@@ -531,6 +512,8 @@ export function saveContactPageContent(
     }
   }
 
+  const nextRevision = crypto.randomBytes(16).toString("hex");
+
   const nextContent: SiteContent = {
     ...current.content,
     schemaVersion: 3,
@@ -539,8 +522,16 @@ export function saveContactPageContent(
     home: updatedHome,
     contactPage: validatedContact,
     company: updatedCompany,
-    media: prunedMedia,
   };
+
+  const activeMediaIds = collectActiveMediaIds(nextContent);
+  const prunedMedia: Record<string, UploadedMediaMetadata> = {};
+  for (const id of activeMediaIds) {
+    if (current.content.media?.[id]) {
+      prunedMedia[id] = current.content.media[id];
+    }
+  }
+  nextContent.media = prunedMedia;
 
   const fullyValidated = validateSiteContent(nextContent);
   const filePath = getSiteContentFilePath();
@@ -578,27 +569,6 @@ export function saveCompanyContent(
 
   const nextRevision = crypto.randomBytes(16).toString("hex");
 
-  // Prune media registry to retain only currently active locations
-  const activeMediaIds = new Set<string>();
-  if (isUuid(updatedHome.showreel.coverImageId)) {
-    activeMediaIds.add(updatedHome.showreel.coverImageId.toLowerCase());
-  }
-  if (isUuid(updatedHome.duo.imageId)) {
-    activeMediaIds.add(updatedHome.duo.imageId.toLowerCase());
-  }
-  for (const member of current.content.studio.team.members) {
-    if (isUuid(member.imageId)) {
-      activeMediaIds.add(member.imageId.toLowerCase());
-    }
-  }
-
-  const prunedMedia: Record<string, UploadedMediaMetadata> = {};
-  for (const id of activeMediaIds) {
-    if (current.content.media?.[id]) {
-      prunedMedia[id] = current.content.media[id];
-    }
-  }
-
   const nextContent: SiteContent = {
     ...current.content,
     schemaVersion: 3,
@@ -608,8 +578,76 @@ export function saveCompanyContent(
     home: updatedHome,
     contactPage: updatedContactPage,
     company: validatedCompany,
-    media: prunedMedia,
   };
+
+  const activeMediaIds = collectActiveMediaIds(nextContent);
+  const prunedMedia: Record<string, UploadedMediaMetadata> = {};
+  for (const id of activeMediaIds) {
+    if (current.content.media?.[id]) {
+      prunedMedia[id] = current.content.media[id];
+    }
+  }
+  nextContent.media = prunedMedia;
+
+  const fullyValidated = validateSiteContent(nextContent);
+  const filePath = getSiteContentFilePath();
+  atomicWriteJson(filePath, fullyValidated);
+  return nextRevision;
+}
+
+export function getStudiosContent(): StudiosContent {
+  const content = getSiteContent();
+  return cleanStudiosContent(content?.studios);
+}
+
+export function saveStudiosContent(
+  newStudios: StudiosContent,
+  previousRevision: string
+): string {
+  const current = getRawSiteContent();
+  if (current.isCorrupted) {
+    throw new CorruptedContentError();
+  }
+  if (current.content.revision !== previousRevision) {
+    throw new RevisionConflictError(undefined, current.content.revision);
+  }
+
+  const validatedStudios = validateStudiosContent(cleanStudiosContent(newStudios));
+
+  if (validatedStudios.sempra.imageId) {
+    validateReferencedMediaConsistency(
+      validatedStudios.sempra.imageId,
+      "studios_sempra",
+      current.content.media,
+      "studios.sempra.imageId"
+    );
+  }
+  if (validatedStudios.parallax.imageId) {
+    validateReferencedMediaConsistency(
+      validatedStudios.parallax.imageId,
+      "studios_parallax",
+      current.content.media,
+      "studios.parallax.imageId"
+    );
+  }
+
+  const nextRevision = crypto.randomBytes(16).toString("hex");
+  const nextContent: SiteContent = {
+    ...current.content,
+    schemaVersion: 3,
+    revision: nextRevision,
+    updatedAt: new Date().toISOString(),
+    studios: validatedStudios,
+  };
+
+  const activeMediaIds = collectActiveMediaIds(nextContent);
+  const prunedMedia: Record<string, UploadedMediaMetadata> = {};
+  for (const id of activeMediaIds) {
+    if (current.content.media?.[id]) {
+      prunedMedia[id] = current.content.media[id];
+    }
+  }
+  nextContent.media = prunedMedia;
 
   const fullyValidated = validateSiteContent(nextContent);
   const filePath = getSiteContentFilePath();

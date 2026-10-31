@@ -1,12 +1,29 @@
 import type { MetaFunction, HeadersFunction } from "react-router";
+import { useLoaderData } from "react-router";
+import { getRawSiteContent, cleanStudiosContent } from "../../lib/site-content.server";
+import type {
+  StudiosFraming,
+  MediaVariantInfo,
+} from "../../lib/site-content.shared";
 import styles from "./studios.module.css";
 
 export const SEMPRA_URL = "https://sempra.be/fr/";
 export const PARALLAX_URL = "https://parallax-creative-studio.com/fr";
 
+export interface StudiosPanelData {
+  imageId: string | null;
+  framing: StudiosFraming;
+  variants?: MediaVariantInfo[];
+}
+
+export interface StudiosLoaderData {
+  sempra: StudiosPanelData;
+  parallax: StudiosPanelData;
+}
+
 export const meta: MetaFunction = () => {
   return [
-    { title: "StudioLM — SEMPRA & Parallax" },
+    { title: "StudioLM | SEMPRA & Parallax" },
     {
       name: "description",
       content:
@@ -23,7 +40,56 @@ export const headers: HeadersFunction = () => {
   };
 };
 
+export async function loader() {
+  const { content } = getRawSiteContent();
+  const studios = cleanStudiosContent(content?.studios);
+
+  const getPanelData = (
+    imageId: string | null,
+    framing: StudiosFraming
+  ): StudiosPanelData => {
+    if (!imageId) {
+      return { imageId: null, framing };
+    }
+    const metaRecord = content?.media?.[imageId];
+    return {
+      imageId,
+      framing,
+      variants: metaRecord?.variants,
+    };
+  };
+
+  return Response.json(
+    {
+      sempra: getPanelData(studios.sempra.imageId, studios.sempra.framing),
+      parallax: getPanelData(studios.parallax.imageId, studios.parallax.framing),
+    },
+    {
+      headers: {
+        "X-Robots-Tag": "noindex, nofollow",
+        "Cache-Control": "public, max-age=60, s-maxage=300",
+      },
+    }
+  );
+}
+
 export default function StudiosGateway() {
+  let loaderData: StudiosLoaderData | undefined;
+  try {
+    loaderData = useLoaderData<StudiosLoaderData>();
+  } catch {
+    // Fallback when rendered without React Router data router in tests
+  }
+
+  const sempra = loaderData?.sempra ?? { imageId: null, framing: "center" };
+  const parallax = loaderData?.parallax ?? { imageId: null, framing: "center" };
+
+  const getFramingClass = (framing: StudiosFraming) => {
+    if (framing === "top") return styles.framingTop;
+    if (framing === "bottom") return styles.framingBottom;
+    return styles.framingCenter;
+  };
+
   return (
     <main className={styles.gatewayPage}>
       {/* Shared StudioLM Identity — dominant & not clickable */}
@@ -47,14 +113,29 @@ export default function StudiosGateway() {
         <a
           href={SEMPRA_URL}
           className={styles.panelSempra}
-          aria-label="SEMPRA — Photographie et vidéo de mariage"
+          aria-label="SEMPRA | Photographie et vidéo de mariage"
         >
-          <img
-            src="/img/projets-141c16b0a2.jpg"
-            alt=""
-            aria-hidden="true"
-            className={styles.bgImage}
-          />
+          {sempra.imageId && (
+            <img
+              src={`/media/site/studios_sempra/${sempra.imageId}/1440p/webp`}
+              srcSet={
+                sempra.variants && sempra.variants.length > 0
+                  ? sempra.variants
+                      .map(
+                        (v) =>
+                          `/media/site/studios_sempra/${sempra.imageId}/${v.name}/webp ${v.width}w`
+                      )
+                      .join(", ")
+                  : undefined
+              }
+              sizes="(max-width: 900px) 100vw, 50vw"
+              alt=""
+              aria-hidden="true"
+              className={`${styles.bgImage} ${getFramingClass(sempra.framing)}`}
+              loading="eager"
+              decoding="async"
+            />
+          )}
           <div className={styles.sempraOverlay} aria-hidden="true" />
 
           <div className={styles.panelContent}>
@@ -95,14 +176,29 @@ export default function StudiosGateway() {
         <a
           href={PARALLAX_URL}
           className={styles.panelParallax}
-          aria-label="Parallax — Photographie et création vidéo"
+          aria-label="Parallax | Photographie et création vidéo"
         >
-          <img
-            src="/img/index-36b7cd6c87.jpg"
-            alt=""
-            aria-hidden="true"
-            className={styles.bgImage}
-          />
+          {parallax.imageId && (
+            <img
+              src={`/media/site/studios_parallax/${parallax.imageId}/1440p/webp`}
+              srcSet={
+                parallax.variants && parallax.variants.length > 0
+                  ? parallax.variants
+                      .map(
+                        (v) =>
+                          `/media/site/studios_parallax/${parallax.imageId}/${v.name}/webp ${v.width}w`
+                      )
+                      .join(", ")
+                  : undefined
+              }
+              sizes="(max-width: 900px) 100vw, 50vw"
+              alt=""
+              aria-hidden="true"
+              className={`${styles.bgImage} ${getFramingClass(parallax.framing)}`}
+              loading="eager"
+              decoding="async"
+            />
+          )}
           <div className={styles.parallaxOverlay} aria-hidden="true" />
 
           <div className={styles.panelContent}>

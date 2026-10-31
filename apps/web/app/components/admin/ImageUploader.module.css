@@ -65,6 +65,11 @@
   backdrop-filter: blur(4px);
 }
 
+.badgeNone {
+  background: rgba(255, 255, 255, 0.1);
+  color: #8c929a;
+}
+
 .fileRequirements {
   font-size: 0.8rem;
   color: #8c929a;

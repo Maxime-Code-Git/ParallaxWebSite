@@ -75,6 +75,14 @@ const MODULES: DashboardModule[] = [
     href: "/admin/studio",
   },
   {
+    id: "studios",
+    title: "Passerelle StudioLM",
+    description: "Photographies d'arrière-plan et cadrages des panneaux SEMPRA et Parallax (/studios).",
+    status: "Actif",
+    isActive: true,
+    href: "/admin/studios",
+  },
+  {
     id: "contact",
     title: "Contact",
     description: "Coordonnées professionnelles, formulaire, types de projet et statut SMTP.",

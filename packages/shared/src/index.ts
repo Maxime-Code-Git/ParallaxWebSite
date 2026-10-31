@@ -2127,21 +2127,108 @@ export type AdminUploadLocation =
   | "showreel_cover"
   | "duo"
   | "portrait_ludovic"
-  | "portrait_maxime";
+  | "portrait_maxime"
+  | "studios_sempra"
+  | "studios_parallax";
 
 export const ADMIN_UPLOAD_LOCATIONS: readonly AdminUploadLocation[] = [
   "showreel_cover",
   "duo",
   "portrait_ludovic",
   "portrait_maxime",
+  "studios_sempra",
+  "studios_parallax",
 ] as const;
 
-export const DEFAULT_LOCATION_IMAGES: Record<AdminUploadLocation, AllowedStaticImageId> = {
+export const DEFAULT_LOCATION_IMAGES: Partial<Record<AdminUploadLocation, AllowedStaticImageId>> = {
   showreel_cover: "index-showreel",
   duo: "index-duo",
   portrait_ludovic: "studio-ludovic",
   portrait_maxime: "studio-maxime",
 };
+
+export type StudiosFraming = "center" | "top" | "bottom";
+
+export interface StudiosPanelConfig {
+  imageId: string | null;
+  framing: StudiosFraming;
+}
+
+export interface StudiosContent {
+  sempra: StudiosPanelConfig;
+  parallax: StudiosPanelConfig;
+}
+
+export function createDefaultStudiosContent(): StudiosContent {
+  return {
+    sempra: {
+      imageId: null,
+      framing: "center",
+    },
+    parallax: {
+      imageId: null,
+      framing: "center",
+    },
+  };
+}
+
+export function cleanStudiosContent(studios: StudiosContent | null | undefined): StudiosContent {
+  if (!studios) {
+    return createDefaultStudiosContent();
+  }
+  const cleanFraming = (f: unknown): StudiosFraming => {
+    return f === "top" || f === "bottom" ? f : "center";
+  };
+  return {
+    sempra: {
+      imageId:
+        typeof studios.sempra?.imageId === "string" && studios.sempra.imageId.trim()
+          ? studios.sempra.imageId.trim().toLowerCase()
+          : null,
+      framing: cleanFraming(studios.sempra?.framing),
+    },
+    parallax: {
+      imageId:
+        typeof studios.parallax?.imageId === "string" && studios.parallax.imageId.trim()
+          ? studios.parallax.imageId.trim().toLowerCase()
+          : null,
+      framing: cleanFraming(studios.parallax?.framing),
+    },
+  };
+}
+
+export function validateStudiosContent(val: unknown, context = "siteContent.studios"): StudiosContent {
+  const obj = assertObject(val, context);
+  assertExactKeys(obj, ["sempra", "parallax"], context);
+
+  function validatePanel(panelVal: unknown, panelContext: string): StudiosPanelConfig {
+    const p = assertObject(panelVal, panelContext);
+    assertExactKeys(p, ["imageId", "framing"], panelContext);
+    let imageId: string | null = null;
+    if (p.imageId !== null && p.imageId !== undefined && p.imageId !== "") {
+      if (typeof p.imageId !== "string") {
+        throw new ValidationError(`${panelContext}.imageId doit être une chaîne ou null.`);
+      }
+      const trimmed = p.imageId.trim();
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(trimmed)) {
+        throw new ValidationError(`${panelContext}.imageId doit être un UUID valide ou null.`);
+      }
+      imageId = trimmed.toLowerCase();
+    }
+    if (typeof p.framing !== "string" || !["center", "top", "bottom"].includes(p.framing)) {
+      throw new ValidationError(`${panelContext}.framing doit être 'center', 'top' ou 'bottom'.`);
+    }
+    return {
+      imageId,
+      framing: p.framing as StudiosFraming,
+    };
+  }
+
+  return {
+    sempra: validatePanel(obj.sempra, `${context}.sempra`),
+    parallax: validatePanel(obj.parallax, `${context}.parallax`),
+  };
+}
 
 export interface MediaVariantInfo {
   name: "640p" | "960p" | "1440p" | "1920p";
@@ -2705,6 +2792,7 @@ export interface SiteContent {
   contactPage: ContactPageContent;
   company: CompanyContent;
   legalPages: LegalPagesContent;
+  studios?: StudiosContent;
   media?: Record<string, UploadedMediaMetadata>;
 }
 
@@ -3793,11 +3881,34 @@ export function validateSiteContent(val: unknown): SiteContent {
   }
 
   if (obj.schemaVersion === 3) {
-    assertExactKeys(
-      obj,
-      ["schemaVersion", "revision", "updatedAt", "common", "home", "studio", "contactPage", "company", "legalPages", "media"],
-      "siteContent"
-    );
+    const hasStudios = obj.studios !== undefined;
+    const allowedKeys = hasStudios
+      ? [
+          "schemaVersion",
+          "revision",
+          "updatedAt",
+          "common",
+          "home",
+          "studio",
+          "contactPage",
+          "company",
+          "legalPages",
+          "media",
+          "studios",
+        ]
+      : [
+          "schemaVersion",
+          "revision",
+          "updatedAt",
+          "common",
+          "home",
+          "studio",
+          "contactPage",
+          "company",
+          "legalPages",
+          "media",
+        ];
+    assertExactKeys(obj, allowedKeys, "siteContent");
     return {
       schemaVersion: 3,
       revision: obj.revision.toLowerCase(),
@@ -3808,6 +3919,7 @@ export function validateSiteContent(val: unknown): SiteContent {
       contactPage: validateContactPageContent(obj.contactPage),
       company: validateCompanyContent(obj.company),
       legalPages: validateLegalPagesContent(obj.legalPages),
+      ...(hasStudios ? { studios: validateStudiosContent(obj.studios) } : {}),
       media,
     };
   }
