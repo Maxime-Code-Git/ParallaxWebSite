@@ -1,0 +1,397 @@
+.gatewayPage {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--px-ink);
+  color: var(--px-text);
+  position: relative;
+  overflow-x: hidden;
+}
+
+/* StudioLM Dominant Header */
+.studioLmHeader {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: clamp(24px, 4.5vh, 44px) 24px clamp(20px, 3.5vh, 36px);
+  background: linear-gradient(180deg, #07090e 0%, rgba(12, 15, 23, 0.95) 100%);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  position: relative;
+  z-index: 10;
+}
+
+.studioLmBrand {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  user-select: none;
+  pointer-events: none;
+}
+
+.studioLmLogo {
+  width: clamp(54px, 6vw, 72px);
+  height: auto;
+  aspect-ratio: 1440 / 1528;
+  object-fit: contain;
+  mix-blend-mode: screen;
+  filter: brightness(0.95) contrast(1.2);
+  display: block;
+}
+
+.studioLmTitle {
+  margin: 0;
+  font-family: var(--font-parallax);
+  font-size: clamp(2.25rem, 4.8vw, 3.5rem);
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  color: #ffffff;
+  text-shadow: 0 2px 20px rgba(0, 0, 0, 0.6);
+  line-height: 1;
+}
+
+/* Panels Section */
+.panelsContainer {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  position: relative;
+  width: 100%;
+}
+
+/* Junction divider on desktop */
+.junctionDivider {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: linear-gradient(
+    180deg,
+    rgba(210, 177, 125, 0.4) 0%,
+    rgba(255, 255, 255, 0.2) 50%,
+    rgba(30, 158, 255, 0.4) 100%
+  );
+  z-index: 5;
+  pointer-events: none;
+}
+
+/* Common Panel Styling */
+.panelSempra,
+.panelParallax {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  text-decoration: none;
+  padding: clamp(48px, 7vh, 88px) clamp(24px, 5vw, 64px);
+  overflow: hidden;
+  cursor: pointer;
+  outline: none;
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.panelSempra {
+  background-color: var(--sp-green);
+}
+
+.panelParallax {
+  background-color: var(--px-ink);
+}
+
+.panelSempra:focus-visible {
+  outline: 3px solid var(--sp-gold);
+  outline-offset: -3px;
+  z-index: 6;
+}
+
+.panelParallax:focus-visible {
+  outline: 3px solid var(--px-accent);
+  outline-offset: -3px;
+  z-index: 6;
+}
+
+/* Background image enrichment */
+.bgImage {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  pointer-events: none;
+  opacity: 0.18;
+  transition: transform 0.5s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.5s ease;
+}
+
+.panelSempra:hover .bgImage,
+.panelParallax:hover .bgImage {
+  transform: scale(1.04);
+  opacity: 0.28;
+}
+
+/* Overlays */
+.sempraOverlay {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    circle at center 40%,
+    rgba(7, 36, 33, 0.76) 0%,
+    rgba(7, 36, 33, 0.95) 85%
+  );
+  pointer-events: none;
+  z-index: 1;
+}
+
+.parallaxOverlay {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    circle at center 40%,
+    rgba(12, 15, 23, 0.76) 0%,
+    rgba(12, 15, 23, 0.95) 85%
+  );
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Panel Content Container */
+.panelContent {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(24px, 3.5vh, 36px);
+  max-width: 460px;
+  width: 100%;
+}
+
+/* SEMPRA Elements */
+.sempraLogoWrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 84px;
+}
+
+.sempraLogo {
+  width: clamp(220px, 26vw, 320px);
+  height: auto;
+  aspect-ratio: 1970 / 627;
+  max-width: 90%;
+  object-fit: contain;
+  display: block;
+  filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.35));
+}
+
+.sempraText {
+  margin: 0;
+  font-family: var(--font-sp-display);
+  font-size: clamp(1.6rem, 2.6vw, 2.25rem);
+  font-weight: 500;
+  font-style: italic;
+  line-height: 1.25;
+  color: var(--sp-cream);
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+}
+
+.sempraButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 8px 8px 8px 26px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--sp-border);
+  background: rgba(7, 36, 33, 0.6);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  font-family: var(--font-sp-text);
+  font-size: clamp(15px, 1.25vw, 17px);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--sp-cream);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  transition: transform 0.22s ease, border-color 0.22s ease, color 0.22s ease,
+    box-shadow 0.22s ease;
+}
+
+.sempraButtonIcon {
+  flex: none;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: 1px solid var(--sp-gold);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--sp-cream);
+  transition: transform 0.22s ease, border-color 0.22s ease, background 0.22s ease;
+}
+
+.panelSempra:hover .sempraButton {
+  transform: translateY(-2px);
+  border-color: var(--sp-gold);
+  color: var(--sp-gold-hover);
+  box-shadow: 0 8px 24px rgba(7, 36, 33, 0.6);
+}
+
+.panelSempra:hover .sempraButtonIcon {
+  border-color: var(--sp-gold-hover);
+  background: rgba(210, 177, 125, 0.2);
+  transform: translateX(3px);
+}
+
+/* Parallax Elements */
+.parallaxLogoWrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  min-height: 84px;
+}
+
+.parallaxLogo {
+  width: clamp(52px, 5.5vw, 68px);
+  height: auto;
+  aspect-ratio: 1125 / 1174;
+  object-fit: contain;
+  display: block;
+  filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.45));
+}
+
+.parallaxBrandName {
+  font-family: var(--font-parallax);
+  font-size: clamp(2.2rem, 3.4vw, 3rem);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  color: var(--px-text);
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.6);
+  line-height: 1;
+}
+
+.parallaxText {
+  margin: 0;
+  font-family: var(--font-parallax);
+  font-size: clamp(1.25rem, 2vw, 1.625rem);
+  font-weight: 400;
+  line-height: 1.35;
+  color: var(--px-text-lead);
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.6);
+}
+
+.parallaxButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 8px 8px 8px 26px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--px-border);
+  background: rgba(20, 24, 34, 0.7);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  font-family: var(--font-parallax);
+  font-size: clamp(15px, 1.25vw, 17px);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  color: var(--px-text);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  transition: transform 0.22s ease, border-color 0.22s ease, color 0.22s ease,
+    box-shadow 0.22s ease;
+}
+
+.parallaxButtonIcon {
+  flex: none;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: 1px solid var(--px-accent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--px-accent);
+  transition: transform 0.22s ease, border-color 0.22s ease, background 0.22s ease,
+    color 0.22s ease;
+}
+
+.panelParallax:hover .parallaxButton {
+  transform: translateY(-2px);
+  border-color: var(--px-accent);
+  color: #ffffff;
+  box-shadow: 0 8px 24px rgba(30, 158, 255, 0.25);
+}
+
+.panelParallax:hover .parallaxButtonIcon {
+  border-color: var(--px-accent-hover);
+  background: rgba(30, 158, 255, 0.25);
+  color: #ffffff;
+  transform: translateX(3px);
+}
+
+.buttonLabel {
+  display: inline-block;
+}
+
+/* Mobile Layout */
+@media (max-width: 899px) {
+  .panelsContainer {
+    grid-template-columns: 1fr;
+  }
+
+  .junctionDivider {
+    top: auto;
+    bottom: auto;
+    left: 0;
+    right: 0;
+    width: 100%;
+    height: 1px;
+    transform: none;
+    background: linear-gradient(
+      90deg,
+      rgba(210, 177, 125, 0.4) 0%,
+      rgba(255, 255, 255, 0.2) 50%,
+      rgba(30, 158, 255, 0.4) 100%
+    );
+  }
+
+  .panelSempra,
+  .panelParallax {
+    min-height: clamp(320px, 44vh, 440px);
+    padding: clamp(36px, 5vh, 48px) 24px;
+  }
+
+  .panelContent {
+    gap: 22px;
+  }
+
+  .sempraButton,
+  .parallaxButton {
+    width: 100%;
+    max-width: 320px;
+    min-height: 52px;
+  }
+}
+
+/* Reduced Motion */
+@media (prefers-reduced-motion: reduce) {
+  .panelSempra,
+  .panelParallax,
+  .sempraButton,
+  .parallaxButton,
+  .sempraButtonIcon,
+  .parallaxButtonIcon,
+  .bgImage {
+    transition: none !important;
+    transform: none !important;
+    animation: none !important;
+  }
+}

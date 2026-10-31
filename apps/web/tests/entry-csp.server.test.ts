@@ -8,6 +8,7 @@ import handleRequest, {
   addSecurityHeaders,
   applyAdminSecurityHeaders,
   applyContactSecurityHeaders,
+  applyStudiosSecurityHeaders,
 } from "../app/entry.server";
 import { headers as contactHeaders } from "../app/routes/public/contact";
 
@@ -145,6 +146,20 @@ describe("entry.server.tsx Security and CSP", () => {
     applyAdminSecurityHeaders(unknownHeaders, "https://parallax.example.com/admin/unknown-404-url");
     expect(unknownHeaders.get("Cache-Control")).toContain("no-store");
     expect(unknownHeaders.get("X-Robots-Tag")).toBe("noindex, nofollow");
+  });
+
+  it("applies studios security headers (noindex, nofollow) on /studios URL", () => {
+    const headers = new Headers();
+    applyStudiosSecurityHeaders(headers, "https://parallax.example.com/studios");
+    expect(headers.get("X-Robots-Tag")).toBe("noindex, nofollow");
+
+    const slashHeaders = new Headers();
+    applyStudiosSecurityHeaders(slashHeaders, "https://parallax.example.com/studios/");
+    expect(slashHeaders.get("X-Robots-Tag")).toBe("noindex, nofollow");
+
+    const nonStudiosHeaders = new Headers();
+    applyStudiosSecurityHeaders(nonStudiosHeaders, "https://parallax.example.com/fr");
+    expect(nonStudiosHeaders.get("X-Robots-Tag")).toBeNull();
   });
 
   it("performs real in-memory SSR rendering of two documents with consistent and distinct nonces without unsafe-inline", async () => {
@@ -342,6 +357,31 @@ describe("entry.server.tsx Security and CSP", () => {
         expect(resEn.headers.get("Content-Security-Policy")).toContain("nonce-");
         const htmlEn = await resEn.text();
         expect(htmlEn).toContain('<html lang="en">');
+      }
+    });
+
+    it("renders Studios SSR HTML with X-Robots-Tag: noindex, nofollow and CSP nonce", async () => {
+      const staticHandler = createStaticHandler([
+        {
+          id: "root",
+          path: "/",
+          Component: RootLayout,
+          children: [
+            { id: "studios-gateway", path: "studios", Component: RootLayout },
+          ],
+        },
+      ]);
+
+      const req = new Request("https://parallax.example.com/studios");
+      const query = await staticHandler.query(req);
+      if (!(query instanceof Response)) {
+        const ctx = createEntryContext(query);
+        const res = await handleRequest(req, 200, new Headers(), ctx, {});
+        expect(res.status).toBe(200);
+        expect(res.headers.get("X-Robots-Tag")).toBe("noindex, nofollow");
+        expect(res.headers.get("Content-Security-Policy")).toContain("nonce-");
+        const html = await res.text();
+        expect(html).toContain('<html lang="fr">');
       }
     });
   });

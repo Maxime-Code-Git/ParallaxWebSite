@@ -40,6 +40,19 @@ export function applyContactSecurityHeaders(headers: Headers, url: string): void
   }
 }
 
+export function applyStudiosSecurityHeaders(headers: Headers, url: string): void {
+  try {
+    const parsed = new URL(url);
+    if (/^\/studios(\/|\.|$)/i.test(parsed.pathname)) {
+      headers.set("X-Robots-Tag", "noindex, nofollow");
+    }
+  } catch {
+    if (url.includes("/studios")) {
+      headers.set("X-Robots-Tag", "noindex, nofollow");
+    }
+  }
+}
+
 import { validateServerStartup } from "./lib/env.server";
 
 export default function handleRequest(
@@ -115,6 +128,7 @@ function handleBotRequest(
 
           applyAdminSecurityHeaders(responseHeaders, request.url);
           applyContactSecurityHeaders(responseHeaders, request.url);
+          applyStudiosSecurityHeaders(responseHeaders, request.url);
           addSecurityHeaders(responseHeaders, nonce);
           responseHeaders.set("Content-Type", "text/html; charset=utf-8");
 
@@ -164,6 +178,7 @@ function handleBrowserRequest(
 
           applyAdminSecurityHeaders(responseHeaders, request.url);
           applyContactSecurityHeaders(responseHeaders, request.url);
+          applyStudiosSecurityHeaders(responseHeaders, request.url);
           addSecurityHeaders(responseHeaders, nonce);
           responseHeaders.set("Content-Type", "text/html; charset=utf-8");
 

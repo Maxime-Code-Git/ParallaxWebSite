@@ -90,6 +90,9 @@ export default [
   route("media/portfolio/:ownerType/:ownerId/:slot/:imageId/:variant/:ext", "routes/media/portfolio-variant.ts"),
   route("admin/media/portfolio/:ownerType/:ownerId/:slot/:imageId/:variant/:ext", "routes/admin/portfolio-media.ts"),
 
+  // Autonomous Studios Gateway (QR Code)
+  route("studios", "routes/public/studios.tsx", { id: "studios-gateway" }),
+
   // Technical SEO & Discovery
   route("robots.txt", "routes/public/robots.ts", { id: "robots-txt" }),
   route("sitemap.xml", "routes/public/sitemap.ts", { id: "sitemap-xml" }),
