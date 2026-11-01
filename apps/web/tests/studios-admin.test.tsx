@@ -16,6 +16,7 @@ import {
   saveHomeContent,
   saveContactPageContent,
   saveCompanyContent,
+  saveStudiosContent,
   getSiteContentFilePath,
   validateSiteContent,
 } from "../app/lib/site-content.server";
@@ -442,6 +443,41 @@ describe("Studios Admin Integration & Media Lifecycle", () => {
       })
     );
     expect(wrongLocRes.status).toBe(404);
+  });
+
+  it.each([
+    { sempra: { imageId: 42, framing: "top" }, parallax: { imageId: null, framing: "bottom" } },
+    { sempra: { imageId: null, framing: "invalid" }, parallax: { imageId: null, framing: "bottom" } },
+    { sempra: { imageId: null, framing: "top" } },
+    { sempra: { imageId: null, framing: "top" }, parallax: { imageId: null, framing: "bottom" }, unknown: true },
+  ])("rejects malformed studios edits without changing persisted settings: %j", async (invalidStudios) => {
+    const current = getRawSiteContent().content;
+    const revision = saveStudiosContent({
+      sempra: { imageId: null, framing: "top" },
+      parallax: { imageId: null, framing: "bottom" },
+    }, current.revision);
+    const cookie = await createValidAdminCookie("token-invalid-studios");
+    const originalContent = fs.readFileSync(testContentFile);
+    const originalFiles = fs.readdirSync(tempDir).sort();
+    const request = new Request("http://localhost:3000/admin/studios", {
+      method: "POST",
+      headers: {
+        Cookie: cookie,
+        Origin: "http://localhost:3000",
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({
+        csrfToken: "token-invalid-studios",
+        revision,
+        studiosData: JSON.stringify(invalidStudios),
+      }),
+    });
+
+    const response = await studiosAdminAction(makeActionArgs(request));
+    expect(response.status).toBe(422);
+    expect(fs.readFileSync(testContentFile)).toEqual(originalContent);
+    expect(fs.readdirSync(tempDir).sort()).toEqual(originalFiles);
+    expect(getRawSiteContent().content.revision).toBe(revision);
   });
 
   it("8. /admin/studios loader and action handle framing configuration and revision conflict", async () => {

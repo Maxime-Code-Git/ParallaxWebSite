@@ -243,9 +243,8 @@ export default function AdminStudiosPage() {
             {actionData.conflict && actionData.latestRevision && (
               <button
                 type="button"
-                className={formStyles.secondaryButton}
+                className={`${formStyles.secondaryButton} ${customStyles.revisionButton}`}
                 onClick={() => setCurrentRevision(actionData.latestRevision!)}
-                style={{ marginTop: 8 }}
               >
                 Mettre à jour avec la dernière révision ({actionData.latestRevision.slice(0, 8)}…)
               </button>
@@ -268,7 +267,7 @@ export default function AdminStudiosPage() {
           <section className={formStyles.sectionCard}>
             <div className={customStyles.brandHeader}>
               <span className={customStyles.brandBadgeSempra}>SEMPRA</span>
-              <h2 className={formStyles.sectionTitle} style={{ margin: 0 }}>
+              <h2 className={`${formStyles.sectionTitle} ${customStyles.brandTitle}`}>
                 Image du panneau SEMPRA
               </h2>
             </div>
@@ -358,7 +357,7 @@ export default function AdminStudiosPage() {
           <section className={formStyles.sectionCard}>
             <div className={customStyles.brandHeader}>
               <span className={customStyles.brandBadgeParallax}>Parallax</span>
-              <h2 className={formStyles.sectionTitle} style={{ margin: 0 }}>
+              <h2 className={`${formStyles.sectionTitle} ${customStyles.brandTitle}`}>
                 Image du panneau Parallax
               </h2>
             </div>

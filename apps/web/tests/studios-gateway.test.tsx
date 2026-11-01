@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
+import { createRoutesStub } from "react-router";
+import AdminStudiosPage from "../app/routes/admin/studios";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
@@ -56,6 +58,38 @@ describe("Studios Gateway Route (/studios)", () => {
   });
 
   describe("1. Route Registration", () => {
+    it("keeps the real admin page free of inline styles, including its conflict state", async () => {
+      const Stub = createRoutesStub([
+        {
+          path: "/admin/studios",
+          Component: AdminStudiosPage,
+          loader: () => ({
+            csrfToken: "test-studios-csrf",
+            studios: {
+              sempra: { imageId: null, framing: "center" },
+              parallax: { imageId: null, framing: "center" },
+            },
+            revision: "0123456789abcdef0123456789abcdef",
+            isCorrupted: false,
+            media: {},
+          }),
+          action: () => Response.json({
+            error: "Conflit de révision",
+            conflict: true,
+            latestRevision: "abcdef0123456789abcdef0123456789",
+          }, { status: 409 }),
+        },
+      ]);
+      const { container } = render(<Stub initialEntries={["/admin/studios"]} />);
+      const saveButton = await screen.findByRole("button", { name: "Enregistrer les réglages" });
+      expect(container.querySelector("[style]")).toBeNull();
+
+      fireEvent.click(saveButton);
+      await screen.findByRole("button", { name: /Mettre à jour avec la dernière révision/ });
+      await waitFor(() => expect(container.querySelector("[style]")).toBeNull());
+      expect(screen.getByRole("alert").textContent).toContain("Conflit de révision");
+    });
+
     it("is registered in route manifest with id studios-gateway and path studios", () => {
       const match = routes.find(
         (r) => "id" in r && r.id === "studios-gateway"

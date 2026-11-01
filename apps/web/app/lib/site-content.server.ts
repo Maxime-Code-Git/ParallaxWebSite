@@ -612,7 +612,7 @@ export function saveStudiosContent(
     throw new RevisionConflictError(undefined, current.content.revision);
   }
 
-  const validatedStudios = validateStudiosContent(cleanStudiosContent(newStudios));
+  const validatedStudios = validateStudiosContent(newStudios);
 
   if (validatedStudios.sempra.imageId) {
     validateReferencedMediaConsistency(
