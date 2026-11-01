@@ -1,3 +1,11 @@
+.revisionButton {
+  margin-top: 8px;
+}
+
+.brandTitle {
+  margin: 0;
+}
+
 .previewCallout {
   background: rgba(30, 158, 255, 0.08);
   border: 1px solid rgba(30, 158, 255, 0.25);
