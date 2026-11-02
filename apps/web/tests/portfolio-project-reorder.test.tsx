@@ -26,7 +26,7 @@ vi.mock("react-router", async (importOriginal) => {
   };
 });
 
-import { useLoaderData, useActionData } from "react-router";
+import { useLoaderData, useActionData, MemoryRouter } from "react-router";
 import AdminPortfolioPage, { action as adminPortfolioAction } from "../app/routes/admin/portfolio";
 import { action as adminPortfolioEditAction } from "../app/routes/admin/portfolio-edit";
 import { loader as publicPortfolioLoader } from "../app/routes/public/portfolio";
@@ -717,6 +717,27 @@ describe("Portfolio Project Reordering — Regression & Integrity Suite", () => 
   // ==========================================================================
   // Test 8: Rejection of invalid direction or parameters without mutation
   // ==========================================================================
+  it.each(["invalid", "", "Published"])("rejects invalid status filter %j without changing project order", async (statusFilter) => {
+    const first = createProjectWithMedia("11111111-1111-4111-8111-111111111111", "documentary", 0);
+    const second = createProjectWithMedia("22222222-2222-4222-8222-222222222222", "documentary", 1);
+    const initial = seedInitialPortfolio([first, second]);
+    const before = fs.readFileSync(testPortfolioContentPath);
+    const { csrfToken } = await createAdminRequest("POST");
+    const { request } = await createAdminRequest("POST", new URLSearchParams({
+      intent: "reorder",
+      projectId: first.project.id,
+      direction: "down",
+      statusFilter,
+      csrfToken,
+      revision: initial.revision,
+    }));
+
+    const response = await adminPortfolioAction(makeActionArgs(request));
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toBe("Filtre de statut invalide.");
+    expect(fs.readFileSync(testPortfolioContentPath)).toEqual(before);
+  });
+
   it("8. rejects invalid direction or missing project with 400/404 without mutating content", async () => {
     const d1 = createProjectWithMedia("11111111-1111-4111-8111-111111111111", "documentary", 0);
     const initial = seedInitialPortfolio([d1]);
@@ -836,7 +857,7 @@ describe("Portfolio Project Reordering — Regression & Integrity Suite", () => 
     vi.mocked(useLoaderData).mockReturnValue({ content, csrfToken: "csrf-token-ui" });
     vi.mocked(useActionData).mockReturnValue(undefined);
 
-    render(<AdminPortfolioPage />);
+    render(<MemoryRouter initialEntries={["/admin/portfolio"]}><AdminPortfolioPage /></MemoryRouter>);
 
     // Documentary D1: first in category -> Up disabled, Down enabled
     const upD1 = screen.getByRole("button", { name: "Monter le projet Projet D1" });

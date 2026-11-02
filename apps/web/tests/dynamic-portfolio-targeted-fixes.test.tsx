@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
 import React from "react";
-import { render, screen, fireEvent, within, act } from "@testing-library/react";
+import { render as renderWithContext, screen, fireEvent, within, act } from "@testing-library/react";
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
 
 // Mock react-router for component rendering tests
@@ -25,7 +25,7 @@ vi.mock("react-router", async (importOriginal) => {
   };
 });
 
-import { useLoaderData, useActionData } from "react-router";
+import { useLoaderData, useActionData, MemoryRouter } from "react-router";
 import PortfolioPage, { loader as publicPortfolioLoader } from "../app/routes/public/portfolio";
 import AdminPortfolioPage, { action as adminPortfolioAction } from "../app/routes/admin/portfolio";
 import { action as adminPortfolioSectionAction } from "../app/routes/admin/portfolio-section";
@@ -42,6 +42,14 @@ import {
 } from "../app/lib/portfolio-content.shared";
 import { ValidationError } from "../app/lib/site-content.server";
 import { getBackups } from "../app/lib/atomic-fs.server";
+
+function render(ui: React.ReactNode) {
+  return renderWithContext(ui, {
+    wrapper: ({ children }: React.PropsWithChildren) => (
+      <MemoryRouter initialEntries={["/admin/portfolio"]}>{children}</MemoryRouter>
+    ),
+  });
+}
 
 describe("Dynamic Portfolio Categories — Targeted Fixes Verification", () => {
   let tempDir: string;
