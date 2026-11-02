@@ -836,6 +836,28 @@ export function calculateEffectiveSide(
   return showcaseIndex % 2 === 0 ? "left" : "right";
 }
 
+/**
+ * Deterministic comparator for portfolio projects.
+ * Compares strictly by:
+ * 1. order ascending
+ * 2. createdAt ascending (as tie-breaker when order is identical)
+ * 3. id ascending (as definitive unique tie-breaker)
+ */
+export function comparePortfolioProjects(
+  a: { order: number; createdAt?: number; id: string },
+  b: { order: number; createdAt?: number; id: string }
+): number {
+  if (a.order !== b.order) {
+    return a.order - b.order;
+  }
+  const aCreated = typeof a.createdAt === "number" ? a.createdAt : 0;
+  const bCreated = typeof b.createdAt === "number" ? b.createdAt : 0;
+  if (aCreated !== bCreated) {
+    return aCreated - bCreated;
+  }
+  return a.id.localeCompare(b.id);
+}
+
 export function validatePortfolioLocalizedString(
   val: unknown,
   path: (string | number)[],

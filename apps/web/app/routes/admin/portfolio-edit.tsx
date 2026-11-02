@@ -276,7 +276,17 @@ export async function action({ request, params }: ActionFunctionArgs) {
       { status: 422, headers: createAdminHeaders() }
     );
   }
-  proj.category = category;
+  if (proj.category !== category) {
+    const newCatProjects = nextContent.projects.filter(
+      (p: PortfolioProject) => p.category === category && p.id !== proj.id
+    );
+    const maxOrder = newCatProjects.reduce(
+      (max: number, p: PortfolioProject) => (p.order > max ? p.order : max),
+      -1
+    );
+    proj.order = maxOrder + 1;
+    proj.category = category;
+  }
   proj.summary = { fr: summaryFr, en: summaryEn };
   proj.description = descriptionBlocks;
   proj.seo = {

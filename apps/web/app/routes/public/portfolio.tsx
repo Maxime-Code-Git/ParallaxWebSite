@@ -16,6 +16,7 @@ import {
   type PortfolioProject,
   type PortfolioCategory,
   resolveProjectPresentationMode,
+  comparePortfolioProjects,
 } from "../../lib/portfolio-content.shared";
 import { getPublicPortfolioContent } from "../../lib/portfolio-content.server";
 import { getSiteContent, type CommonContent } from "../../lib/site-content.server";
@@ -590,9 +591,11 @@ export default function PortfolioPage() {
 
   // Projects in active section
   const categoryProjects = effectiveCategory
-    ? content.projects.filter(
-        (p) => p.category === effectiveCategory && p.status === "published" && !p.archived
-      )
+    ? content.projects
+        .filter(
+          (p) => p.category === effectiveCategory && p.status === "published" && !p.archived
+        )
+        .sort(comparePortfolioProjects)
     : [];
 
   // Collect all gallery images in this category

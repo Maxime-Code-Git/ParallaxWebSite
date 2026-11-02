@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import {
   type ActionFunctionArgs,
   type LoaderFunctionArgs,
@@ -16,6 +16,7 @@ import {
   type PortfolioProject,
   type PortfolioCategoryItem,
   resolveProjectPresentationMode,
+  comparePortfolioProjects,
 } from "../../lib/portfolio-content.shared";
 import {
   getRawPortfolioContent,
@@ -56,6 +57,7 @@ const ALLOWED_PORTFOLIO_ACTIONS = [
   "projectId",
   "category",
   "direction",
+  "statusFilter",
   "categoryId",
   "targetCategoryId",
   "overview_title_fr",
@@ -291,12 +293,20 @@ export async function action({ request }: ActionFunctionArgs) {
         );
       }
 
+      let maxTargetOrder = nextContent.projects
+        .filter((p: PortfolioProject) => p.category === targetCategoryId)
+        .reduce((max: number, p: PortfolioProject) => (p.order > max ? p.order : max), -1);
+
+      const projectsToReassign = nextContent.projects
+        .filter((p: PortfolioProject) => p.category === categoryId)
+        .sort(comparePortfolioProjects);
+
       let reassignedCount = 0;
-      for (const p of nextContent.projects) {
-        if (p.category === categoryId) {
-          p.category = targetCategoryId;
-          reassignedCount++;
-        }
+      for (const p of projectsToReassign) {
+        p.category = targetCategoryId;
+        maxTargetOrder += 1;
+        p.order = maxTargetOrder;
+        reassignedCount++;
       }
 
       nextContent.categories.splice(catIndex, 1);
@@ -384,7 +394,12 @@ export async function action({ request }: ActionFunctionArgs) {
 
       const newId = crypto.randomUUID();
       const uniqueSuffix = Date.now().toString(36);
-      const newOrder = nextContent.projects.filter((p: PortfolioProject) => p.category === category).length;
+      const catProjects = nextContent.projects.filter((p: PortfolioProject) => p.category === category);
+      const maxOrder = catProjects.reduce(
+        (max: number, p: PortfolioProject) => (p.order > max ? p.order : max),
+        -1
+      );
+      const newOrder = maxOrder + 1;
 
       const newProject: PortfolioProject = {
         id: newId,
@@ -513,8 +528,21 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     if (intent === "reorder") {
-      const projectId = String(formData.get("projectId") || "");
-      const direction = String(formData.get("direction") || "");
+      const projectId = String(formData.get("projectId") || "").trim();
+      const direction = String(formData.get("direction") || "").trim();
+      const rawStatusFilter = String(formData.get("statusFilter") || "all").trim();
+      const statusFilter: "all" | "published" | "draft" | "archived" =
+        rawStatusFilter === "published" || rawStatusFilter === "draft" || rawStatusFilter === "archived"
+          ? rawStatusFilter
+          : "all";
+
+      if (direction !== "up" && direction !== "down") {
+        return Response.json(
+          { error: "Direction de déplacement invalide." },
+          { status: 400, headers: createAdminHeaders() }
+        );
+      }
+
       const project = nextContent.projects.find((p: PortfolioProject) => p.id === projectId);
       if (!project) {
         return Response.json({ error: "Projet introuvable." }, { status: 404, headers: createAdminHeaders() });
@@ -522,20 +550,52 @@ export async function action({ request }: ActionFunctionArgs) {
 
       const sameCatProjects = nextContent.projects
         .filter((p: PortfolioProject) => p.category === project.category)
-        .sort((a: PortfolioProject, b: PortfolioProject) => a.order - b.order);
+        .sort(comparePortfolioProjects);
 
-      const currentIndex = sameCatProjects.findIndex((p: PortfolioProject) => p.id === projectId);
-      if (direction === "up" && currentIndex > 0) {
-        const prev = sameCatProjects[currentIndex - 1];
-        const tempOrder = project.order;
-        project.order = prev.order;
-        prev.order = tempOrder;
-      } else if (direction === "down" && currentIndex < sameCatProjects.length - 1) {
-        const next = sameCatProjects[currentIndex + 1];
-        const tempOrder = project.order;
-        project.order = next.order;
-        next.order = tempOrder;
+      const visibleCatProjects = sameCatProjects.filter((p: PortfolioProject) => {
+        if (statusFilter === "published" && (p.status !== "published" || p.archived)) return false;
+        if (statusFilter === "draft" && (p.status !== "draft" || p.archived)) return false;
+        if (statusFilter === "archived" && !p.archived) return false;
+        return true;
+      });
+
+      const vIndex = visibleCatProjects.findIndex((p: PortfolioProject) => p.id === projectId);
+      if (vIndex === -1) {
+        return Response.json(
+          { error: "Le projet n'est pas visible avec le filtre sélectionné." },
+          { status: 400, headers: createAdminHeaders() }
+        );
       }
+
+      if (direction === "up") {
+        if (vIndex <= 0) {
+          return Response.json(
+            { error: "Impossible de monter le premier projet de cette sélection." },
+            { status: 400, headers: createAdminHeaders() }
+          );
+        }
+        const targetVisibleProject = visibleCatProjects[vIndex - 1];
+        const oldIndex = sameCatProjects.findIndex((p: PortfolioProject) => p.id === projectId);
+        sameCatProjects.splice(oldIndex, 1);
+        const targetIndex = sameCatProjects.findIndex((p: PortfolioProject) => p.id === targetVisibleProject.id);
+        sameCatProjects.splice(targetIndex, 0, project);
+      } else {
+        if (vIndex >= visibleCatProjects.length - 1) {
+          return Response.json(
+            { error: "Impossible de descendre le dernier projet de cette sélection." },
+            { status: 400, headers: createAdminHeaders() }
+          );
+        }
+        const targetVisibleProject = visibleCatProjects[vIndex + 1];
+        const oldIndex = sameCatProjects.findIndex((p: PortfolioProject) => p.id === projectId);
+        sameCatProjects.splice(oldIndex, 1);
+        const targetIndex = sameCatProjects.findIndex((p: PortfolioProject) => p.id === targetVisibleProject.id);
+        sameCatProjects.splice(targetIndex + 1, 0, project);
+      }
+
+      sameCatProjects.forEach((p: PortfolioProject, idx: number) => {
+        p.order = idx;
+      });
 
       const saveResult = await savePortfolioContent(nextContent, expectedRevision);
       return Response.json(
@@ -597,8 +657,52 @@ export default function AdminPortfolioPage() {
   const navigation = useNavigation();
   const isSubmitting = navigation.state === "submitting";
 
-  const [categoryFilter, setCategoryFilter] = useState<string>("all");
-  const [statusFilter, setStatusFilter] = useState<"all" | "published" | "draft" | "archived">("all");
+  const [categoryFilter, setCategoryFilterState] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      const p = new URLSearchParams(window.location.search);
+      return p.get("category") || "all";
+    }
+    return "all";
+  });
+  const [statusFilter, setStatusFilterState] = useState<"all" | "published" | "draft" | "archived">(() => {
+    if (typeof window !== "undefined") {
+      const p = new URLSearchParams(window.location.search);
+      const s = p.get("status");
+      if (s === "published" || s === "draft" || s === "archived") return s;
+    }
+    return "all";
+  });
+
+  const setCategoryFilter = useCallback((cat: string) => {
+    setCategoryFilterState(cat);
+    if (typeof window !== "undefined") {
+      const next = new URLSearchParams(window.location.search);
+      if (cat === "all") {
+        next.delete("category");
+      } else {
+        next.set("category", cat);
+      }
+      const newSearch = next.toString();
+      const newUrl = window.location.pathname + (newSearch ? `?${newSearch}` : "");
+      window.history.replaceState(null, "", newUrl);
+    }
+  }, []);
+
+  const setStatusFilter = useCallback((st: "all" | "published" | "draft" | "archived") => {
+    setStatusFilterState(st);
+    if (typeof window !== "undefined") {
+      const next = new URLSearchParams(window.location.search);
+      if (st === "all") {
+        next.delete("status");
+      } else {
+        next.set("status", st);
+      }
+      const newSearch = next.toString();
+      const newUrl = window.location.pathname + (newSearch ? `?${newSearch}` : "");
+      window.history.replaceState(null, "", newUrl);
+    }
+  }, []);
+
   const [projectToDelete, setProjectToDelete] = useState<PortfolioProject | null>(null);
   const [categoryToDelete, setCategoryToDelete] = useState<PortfolioCategoryItem | null>(null);
   const [targetReassignCategory, setTargetReassignCategory] = useState<string>("");
@@ -755,7 +859,41 @@ export default function AdminPortfolioPage() {
       if (statusFilter === "archived" && !p.archived) return false;
       return true;
     })
-    .sort((a, b) => a.order - b.order);
+    .sort(comparePortfolioProjects);
+
+  const categoryVisibleProjectsMap = useMemo(() => {
+    const map = new Map<string, { canMoveUp: boolean; canMoveDown: boolean }>();
+    const projectsByCat = new Map<string, PortfolioProject[]>();
+
+    for (const p of content.projects) {
+      let list = projectsByCat.get(p.category);
+      if (!list) {
+        list = [];
+        projectsByCat.set(p.category, list);
+      }
+      list.push(p);
+    }
+
+    for (const [, catProjects] of projectsByCat.entries()) {
+      catProjects.sort(comparePortfolioProjects);
+      const visible = catProjects.filter((p) => {
+        if (statusFilter === "published" && (p.status !== "published" || p.archived)) return false;
+        if (statusFilter === "draft" && (p.status !== "draft" || p.archived)) return false;
+        if (statusFilter === "archived" && !p.archived) return false;
+        return true;
+      });
+
+      const len = visible.length;
+      visible.forEach((p, idx) => {
+        map.set(p.id, {
+          canMoveUp: idx > 0,
+          canMoveDown: idx < len - 1,
+        });
+      });
+    }
+
+    return map;
+  }, [content.projects, statusFilter]);
 
   const projectsInDeletingCategory = categoryToDelete
     ? content.projects.filter((p) => p.category === categoryToDelete.id)
@@ -1240,7 +1378,7 @@ export default function AdminPortfolioPage() {
               </tr>
             </thead>
             <tbody>
-              {filteredProjects.map((p, pIdx) => {
+              {filteredProjects.map((p) => {
                 const catItem = categories.find((c) => c.id === p.category);
                 const catTitle = catItem ? catItem.title.fr : p.category;
                 const isVideo = resolveProjectPresentationMode(p) === "video";
@@ -1251,6 +1389,9 @@ export default function AdminPortfolioPage() {
                 const effectiveOwnerId = mediaItem?.ownerId || p.id;
                 const effectiveOwnerType = mediaItem?.ownerType || "project";
                 const effectiveSlot = mediaItem?.mediaSlot || (isVideo && !p.coverImageId ? "video_cover" : "cover");
+                const moveState = categoryVisibleProjectsMap.get(p.id);
+                const canMoveUp = moveState ? moveState.canMoveUp : false;
+                const canMoveDown = moveState ? moveState.canMoveDown : false;
 
                 return (
                   <tr key={p.id} className={styles.tableRow}>
@@ -1311,9 +1452,10 @@ export default function AdminPortfolioPage() {
                         <input type="hidden" name="intent" value="reorder" />
                         <input type="hidden" name="projectId" value={p.id} />
                         <input type="hidden" name="direction" value="up" />
+                        <input type="hidden" name="statusFilter" value={statusFilter} />
                         <button
                           type="submit"
-                          disabled={isSubmitting || pIdx === 0}
+                          disabled={isSubmitting || !canMoveUp}
                           className={styles.orderBtn}
                           aria-label={`Monter le projet ${p.title.fr}`}
                         >
@@ -1326,9 +1468,10 @@ export default function AdminPortfolioPage() {
                         <input type="hidden" name="intent" value="reorder" />
                         <input type="hidden" name="projectId" value={p.id} />
                         <input type="hidden" name="direction" value="down" />
+                        <input type="hidden" name="statusFilter" value={statusFilter} />
                         <button
                           type="submit"
-                          disabled={isSubmitting || pIdx === filteredProjects.length - 1}
+                          disabled={isSubmitting || !canMoveDown}
                           className={styles.orderBtn}
                           aria-label={`Descendre le projet ${p.title.fr}`}
                         >

@@ -16,6 +16,7 @@ import {
   portfolioContentSchema,
   migratePortfolioContentV1ToV2,
   cleanPortfolioContent,
+  comparePortfolioProjects,
 } from "./portfolio-content.shared";
 import {
   verifySecurePathChain,
@@ -445,7 +446,7 @@ export function getPublicPortfolioContent(customPath?: string): {
 
   const publicProjects = cleanedContent.projects
     .filter((p) => p.status === "published" && !p.archived && publishedCategoryIds.has(p.category))
-    .sort((a, b) => a.order - b.order);
+    .sort(comparePortfolioProjects);
 
   // Collect ONLY media IDs referenced by public categories and published projects
   const publicMediaIds = new Set<string>();

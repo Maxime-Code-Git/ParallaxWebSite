@@ -41,5 +41,6 @@ export {
   resolveProjectPresentationMode,
   slugify,
   calculateEffectiveSide,
+  comparePortfolioProjects,
   cleanPortfolioContent,
 } from "@parallax/shared";
