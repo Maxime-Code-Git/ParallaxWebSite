@@ -7,6 +7,7 @@ import {
   useActionData,
   useLoaderData,
   useNavigation,
+  useSearchParams,
 } from "react-router";
 import { requireValidAdminSession, createAdminHeaders } from "../../lib/admin-auth.server";
 import { constantTimeEqual } from "../../lib/auth.server";
@@ -530,11 +531,13 @@ export async function action({ request }: ActionFunctionArgs) {
     if (intent === "reorder") {
       const projectId = String(formData.get("projectId") || "").trim();
       const direction = String(formData.get("direction") || "").trim();
-      const rawStatusFilter = String(formData.get("statusFilter") || "all").trim();
-      const statusFilter: "all" | "published" | "draft" | "archived" =
-        rawStatusFilter === "published" || rawStatusFilter === "draft" || rawStatusFilter === "archived"
-          ? rawStatusFilter
-          : "all";
+      const statusFilter = String(formData.get("statusFilter") ?? "all").trim();
+      if (!["all", "published", "draft", "archived"].includes(statusFilter)) {
+        return Response.json(
+          { error: "Filtre de statut invalide." },
+          { status: 400, headers: createAdminHeaders() }
+        );
+      }
 
       if (direction !== "up" && direction !== "down") {
         return Response.json(
@@ -657,51 +660,37 @@ export default function AdminPortfolioPage() {
   const navigation = useNavigation();
   const isSubmitting = navigation.state === "submitting";
 
-  const [categoryFilter, setCategoryFilterState] = useState<string>(() => {
-    if (typeof window !== "undefined") {
-      const p = new URLSearchParams(window.location.search);
-      return p.get("category") || "all";
-    }
-    return "all";
-  });
-  const [statusFilter, setStatusFilterState] = useState<"all" | "published" | "draft" | "archived">(() => {
-    if (typeof window !== "undefined") {
-      const p = new URLSearchParams(window.location.search);
-      const s = p.get("status");
-      if (s === "published" || s === "draft" || s === "archived") return s;
-    }
-    return "all";
-  });
+  const [searchParams, setSearchParams] = useSearchParams();
+  const categoryFilter = searchParams.get("category") || "all";
+  const rawStatusFilter = searchParams.get("status");
+  const statusFilter =
+    rawStatusFilter === "published" || rawStatusFilter === "draft" || rawStatusFilter === "archived"
+      ? rawStatusFilter
+      : "all";
 
   const setCategoryFilter = useCallback((cat: string) => {
-    setCategoryFilterState(cat);
-    if (typeof window !== "undefined") {
-      const next = new URLSearchParams(window.location.search);
+    setSearchParams((previous) => {
+      const next = new URLSearchParams(previous);
       if (cat === "all") {
         next.delete("category");
       } else {
         next.set("category", cat);
       }
-      const newSearch = next.toString();
-      const newUrl = window.location.pathname + (newSearch ? `?${newSearch}` : "");
-      window.history.replaceState(null, "", newUrl);
-    }
-  }, []);
+      return next;
+    }, { replace: true, preventScrollReset: true });
+  }, [setSearchParams]);
 
   const setStatusFilter = useCallback((st: "all" | "published" | "draft" | "archived") => {
-    setStatusFilterState(st);
-    if (typeof window !== "undefined") {
-      const next = new URLSearchParams(window.location.search);
+    setSearchParams((previous) => {
+      const next = new URLSearchParams(previous);
       if (st === "all") {
         next.delete("status");
       } else {
         next.set("status", st);
       }
-      const newSearch = next.toString();
-      const newUrl = window.location.pathname + (newSearch ? `?${newSearch}` : "");
-      window.history.replaceState(null, "", newUrl);
-    }
-  }, []);
+      return next;
+    }, { replace: true, preventScrollReset: true });
+  }, [setSearchParams]);
 
   const [projectToDelete, setProjectToDelete] = useState<PortfolioProject | null>(null);
   const [categoryToDelete, setCategoryToDelete] = useState<PortfolioCategoryItem | null>(null);
