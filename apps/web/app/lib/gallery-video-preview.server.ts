@@ -21,6 +21,10 @@ class PreviewError extends Error {}
 let activeKey: string | undefined;
 const failures = new Map<string, string>();
 
+export function isGalleryVideoPreviewProcessing(galleryId: string, mediaId: string): boolean {
+  return activeKey === `${galleryId}:${mediaId}`;
+}
+
 export function galleryVideoPreviewSegments(galleryId: string, mediaId: string): string[] {
   return [galleryId, ".previews", mediaId, PREVIEW_FILENAME];
 }
@@ -49,7 +53,7 @@ export function hasGalleryVideoPreview(galleryId: string, mediaId: string): bool
 export function getGalleryVideoPreviewStatus(galleryId: string, mediaId: string): GalleryVideoPreviewStatus {
   const key = `${galleryId}:${mediaId}`;
   if (hasGalleryVideoPreview(galleryId, mediaId)) return { state: "ready" };
-  if (key === activeKey) return { state: "processing" };
+  if (isGalleryVideoPreviewProcessing(galleryId, mediaId)) return { state: "processing" };
   const message = failures.get(key);
   return message ? { state: "failed", message } : { state: "missing" };
 }

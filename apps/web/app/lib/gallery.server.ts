@@ -8,6 +8,7 @@ import {
   GalleryCodeDecryptionError,
 } from "./gallery-auth.server";
 import { deleteStoredGalleryMediaFiles } from "./gallery-preview.server";
+import { isGalleryVideoPreviewProcessing } from "./gallery-video-preview.server";
 import { computeGalleryFolderName, createGalleryFolderOnDisk } from "./gallery-folder.server";
 
 export class GalleryCodeNotFoundError extends Error {
@@ -710,7 +711,7 @@ export function parsePreviewVariants(
 }
 
 /**
- * Removes a single photo from a gallery atomically:
+ * Removes one imported media item from a gallery:
  * - Checks optimistic revision and belonging to the gallery.
  * - Rejects mutation if an import or gallery deletion is currently active.
  * - Reassigns cover photo if this was the cover (to next ready photo or null).
@@ -718,11 +719,13 @@ export function parsePreviewVariants(
  * - Deletes the media row in DB and cleans up preview/poster/original files in storage.
  * - Strictly leaves source files in imports intact.
  */
-export function deleteGalleryPhoto(
+function deleteGalleryMedia(
   galleryId: string,
   mediaId: string,
-  expectedRevision: number
+  expectedRevision: number,
+  mediaType: "photo" | "video"
 ): { success: boolean; unpublishNotice: boolean; newCoverId: string | null; deletedFilename: string } {
+  const mediaLabel = mediaType === "photo" ? "photo" : "vidéo";
   if (!galleryId || typeof galleryId !== "string") {
     throw new GalleryValidationError("ID de galerie invalide.");
   }
@@ -742,7 +745,7 @@ export function deleteGalleryPhoto(
 
   if (activeImports > 0) {
     throw new GalleryConflictError(
-      "Une opération d'importation est en cours pour cette galerie. Suppression de photo impossible pour le moment."
+      `Une opération d'importation est en cours pour cette galerie. Suppression de ${mediaLabel} impossible pour le moment.`
     );
   }
 
@@ -754,22 +757,22 @@ export function deleteGalleryPhoto(
 
   if (activeDeletion) {
     throw new GalleryConflictError(
-      "Une suppression de la galerie est en cours. Suppression de photo impossible pour le moment."
+      `Une suppression de la galerie est en cours. Suppression de ${mediaLabel} impossible pour le moment.`
     );
   }
 
-  // 3. Verify media exists, belongs to gallery and is a photo
+  // 3. Verify the media belongs to this gallery and matches the action type.
   const mediaItem = db.prepare(`
     SELECT id, gallery_id, media_type, original_filename
     FROM gallery_media
     WHERE id = ? AND gallery_id = ?
   `).get(mediaId, galleryId) as { id: string; gallery_id: string; media_type: string; original_filename: string } | undefined;
 
-  if (!mediaItem) {
-    throw new GalleryValidationError("Photo introuvable ou n'appartenant pas à cette galerie.");
+  if (!mediaItem || mediaItem.media_type !== mediaType) {
+    throw new GalleryValidationError(`La ${mediaLabel} est introuvable dans cette galerie.`);
   }
-  if (mediaItem.media_type !== "photo") {
-    throw new GalleryValidationError("Seules les photos peuvent être supprimées via cette action.");
+  if (mediaType === "video" && isGalleryVideoPreviewProcessing(galleryId, mediaId)) {
+    throw new GalleryConflictError("L'aperçu de cette vidéo est en cours de génération. Réessayez une fois le traitement terminé.");
   }
 
   // 4. Verify gallery and revision
@@ -848,7 +851,7 @@ export function deleteGalleryPhoto(
     if (err instanceof GalleryConflictError || err instanceof GalleryValidationError) {
       throw err;
     }
-    throw new Error(`Erreur lors de la suppression de la photo : ${err instanceof Error ? err.message : String(err)}`, { cause: err });
+    throw new Error(`Erreur lors de la suppression de la ${mediaLabel} : ${err instanceof Error ? err.message : String(err)}`, { cause: err });
   }
 
   // 8. Filesystem cleanup outside transaction (safe & confined)
@@ -864,6 +867,14 @@ export function deleteGalleryPhoto(
     newCoverId,
     deletedFilename: mediaItem.original_filename,
   };
+}
+
+export function deleteGalleryPhoto(galleryId: string, mediaId: string, expectedRevision: number) {
+  return deleteGalleryMedia(galleryId, mediaId, expectedRevision, "photo");
+}
+
+export function deleteGalleryVideo(galleryId: string, mediaId: string, expectedRevision: number) {
+  return deleteGalleryMedia(galleryId, mediaId, expectedRevision, "video");
 }
 
 /**

@@ -27,6 +27,7 @@ import {
   archiveGallery,
   setCoverPhoto,
   deleteGalleryPhoto,
+  deleteGalleryVideo,
   moveGalleryPhoto,
   reorderGalleryPhotos,
   getGalleryMediaList,
@@ -46,6 +47,12 @@ import {
 } from "../../lib/gallery-import.server";
 import { ensureGalleryImportFolder } from "../../lib/gallery-folder.server";
 import {
+  deleteGalleryVideoSource,
+  GalleryImportFileError,
+  listGalleryVideoSources,
+  type GalleryVideoSource,
+} from "../../lib/gallery-import-files.server";
+import {
   getGalleryVideoPreviewStatus,
   startGalleryVideoPreview,
   type GalleryVideoPreviewStatus,
@@ -64,6 +71,8 @@ interface LoaderData {
   folders: string[];
   importRootPath: string;
   galleryFolderName: string;
+  videoSources?: GalleryVideoSource[];
+  videoSourcesError?: string;
   csrfToken: string;
   media: GalleryMediaRow[];
   videoPreviews?: Record<string, GalleryVideoPreviewStatus>;
@@ -103,6 +112,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const importRootPath = ENV.GALLERY_IMPORT_PATH;
   const importFolderInfo = ensureGalleryImportFolder(gallery.id);
   const galleryFolderName = importFolderInfo.folderName;
+  let videoSources: GalleryVideoSource[] = [];
+  let videoSourcesError: string | undefined;
+  try {
+    videoSources = listGalleryVideoSources(galleryFolderName);
+  } catch {
+    videoSourcesError = "Impossible de lire les fichiers vidéo du dossier d’import.";
+  }
   const csrfToken = session.get("csrfToken") || "";
   const media = getGalleryMediaList(gallery.id);
 
@@ -125,6 +141,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       folders,
       importRootPath,
       galleryFolderName,
+      videoSources,
+      videoSourcesError,
       csrfToken,
       media,
       videoPreviews: Object.fromEntries(media.filter((item) => item.media_type === "video")
@@ -272,13 +290,26 @@ export async function action({ request, params }: ActionFunctionArgs) {
       return Response.json({ success, intent }, { status: result === "ready" ? 200 : 202, headers: createAdminHeaders() });
     }
 
-    if (intent === "delete_photo") {
+    if (intent === "delete_video_source") {
+      const name = body.get("sourceName") ?? "";
+      deleteGalleryVideoSource(gallery.id, name, body.get("sourceVersion") ?? "");
+      return Response.json({
+        success: `Le fichier « ${name} » a été supprimé du Mac mini.`,
+        intent,
+      }, { headers: createAdminHeaders() });
+    }
+
+    if (intent === "delete_photo" || intent === "delete_video") {
       const mediaId = (body.get("mediaId") || "").trim();
       const revision = parseInt(body.get("revision") || "0", 10);
-      const res = deleteGalleryPhoto(gallery.id, mediaId, revision);
+      const isVideo = intent === "delete_video";
+      const res = isVideo
+        ? deleteGalleryVideo(gallery.id, mediaId, revision)
+        : deleteGalleryPhoto(gallery.id, mediaId, revision);
+      const mediaLabel = isVideo ? "vidéo" : "photo";
       const successMessage = res.unpublishNotice
-        ? `La photo « ${res.deletedFilename} » a été retirée. La galerie ne contenant plus aucun média, elle a été basculée automatiquement en brouillon.`
-        : `La photo « ${res.deletedFilename} » a été supprimée de la galerie.`;
+        ? `La ${mediaLabel} « ${res.deletedFilename} » a été retirée. La galerie ne contenant plus aucun média, elle a été basculée automatiquement en brouillon.`
+        : `La ${mediaLabel} « ${res.deletedFilename} » a été supprimée de la galerie.`;
       return Response.json({ success: successMessage, intent }, { headers: createAdminHeaders() });
     }
 
@@ -325,6 +356,9 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
     return Response.json({ error: "Action inconnue.", intent }, { status: 400, headers: createAdminHeaders() });
   } catch (err) {
+    if (err instanceof GalleryImportFileError) {
+      return Response.json({ error: err.message, intent }, { status: err.status, headers: createAdminHeaders() });
+    }
     if (err instanceof GalleryConflictError) {
       return Response.json(
         { error: "Conflit de révision (409) : la galerie a été modifiée par une autre opération en arrière-plan. Vos modifications n'ont pas été écrasées.", intent },
@@ -413,6 +447,8 @@ export default function AdminGalleryEditPage() {
     folders,
     importRootPath,
     galleryFolderName,
+    videoSources = [],
+    videoSourcesError,
     csrfToken,
     media,
     videoPreviews = {},
@@ -435,6 +471,8 @@ export default function AdminGalleryEditPage() {
   }, [generatingPreview, idle, revalidate]);
 
   const [confirmDeletePhotoId, setConfirmDeletePhotoId] = useState<string | null>(null);
+  const [confirmDeleteVideoId, setConfirmDeleteVideoId] = useState<string | null>(null);
+  const [confirmDeleteVideoSource, setConfirmDeleteVideoSource] = useState<string | null>(null);
 
   const handleDirectReorder = (newOrder: string[]) => {
     const formData = new FormData();
@@ -566,6 +604,7 @@ export default function AdminGalleryEditPage() {
   const handleUploadBatchComplete = (folderName: string) => {
     setSelectedFolder(folderName);
     void triggerAnalyzeFolder(folderName);
+    void revalidate();
   };
 
   const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -743,13 +782,13 @@ export default function AdminGalleryEditPage() {
           </div>
         )}
 
-        {actionData?.success && (
+        {actionData?.success && actionData.intent !== "delete_video_source" && (
           <div className={styles.alertSuccess} role="status">
             {actionData.success}
           </div>
         )}
 
-        {actionData?.error && (
+        {actionData?.error && actionData.intent !== "delete_video_source" && (
           <div className={styles.alertError} role="alert">
             {actionData.error}
           </div>
@@ -1064,6 +1103,75 @@ export default function AdminGalleryEditPage() {
             onUploadBatchComplete={handleUploadBatchComplete}
           />
 
+          <details className={styles.advancedImportDetails}>
+            <summary className={styles.advancedImportSummary}>
+              Fichiers vidéo sur le Mac mini ({videoSources.length})
+            </summary>
+            <div className={styles.sourceVideoPanel}>
+              <p className={styles.pathInstruction}>
+                Dossier <code>{galleryFolderName}/videos</code>. La liste comprend aussi les fichiers ignorés à l’import.
+                Supprimer un fichier ici laisse en place toute copie déjà importée dans la galerie.
+              </p>
+              {videoSourcesError && <p role="alert">{videoSourcesError}</p>}
+              {actionData?.intent === "delete_video_source" && (
+                <p role={actionData.error ? "alert" : "status"}>
+                  {actionData.error || actionData.success}
+                </p>
+              )}
+              {!videoSourcesError && videoSources.length === 0 && <p>Aucun fichier vidéo dans ce dossier.</p>}
+              <div className={styles.videoList}>
+                {videoSources.map((file) => {
+                  const confirming = confirmDeleteVideoSource === file.version;
+                  const busy = isSubmitting || importStatus === "importing" || importStatus === "pending";
+                  return (
+                    <div key={file.version} className={styles.videoCard}>
+                      <div className={styles.sourceVideoName}>
+                        <strong className={styles.videoTitle}>{file.name}</strong>
+                        <span className={styles.codeMeta}>{(file.size / 1024 / 1024).toFixed(1)} Mio</span>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        aria-label={`Supprimer ${file.name} du Mac mini`}
+                        aria-expanded={confirming}
+                        className={`${styles.btn} ${styles.btnDanger} ${styles.btnSmall}`}
+                        onClick={() => setConfirmDeleteVideoSource(confirming ? null : file.version)}
+                      >
+                        Supprimer du Mac mini
+                      </button>
+                      {confirming && (
+                        <div className={`${styles.photoDeleteConfirmBox} ${styles.videoDeleteConfirmBox}`} role="alert">
+                          <p className={styles.photoDeleteConfirmText}>
+                            Supprimer définitivement <strong>« {file.name} »</strong> du dossier d’import ?
+                          </p>
+                          <div className={styles.videoActions}>
+                            <Form method="post" preventScrollReset onSubmit={() => setAnalysisResult(null)}>
+                              <input type="hidden" name="csrfToken" value={csrfToken} />
+                              <input type="hidden" name="intent" value="delete_video_source" />
+                              <input type="hidden" name="sourceName" value={file.name} />
+                              <input type="hidden" name="sourceVersion" value={file.version} />
+                              <button type="submit" disabled={busy} className={`${styles.btn} ${styles.btnDanger} ${styles.btnSmall}`}>
+                                Confirmer la suppression
+                              </button>
+                            </Form>
+                            <button
+                              type="button"
+                              disabled={isSubmitting}
+                              className={`${styles.btn} ${styles.btnSecondary} ${styles.btnSmall}`}
+                              onClick={() => setConfirmDeleteVideoSource(null)}
+                            >
+                              Annuler
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </details>
+
           {/* Analysis Result Box */}
           {analysisResult && (
             <div className={styles.analysisResults}>
@@ -1210,6 +1318,9 @@ export default function AdminGalleryEditPage() {
               <div className={styles.videoList}>
                 {videos.map((vid) => {
                   const preview = videoPreviews[vid.id];
+                  const isConfirmingDelete = confirmDeleteVideoId === vid.id;
+                  const videoBusy = isSubmitting || posterUploadingId === vid.id ||
+                    preview?.state === "processing" || importStatus === "importing" || importStatus === "pending";
                   return (
                     <div key={vid.id} className={styles.videoCard}>
                       <div>
@@ -1258,7 +1369,56 @@ export default function AdminGalleryEditPage() {
                             }}
                           />
                         </label>
+                        <button
+                          type="button"
+                          disabled={videoBusy}
+                          onClick={() => setConfirmDeleteVideoId(isConfirmingDelete ? null : vid.id)}
+                          className={`${styles.btn} ${styles.btnDanger} ${styles.btnSmall}`}
+                          aria-label={`Supprimer ${vid.original_filename} de la galerie`}
+                          aria-expanded={isConfirmingDelete}
+                        >
+                          Supprimer de la galerie
+                        </button>
                       </div>
+                      {isConfirmingDelete && (
+                        <div className={`${styles.photoDeleteConfirmBox} ${styles.videoDeleteConfirmBox}`} role="alert">
+                          <p className={styles.photoDeleteConfirmText}>
+                            Supprimer la vidéo <strong>« {vid.original_filename} »</strong> de la galerie ?
+                          </p>
+                          <p className={styles.photoDeleteConfirmSubtext}>
+                            La vidéo, son affiche et son aperçu seront retirés de la galerie.
+                            Le fichier source reste dans le dossier d’import et pourra être réimporté.
+                          </p>
+                          {media.length === 1 && gallery.status === "published" && (
+                            <p className={styles.photoDeleteConfirmSubtext}>
+                              La galerie repassera en brouillon puisqu’elle ne contiendra plus de média.
+                            </p>
+                          )}
+                          <div className={styles.videoActions}>
+                            <Form method="post">
+                              <input type="hidden" name="csrfToken" value={csrfToken} />
+                              <input type="hidden" name="intent" value="delete_video" />
+                              <input type="hidden" name="mediaId" value={vid.id} />
+                              <input type="hidden" name="revision" value={gallery.revision} />
+                              <button
+                                type="submit"
+                                disabled={videoBusy}
+                                className={`${styles.btn} ${styles.btnDanger} ${styles.btnSmall}`}
+                              >
+                                Confirmer le retrait
+                              </button>
+                            </Form>
+                            <button
+                              type="button"
+                              disabled={isSubmitting}
+                              onClick={() => setConfirmDeleteVideoId(null)}
+                              className={`${styles.btn} ${styles.btnSecondary} ${styles.btnSmall}`}
+                            >
+                              Annuler
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
