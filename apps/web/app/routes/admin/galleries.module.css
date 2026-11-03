@@ -736,6 +736,12 @@
   align-items: center;
 }
 
+.videoDeleteConfirmBox {
+  flex: 1 0 100%;
+  box-sizing: border-box;
+  margin: 0;
+}
+
 .fileInputHidden {
   display: none;
 }

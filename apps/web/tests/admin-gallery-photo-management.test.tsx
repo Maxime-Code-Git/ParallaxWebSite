@@ -450,6 +450,94 @@ describe("Admin Gallery Photo Management (Thumbnails, Deletion, Reordering, Conc
     });
   });
 
+  describe("Delete an imported video", () => {
+    function removeVideo(galleryId: string, mediaId: string, revision: number, token = csrfToken) {
+      const request = new Request(`http://127.0.0.1:3000/admin/galleries/${galleryId}`, {
+        method: "POST",
+        headers: { Cookie: adminCookie, Origin: "http://127.0.0.1:3000" },
+        body: new URLSearchParams({ intent: "delete_video", csrfToken: token, mediaId, revision: String(revision) }),
+      });
+      return editAction(createRouteArgs(request, { id: galleryId }));
+    }
+
+    it("removes only the selected film, its poster and preview, and keeps its import source", async () => {
+      const { gallery } = createGallery({ title: "Films", clientName: "Client", projectDate: "2026-08-01" });
+      const video = crypto.randomUUID();
+      const otherVideo = crypto.randomUUID();
+      insertVideoRow(gallery.id, video, "film-a.mp4", 1);
+      insertVideoRow(gallery.id, otherVideo, "film-b.mp4", 2);
+
+      const mediaRoot = path.join(testMediaPath, gallery.id);
+      const source = path.join(testImportPath, "fixture", "videos", "film-a.mp4");
+      const original = path.join(mediaRoot, video);
+      const files = [
+        original,
+        path.join(mediaRoot, ".posters", video, "1.webp"),
+        path.join(mediaRoot, ".posters", video, "1.avif"),
+        path.join(mediaRoot, ".previews", video, "video-v1.mp4"),
+      ];
+      const otherOriginal = path.join(mediaRoot, otherVideo);
+      for (const filename of [source, otherOriginal, ...files]) {
+        fs.mkdirSync(path.dirname(filename), { recursive: true });
+        fs.writeFileSync(filename, "fixture");
+      }
+      getGalleryDb().prepare("UPDATE galleries SET status = 'published' WHERE id = ?").run(gallery.id);
+
+      const response = await removeVideo(gallery.id, video, gallery.revision);
+      expect(response.status).toBe(200);
+      expect((await response.json()).success).toContain("film-a.mp4");
+      expect(getGalleryMediaList(gallery.id, "video").map((item) => item.id)).toEqual([otherVideo]);
+      expect(getGalleryById(gallery.id)).toMatchObject({ status: "published", revision: gallery.revision + 1 });
+      expect(files.every((filename) => !fs.existsSync(filename))).toBe(true);
+      expect(fs.readFileSync(source, "utf8")).toBe("fixture");
+      expect(fs.existsSync(otherOriginal)).toBe(true);
+
+      const last = await removeVideo(gallery.id, otherVideo, gallery.revision + 1);
+      expect(last.status).toBe(200);
+      expect((await last.json()).success).toContain("brouillon");
+      expect(getGalleryById(gallery.id)?.status).toBe("draft");
+    });
+
+    it("guards the video action against a wrong type, foreign gallery, invalid CSRF and stale revision", async () => {
+      const { gallery } = createGallery({ title: "Films", clientName: "Client", projectDate: "2026-08-01" });
+      const { gallery: other } = createGallery({ title: "Autre", clientName: "Client", projectDate: "2026-08-01" });
+      const video = crypto.randomUUID();
+      const otherVideo = crypto.randomUUID();
+      const photo = crypto.randomUUID();
+      insertVideoRow(gallery.id, video, "film-a.mp4", 1);
+      insertPhotoRow(gallery.id, photo, "photo.jpg", 2);
+      insertVideoRow(other.id, otherVideo, "film-b.mp4", 1);
+
+      expect((await removeVideo(gallery.id, photo, gallery.revision)).status).toBe(400);
+      expect((await removeVideo(gallery.id, otherVideo, gallery.revision)).status).toBe(400);
+      expect((await removeVideo(gallery.id, video, gallery.revision, "wrong")).status).toBe(403);
+      expect((await removeVideo(gallery.id, video, gallery.revision + 1)).status).toBe(409);
+      expect(getGalleryMediaList(gallery.id).map((item) => item.id)).toEqual([video, photo]);
+      expect(getGalleryMediaList(other.id).map((item) => item.id)).toEqual([otherVideo]);
+    });
+
+    it("requires a separate confirmation for the selected film", async () => {
+      const { gallery } = createGallery({ title: "Films", clientName: "Client", projectDate: "2026-08-01" });
+      const video = crypto.randomUUID();
+      insertVideoRow(gallery.id, video, "film-a.mp4", 1);
+      const url = `http://127.0.0.1:3000/admin/galleries/${gallery.id}`;
+      const request = new Request(url, { headers: { Cookie: adminCookie } });
+      const response = await editLoader(createRouteArgs(request, { id: gallery.id }));
+      vi.mocked(useLoaderData).mockReturnValue(await response.json());
+      vi.mocked(useActionData).mockReturnValue(undefined);
+
+      render(<AdminGalleryEditPage />);
+      const button = screen.getByRole("button", { name: "Supprimer film-a.mp4 de la galerie" });
+      expect(screen.queryByRole("button", { name: "Confirmer le retrait" })).not.toBeInTheDocument();
+      fireEvent.click(button);
+      expect(screen.getByRole("button", { name: "Confirmer le retrait" }).closest("form"))
+        .toHaveFormValues({ intent: "delete_video", mediaId: video });
+      fireEvent.click(screen.getByRole("button", { name: "Annuler" }));
+      expect(screen.queryByRole("button", { name: "Confirmer le retrait" })).not.toBeInTheDocument();
+      expect(getGalleryMediaList(gallery.id, "video")).toHaveLength(1);
+    });
+  });
+
   // --------------------------------------------------------------------------
   // Requirement 4: Reordering and moving photos
   // --------------------------------------------------------------------------
