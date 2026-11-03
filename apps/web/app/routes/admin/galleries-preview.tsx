@@ -118,7 +118,6 @@ export default function AdminGalleryPreviewPage() {
             className={styles.heroCoverBg}
           />
         )}
-        <div className={styles.heroOverlay} />
         <div className={styles.heroContent}>
           <div className={styles.heroBadge}>{gallery.location || "Galerie privée"}</div>
           <h1 className={styles.heroTitle}>{gallery.title}</h1>

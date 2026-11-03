@@ -83,6 +83,32 @@ describe("AdminGalleryEditPage UI Component Rendering", () => {
     expect(screen.queryByText(/Code indisponible/)).not.toBeInTheDocument();
   });
 
+  it("shows why the last completed import did not add a file after reloading the editor", () => {
+    vi.mocked(useLoaderData).mockReturnValue({
+      gallery: baseGallery,
+      codeVersion: 1,
+      codeStatus: "unavailable",
+      folders: [],
+      importRootPath: "/test/import",
+      csrfToken: "csrf-token-test",
+      media: [],
+      activeImportJob: {
+        id: "test-import",
+        status: "completed",
+        progress_total: 1,
+        progress_current: 1,
+        error_message: null,
+        rejected_files: [{ file: "videos/film.mp4", reason: "Fichier ignoré : contenu en double dans la galerie." }],
+      },
+    });
+    vi.mocked(useActionData).mockReturnValue(undefined);
+
+    render(<AdminGalleryEditPage />);
+    expect(screen.getByRole("heading", { name: "Résultat du dernier import" })).toBeInTheDocument();
+    expect(screen.getByText("videos/film.mp4")).toBeInTheDocument();
+    expect(screen.getByText(/contenu en double/)).toBeInTheDocument();
+  });
+
   it("renders explicit warning, disables reveal/copy buttons and shows no fake code when code is unavailable", () => {
     const warningText =
       "Le code d'accès actuel ne peut pas être déchiffré avec la clé active (clé de chiffrement différente ou données altérées).";

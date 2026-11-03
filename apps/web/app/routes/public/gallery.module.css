@@ -35,20 +35,19 @@
   object-fit: cover;
 }
 
-.heroOverlay {
-  position: absolute;
-  inset: 0;
-  background:
-    radial-gradient(ellipse at center, rgb(12 15 23 / 72%), rgb(12 15 23 / 32%) 44%, transparent 75%),
-    linear-gradient(180deg, rgb(12 15 23 / 12%), rgb(12 15 23 / 28%));
-}
-
 .heroContent {
   position: relative;
   z-index: 2;
   max-width: 800px;
   margin: 0 auto;
   text-shadow: 0 2px 8px rgb(0 0 0 / 85%);
+}
+
+.heroCoverBg ~ .heroContent {
+  margin-top: auto;
+  padding: 14px 22px;
+  border-radius: 12px;
+  background: rgb(12 15 23 / 80%);
 }
 
 .heroBadge {

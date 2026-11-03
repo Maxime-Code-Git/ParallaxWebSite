@@ -10,6 +10,7 @@ import {
   analyzeImportFolder,
   startImportJob,
   getImportJobStatus,
+  parseImportRejections,
   processImportJob,
 } from "../app/lib/gallery-import.server";
 import {
@@ -218,6 +219,40 @@ describe("gallery-import.server.ts (Folder Analysis, Magic Bytes, Lease Worker)"
         expect(fs.existsSync(path.join(previewDir, "960.webp"))).toBe(true);
         expect(fs.existsSync(path.join(previewDir, "1920.webp"))).toBe(true);
       }
+    });
+
+    it("adds a second distinct video and records one reason per skipped source", async () => {
+      const videos = path.join(testImportPath, "second-film", "videos");
+      fs.mkdirSync(videos, { recursive: true });
+      // Distinct byte streams with the MP4 signature expected by the folder scanner.
+      fs.writeFileSync(path.join(videos, "film-1.mp4"), Buffer.from("0000ftypmp42first"));
+      await processImportJob(startImportJob(testGallery.id, "second-film"));
+      fs.writeFileSync(path.join(videos, "film-2.mp4"), Buffer.from("0000ftypmp42second"));
+      fs.writeFileSync(path.join(videos, "non-supporte.mov"), Buffer.from("0000ftypqt  third"));
+
+      const jobId = startImportJob(testGallery.id, "second-film");
+      await processImportJob(jobId);
+      expect(getGalleryMediaList(testGallery.id, "video").map((media) => media.original_filename))
+        .toEqual(["film-1.mp4", "film-2.mp4"]);
+      const job = getImportJobStatus(jobId);
+      expect(job?.status).toBe("completed");
+      expect(parseImportRejections(job?.rejection_report ?? null)).toEqual(expect.arrayContaining([
+        { file: "videos/film-1.mp4", reason: expect.stringContaining("double") },
+        { file: "videos/non-supporte.mov", reason: expect.stringContaining("non supporté") },
+      ]));
+      expect(job?.rejected_files).toBe(2);
+    });
+
+    it("marks a job failed if its source folder disappears before processing", async () => {
+      const videos = path.join(testImportPath, "source-deplacee", "videos");
+      fs.mkdirSync(videos, { recursive: true });
+      fs.writeFileSync(path.join(videos, "film.mp4"), Buffer.from("0000ftypmp42first"));
+      const jobId = startImportJob(testGallery.id, "source-deplacee");
+      fs.renameSync(path.dirname(videos), path.join(testImportPath, "moved"));
+
+      await expect(processImportJob(jobId)).rejects.toThrow();
+      expect(getImportJobStatus(jobId)?.status).toBe("failed");
+      expect(getGalleryMediaList(testGallery.id, "video")).toEqual([]);
     });
 
     it("prevents worker from claiming job if active lease belongs to another worker", async () => {
