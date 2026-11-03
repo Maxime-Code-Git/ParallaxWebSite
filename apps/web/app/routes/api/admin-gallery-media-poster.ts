@@ -15,8 +15,11 @@ import { validateOrigin } from "../../lib/security.server";
 import { getGalleryDb } from "../../lib/gallery-db.server";
 import { ENV } from "../../lib/env.server";
 
-const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25 MB
-const MAX_PAYLOAD_SIZE = MAX_FILE_SIZE + 1024 * 1024; // 26 MB
+const MAX_FILE_SIZE = 60 * 1024 * 1024;
+const MAX_PAYLOAD_SIZE = MAX_FILE_SIZE + 1024 * 1024;
+const MAX_POSTER_PIXELS = 120_000_000;
+const MAX_POSTER_SIDE = 20_000;
+const POSTER_DIMENSIONS_ERROR = "Image trop grande : maximum 120 mégapixels et 20 000 pixels par côté.";
 const ALLOWED_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/avif"]);
 
 class PosterUploadError extends Error {
@@ -97,7 +100,7 @@ async function parseMultipartUpload(
     state.activeWriteStream = writeStream;
 
     file.on("limit", () => {
-      fail(new PosterUploadError("Le fichier dépasse la limite autorisée de 25 Mo.", 413));
+      fail(new PosterUploadError("Le fichier dépasse la limite autorisée de 60 Mio.", 413));
     });
     file.on("error", () => {
       fail(new PosterUploadError("Erreur lors de la lecture du flux de téléversement.", 400));
@@ -238,32 +241,41 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
     // Validate image dimensions and format with sharp under limiter
     const meta = await imageProcessingLimiter.run(async () => {
-      return sharp(uploadedPath, { limitInputPixels: 40_000_000 }).metadata();
+      return sharp(uploadedPath, { limitInputPixels: MAX_POSTER_PIXELS }).metadata().catch((err: unknown) => {
+        if (err instanceof Error && /pixel limit/i.test(err.message)) {
+          throw new PosterUploadError(POSTER_DIMENSIONS_ERROR, 413);
+        }
+        throw new PosterUploadError("Le fichier image est invalide ou illisible.", 415);
+      });
     });
 
-    if (!meta.format || !["jpeg", "png", "webp", "avif"].includes(meta.format)) {
+    const isAvif = meta.format === "heif" && meta.compression === "av1";
+    if ((!meta.format || !["jpeg", "png", "webp", "avif"].includes(meta.format)) && !isAvif) {
       return Response.json({ error: "Contenu de fichier image invalide." }, { status: 415, headers: createAdminHeaders() });
     }
 
-    if ((meta.width || 0) * (meta.height || 0) > 40_000_000) {
-      return Response.json({ error: "Dimensions de l'image trop importantes." }, { status: 413, headers: createAdminHeaders() });
+    const { width = 0, height = 0 } = meta;
+    if (!width || !height || (meta.pages ?? 1) > 1) {
+      return Response.json({ error: "Une image fixe et lisible est requise." }, { status: 415, headers: createAdminHeaders() });
+    }
+    if (width * height > MAX_POSTER_PIXELS || Math.max(width, height) > MAX_POSTER_SIDE) {
+      return Response.json({ error: POSTER_DIMENSIONS_ERROR }, { status: 413, headers: createAdminHeaders() });
     }
 
     const nextRevision = (media.poster_revision || 0) + 1;
     const tempWebp = path.join(tempDir, `${nextRevision}.webp`);
     const tempAvif = path.join(tempDir, `${nextRevision}.avif`);
 
-    // Process and strip metadata (EXIF auto-orient, max width 1920) under global limiter
+    // Process and strip metadata (EXIF auto-orient, longest side at most 1920).
     await imageProcessingLimiter.run(async () => {
-      await sharp(uploadedPath, { limitInputPixels: 40_000_000 })
+      const pipeline = sharp(uploadedPath, { limitInputPixels: MAX_POSTER_PIXELS })
         .rotate()
-        .resize({ width: 1920, withoutEnlargement: true })
+        .resize({ width: 1920, height: 1920, fit: "inside", withoutEnlargement: true });
+      await pipeline.clone()
         .webp({ quality: 85, effort: 4 })
         .toFile(tempWebp);
 
-      await sharp(uploadedPath, { limitInputPixels: 40_000_000 })
-        .rotate()
-        .resize({ width: 1920, withoutEnlargement: true })
+      await pipeline.clone()
         .avif({ quality: 80, effort: 4 })
         .toFile(tempAvif);
     });
@@ -286,6 +298,14 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
     const finalWebp = path.join(postersDir, `${nextRevision}.webp`);
     const finalAvif = path.join(postersDir, `${nextRevision}.avif`);
+
+    // A newer upload may have completed during processing. Check before renaming
+    // so a losing writer never overwrites or deletes the winning files.
+    const current = db.prepare("SELECT poster_revision FROM gallery_media WHERE id = ? AND gallery_id = ?")
+      .get(mediaId, galleryId) as { poster_revision: number } | undefined;
+    if (!current || current.poster_revision !== media.poster_revision) {
+      throw new PosterUploadError("Le poster a changé pendant le traitement. Réessayez.", 409);
+    }
 
     fs.renameSync(tempWebp, finalWebp);
     try {

@@ -4,11 +4,18 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import crypto from "node:crypto";
+import { execFileSync, spawnSync } from "node:child_process";
+import sharp from "sharp";
 import { RouterContextProvider } from "react-router";
 import { loader as listLoader } from "../app/routes/admin/galleries-list";
 import { loader as newLoader, action as newAction } from "../app/routes/admin/galleries-new";
 import { loader as editLoader, action as editAction } from "../app/routes/admin/galleries-edit";
 import { loader as previewLoader } from "../app/routes/admin/galleries-preview";
+import { action as posterAction } from "../app/routes/api/admin-gallery-media-poster";
+import { loader as clientMediaLoader } from "../app/routes/api/gallery-media";
+import { loader as originalLoader } from "../app/routes/api/gallery-download-original";
+import { loader as clientGalleryLoader } from "../app/routes/public/gallery";
+import { galleryVideoPreviewSegments, getGalleryVideoPreviewStatus } from "../app/lib/gallery-video-preview.server";
 import {
   closeGalleryDb,
   getGalleryDb,
@@ -90,6 +97,143 @@ describe("Admin Galleries Management (CRUD, Code Rotation, Concurrency, Quaranti
     if (fs.existsSync(tmpDir)) {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
+  });
+
+  function createVideoFixture(original?: Buffer) {
+    const { gallery, plainCode } = createGallery({
+      title: "Galerie vidéo",
+      clientName: "Client",
+      projectDate: "2026-11-03",
+    });
+    const mediaId = crypto.randomUUID();
+    const directory = path.join(testMediaPath, gallery.id);
+    fs.mkdirSync(directory, { recursive: true });
+    const file = path.join(directory, mediaId);
+    if (original) fs.writeFileSync(file, original);
+    const now = Date.now();
+    const db = getGalleryDb();
+    db.prepare(`
+      INSERT INTO gallery_media (
+        id, gallery_id, media_type, sort_order, original_filename,
+        mime_type, file_size, content_hash, is_ready, created_at, updated_at
+      ) VALUES (?, ?, 'video', 0, 'film.mp4', 'video/mp4', ?, ?, 1, ?, ?)
+    `).run(mediaId, gallery.id, original?.length ?? 0, mediaId, now, now);
+    db.prepare("UPDATE galleries SET status = 'published', expires_at = ? WHERE id = ?")
+      .run(now + 86_400_000, gallery.id);
+    return { gallery, plainCode, mediaId, file };
+  }
+
+  describe("Gallery video playback and posters", () => {
+    it("serves private preview ranges while keeping the original URL and downloads stable", async () => {
+      const original = Buffer.from("original-film-content");
+      const { gallery, plainCode, mediaId } = createVideoFixture(original);
+      const clientStorage = getGallerySessionStorage();
+      const clientSession = await clientStorage.getSession();
+      const token = createGalleryCsrfToken();
+      clientSession.set("csrfToken", token);
+      const auth = await authenticateGalleryCode(new Request("http://127.0.0.1:3000/fr/espace-client", {
+        headers: { Origin: "http://127.0.0.1:3000", "x-forwarded-for": "127.0.0.1" },
+      }), plainCode, token, clientSession);
+      if (!auth.success) throw new Error("Fixture client login failed");
+
+      const params = { publicId: gallery.public_id, mediaId };
+      const playback = `http://127.0.0.1:3000/api/gallery/${gallery.public_id}/media/${mediaId}`;
+      const previewUrl = playback + "?variant=preview";
+      const headers = { Cookie: auth.sessionCookie };
+      const page = () => clientGalleryLoader(createRouteArgs(new Request(
+        `http://127.0.0.1:3000/fr/galerie/${gallery.public_id}`, { headers },
+      ), params)).then((response) => response.json());
+      const missing = await clientMediaLoader(createRouteArgs(new Request(playback, { headers }), params));
+      expect(Buffer.from(await missing.arrayBuffer())).toEqual(original);
+      expect((await page()).videos[0].hasVideoPreview).toBe(false);
+      expect((await clientMediaLoader(createRouteArgs(new Request(previewUrl, { headers }), params))).status).toBe(404);
+
+      const preview = path.join(testMediaPath, ...galleryVideoPreviewSegments(gallery.id, mediaId));
+      fs.mkdirSync(path.dirname(preview), { recursive: true });
+      fs.writeFileSync(preview, "preview");
+
+      expect((await page()).videos[0].hasVideoPreview).toBe(true);
+      await expect(clientMediaLoader(createRouteArgs(new Request(previewUrl), params))).rejects.toMatchObject({ status: 401 });
+      const range = await clientMediaLoader(createRouteArgs(new Request(previewUrl, {
+        headers: { ...headers, Range: "bytes=1-3" },
+      }), params));
+      expect(range.status).toBe(206);
+      expect(range.headers.get("Content-Range")).toBe("bytes 1-3/7");
+      expect(range.headers.get("Content-Type")).toBe("video/mp4");
+      expect(range.headers.get("Cache-Control")).toContain("no-store");
+      expect(await range.text()).toBe("rev");
+
+      const previousPlayback = await clientMediaLoader(createRouteArgs(new Request(playback, { headers }), params));
+      expect(Buffer.from(await previousPlayback.arrayBuffer())).toEqual(original);
+
+      const download = await originalLoader(createRouteArgs(new Request(
+        `http://127.0.0.1:3000/api/gallery/${gallery.public_id}/download/original/${mediaId}`, { headers },
+      ), params));
+      expect(Buffer.from(await download.arrayBuffer())).toEqual(original);
+      expect(download.headers.get("Content-Disposition")).toContain('filename="film.mp4"');
+    });
+
+    it("accepts an oriented 60 MP JPEG poster and keeps the generated image within 1920 px", async () => {
+      const { gallery, mediaId } = createVideoFixture();
+      const original = await sharp({
+        create: { width: 9504, height: 6336, channels: 3, background: "#ddbb99" },
+      }).jpeg().withMetadata({ orientation: 6 }).toBuffer();
+      const body = new FormData();
+      body.set("csrfToken", csrfToken);
+      body.set("file", new Blob([new Uint8Array(original)], { type: "image/jpeg" }), "photo-haute-definition.jpg");
+      const res = await posterAction(createRouteArgs(new Request(
+        `http://127.0.0.1:3000/api/admin/galleries/${gallery.id}/media/${mediaId}/poster`,
+        { method: "POST", headers: { Cookie: adminCookie, Origin: "http://127.0.0.1:3000" }, body },
+      ), { id: gallery.id, mediaId }));
+      expect(await res.json()).toEqual({ success: true, revision: 1 });
+      expect(res.status).toBe(200);
+      const output = path.join(testMediaPath, gallery.id, ".posters", mediaId, "1.webp");
+      const meta = await sharp(output).metadata();
+      expect([meta.width, meta.height]).toEqual([1280, 1920]);
+      expect(meta.exif).toBeUndefined();
+    }, 30_000);
+
+    const ffmpegAvailable = spawnSync("ffmpeg", ["-version"], { stdio: "ignore" }).status === 0
+      && spawnSync("ffprobe", ["-version"], { stdio: "ignore" }).status === 0;
+
+    it.runIf(ffmpegAvailable)("generates a smaller, playable MP4 after an authenticated admin action", async () => {
+      const source = path.join(tmpDir, "source.mp4");
+      execFileSync("ffmpeg", [
+        "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=size=1920x1080:rate=60",
+        "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=44100",
+        "-t", "0.3", "-filter_threads", "1", "-threads", "2",
+        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "12", "-c:a", "aac", source,
+      ]);
+      const original = fs.readFileSync(source);
+      const { gallery, mediaId, file } = createVideoFixture(original);
+      const url = `http://127.0.0.1:3000/admin/galleries/${gallery.id}`;
+      const params = { id: gallery.id };
+      const makeRequest = (token: string) => new Request(url, {
+        method: "POST",
+        headers: { Cookie: adminCookie, Origin: "http://127.0.0.1:3000" },
+        body: new URLSearchParams({ intent: "generate_video_preview", mediaId, csrfToken: token }),
+      });
+
+      expect((await editAction(createRouteArgs(makeRequest("invalid"), params))).status).toBe(403);
+      expect(getGalleryVideoPreviewStatus(gallery.id, mediaId).state).toBe("missing");
+      expect((await editAction(createRouteArgs(makeRequest(csrfToken), params))).status).toBe(202);
+      await vi.waitFor(() => {
+        expect(getGalleryVideoPreviewStatus(gallery.id, mediaId)).not.toEqual({ state: "processing" });
+      }, { timeout: 12_000 });
+      expect(getGalleryVideoPreviewStatus(gallery.id, mediaId)).toEqual({ state: "ready" });
+
+      const output = path.join(testMediaPath, ...galleryVideoPreviewSegments(gallery.id, mediaId));
+      const media = JSON.parse(execFileSync("ffprobe", [
+        "-v", "error", "-show_streams", "-of", "json", output,
+      ], { encoding: "utf8" })) as { streams: Record<string, unknown>[] };
+      expect(media.streams).toEqual(expect.arrayContaining([
+        expect.objectContaining({ codec_name: "h264", width: 1280, height: 720, pix_fmt: "yuv420p", avg_frame_rate: "30/1" }),
+        expect.objectContaining({ codec_name: "aac" }),
+      ]));
+      expect(fs.statSync(output).size).toBeLessThan(original.length);
+      expect(fs.readFileSync(file)).toEqual(original);
+      expect((await editAction(createRouteArgs(makeRequest(csrfToken), params))).status).toBe(200);
+    }, 30_000);
   });
 
   describe("Galleries List (/admin/galleries)", () => {

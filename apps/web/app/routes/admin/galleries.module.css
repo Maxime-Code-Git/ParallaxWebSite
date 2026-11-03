@@ -724,6 +724,18 @@
   font-size: 15px;
 }
 
+.videoPreviewStatus {
+  display: block;
+  margin-top: 4px;
+}
+
+.videoActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
 .fileInputHidden {
   display: none;
 }

@@ -45,6 +45,11 @@ import {
   type RejectedFileItem,
 } from "../../lib/gallery-import.server";
 import { ensureGalleryImportFolder } from "../../lib/gallery-folder.server";
+import {
+  getGalleryVideoPreviewStatus,
+  startGalleryVideoPreview,
+  type GalleryVideoPreviewStatus,
+} from "../../lib/gallery-video-preview.server";
 import { GalleryBrowserUpload } from "../../components/admin/GalleryBrowserUpload";
 import { ENV } from "../../lib/env.server";
 import styles from "./galleries.module.css";
@@ -61,6 +66,7 @@ interface LoaderData {
   galleryFolderName: string;
   csrfToken: string;
   media: GalleryMediaRow[];
+  videoPreviews?: Record<string, GalleryVideoPreviewStatus>;
   activeImportJob: {
     id: string;
     status: string;
@@ -121,6 +127,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       galleryFolderName,
       csrfToken,
       media,
+      videoPreviews: Object.fromEntries(media.filter((item) => item.media_type === "video")
+        .map((item) => [item.id, getGalleryVideoPreviewStatus(gallery.id, item.id)])),
       activeImportJob: activeJob || null,
     },
     { headers: createAdminHeaders() }
@@ -247,6 +255,21 @@ export async function action({ request, params }: ActionFunctionArgs) {
       const revision = parseInt(body.get("revision") || "0", 10);
       setCoverPhoto(gallery.id, mediaId, revision);
       return Response.json({ success: "Photo de couverture mise à jour.", intent }, { headers: createAdminHeaders() });
+    }
+
+    if (intent === "generate_video_preview") {
+      const mediaId = (body.get("mediaId") || "").trim();
+      const result = startGalleryVideoPreview(gallery.id, mediaId);
+      if (result === "not_found" || result === "busy") {
+        const error = result === "not_found"
+          ? "Vidéo introuvable dans cette galerie."
+          : "Un autre aperçu est en cours de génération. Réessayez une fois le traitement terminé.";
+        return Response.json({ error, intent }, { status: result === "not_found" ? 404 : 409, headers: createAdminHeaders() });
+      }
+      const success = result === "ready"
+        ? "L'aperçu vidéo est déjà disponible."
+        : "Génération de l'aperçu lancée. Le fichier original est conservé.";
+      return Response.json({ success, intent }, { status: result === "ready" ? 200 : 202, headers: createAdminHeaders() });
     }
 
     if (intent === "delete_photo") {
@@ -392,6 +415,7 @@ export default function AdminGalleryEditPage() {
     galleryFolderName,
     csrfToken,
     media,
+    videoPreviews = {},
     activeImportJob,
   } = useLoaderData<LoaderData>();
 
@@ -400,6 +424,15 @@ export default function AdminGalleryEditPage() {
   const revalidator = useRevalidator();
   const submit = useSubmit();
   const isSubmitting = navigation.state === "submitting";
+  const generatingPreview = Object.values(videoPreviews).some((preview) => preview.state === "processing");
+  const revalidate = revalidator.revalidate;
+  const idle = navigation.state === "idle" && revalidator.state === "idle";
+
+  useEffect(() => {
+    if (!generatingPreview || !idle) return;
+    const timer = setTimeout(() => { void revalidate(); }, 3000);
+    return () => clearTimeout(timer);
+  }, [generatingPreview, idle, revalidate]);
 
   const [confirmDeletePhotoId, setConfirmDeletePhotoId] = useState<string | null>(null);
 
@@ -1175,34 +1208,60 @@ export default function AdminGalleryEditPage() {
                 Films et posters vidéo
               </h3>
               <div className={styles.videoList}>
-                {videos.map((vid) => (
-                  <div key={vid.id} className={styles.videoCard}>
-                    <div>
-                      <strong className={styles.videoTitle}>
-                        🎬 {vid.original_filename}
-                      </strong>
-                      <span className={styles.codeMeta}>
-                        Poster : {vid.poster_revision > 0 ? `Défini (rev ${vid.poster_revision})` : "Aucun poster"} · MIME : {vid.mime_type}
-                      </span>
-                    </div>
+                {videos.map((vid) => {
+                  const preview = videoPreviews[vid.id];
+                  return (
+                    <div key={vid.id} className={styles.videoCard}>
+                      <div>
+                        <strong className={styles.videoTitle}>
+                          🎬 {vid.original_filename}
+                        </strong>
+                        <span className={styles.codeMeta}>
+                          Poster : {vid.poster_revision > 0 ? `Défini (rev ${vid.poster_revision})` : "Aucun poster"} · MIME : {vid.mime_type}
+                        </span>
+                        <span className={`${styles.codeMeta} ${styles.videoPreviewStatus}`} role="status">
+                          {preview?.state === "ready"
+                            ? "Aperçu léger utilisé pour la lecture."
+                            : preview?.state === "processing"
+                              ? "Compression de l'aperçu en cours…"
+                              : preview?.state === "failed"
+                                ? preview.message
+                                : "Aucun aperçu léger. Le lecteur utilise l'original."}
+                        </span>
+                      </div>
 
-                    <div className={styles.rowGap10}>
-                      <label className={`${styles.btn} ${styles.btnSecondary} ${styles.btnSmall} ${styles.cursorPointer}`}>
-                        {posterUploadingId === vid.id ? "Téléversement..." : "Changer le poster"}
-                        <input
-                          type="file"
-                          accept="image/jpeg,image/png,image/webp,image/avif"
-                          className={styles.fileInputHidden}
-                          disabled={posterUploadingId === vid.id}
-                          onChange={(e) => {
-                            const file = e.target.files?.[0];
-                            if (file) handlePosterUpload(vid.id, file);
-                          }}
-                        />
-                      </label>
+                      <div className={styles.videoActions}>
+                        {preview?.state !== "ready" && (
+                          <Form method="post">
+                            <input type="hidden" name="csrfToken" value={csrfToken} />
+                            <input type="hidden" name="intent" value="generate_video_preview" />
+                            <input type="hidden" name="mediaId" value={vid.id} />
+                            <button
+                              type="submit"
+                              className={`${styles.btn} ${styles.btnSecondary} ${styles.btnSmall}`}
+                              disabled={isSubmitting || generatingPreview}
+                            >
+                              {preview?.state === "failed" ? "Réessayer la compression" : "Générer un aperçu léger"}
+                            </button>
+                          </Form>
+                        )}
+                        <label className={`${styles.btn} ${styles.btnSecondary} ${styles.btnSmall} ${styles.cursorPointer}`}>
+                          {posterUploadingId === vid.id ? "Téléversement..." : "Changer le poster"}
+                          <input
+                            type="file"
+                            accept="image/jpeg,image/png,image/webp,image/avif"
+                            className={styles.fileInputHidden}
+                            disabled={posterUploadingId === vid.id}
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) handlePosterUpload(vid.id, file);
+                            }}
+                          />
+                        </label>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
