@@ -3,7 +3,7 @@ import {
   requireValidAdminSession,
   createAdminHeaders,
 } from "../../lib/admin-auth.server";
-import { getImportJobStatus } from "../../lib/gallery-import.server";
+import { getImportJobStatus, parseImportRejections } from "../../lib/gallery-import.server";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   await requireValidAdminSession(request);
@@ -14,17 +14,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   }
 
   const job = getImportJobStatus(importId);
-  if (!job) {
+  if (!job || job.gallery_id !== params.id) {
     return Response.json({ error: "Tâche introuvable." }, { status: 404, headers: createAdminHeaders() });
-  }
-
-  let rejectedFiles = [];
-  if (job.rejection_report) {
-    try {
-      rejectedFiles = JSON.parse(job.rejection_report);
-    } catch {
-      // Ignored
-    }
   }
 
   return Response.json(
@@ -37,7 +28,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       scanned_photos: job.scanned_photos,
       scanned_videos: job.scanned_videos,
       rejected_files_count: job.rejected_files,
-      rejected_files: rejectedFiles,
+      rejected_files: parseImportRejections(job.rejection_report),
       error_message: job.error_message,
     },
     { headers: createAdminHeaders() }

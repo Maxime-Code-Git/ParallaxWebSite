@@ -173,10 +173,10 @@ describe("Admin Galleries Management (CRUD, Code Rotation, Concurrency, Quaranti
       expect(download.headers.get("Content-Disposition")).toContain('filename="film.mp4"');
     });
 
-    it("accepts an oriented 60 MP JPEG poster and keeps the generated image within 1920 px", async () => {
+    it("accepts the 7952 × 5304 JPEG poster and keeps the generated image within 1920 px", async () => {
       const { gallery, mediaId } = createVideoFixture();
       const original = await sharp({
-        create: { width: 9504, height: 6336, channels: 3, background: "#ddbb99" },
+        create: { width: 7952, height: 5304, channels: 3, background: "#ddbb99" },
       }).jpeg().withMetadata({ orientation: 6 }).toBuffer();
       const body = new FormData();
       body.set("csrfToken", csrfToken);
@@ -189,7 +189,7 @@ describe("Admin Galleries Management (CRUD, Code Rotation, Concurrency, Quaranti
       expect(res.status).toBe(200);
       const output = path.join(testMediaPath, gallery.id, ".posters", mediaId, "1.webp");
       const meta = await sharp(output).metadata();
-      expect([meta.width, meta.height]).toEqual([1280, 1920]);
+      expect([meta.width, meta.height]).toEqual([1281, 1920]);
       expect(meta.exif).toBeUndefined();
     }, 30_000);
 

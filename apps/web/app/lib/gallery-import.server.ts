@@ -37,6 +37,17 @@ export interface RejectedFileItem {
   reason: string;
 }
 
+export function parseImportRejections(report: string | null): RejectedFileItem[] {
+  try {
+    const entries: unknown = JSON.parse(report || "[]");
+    return Array.isArray(entries) ? entries.filter((entry): entry is RejectedFileItem =>
+      entry !== null && typeof entry === "object" &&
+      typeof entry.file === "string" && typeof entry.reason === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 export interface ImportAnalysisResult {
   folderName: string;
   validPhotosCount: number;
@@ -519,40 +530,13 @@ export async function processImportJob(jobId: string, workerId = crypto.randomUU
   const job = db.prepare("SELECT * FROM gallery_import_jobs WHERE id = ?").get(jobId) as {
     gallery_id: string;
     import_folder: string;
-    rejection_report: string | null;
   } | undefined;
 
   if (!job) return;
 
   const galleryId = job.gallery_id;
-  const folderPath = resolveImportFolder(job.import_folder);
-
-  const baseMedia = path.resolve(ENV.GALLERY_MEDIA_PATH);
-  const canonicalBase = fs.realpathSync(baseMedia);
-
-  // Staging folder for this worker on the exact same media volume
-  const stagingRoot = path.join(canonicalBase, ".staging", "imports");
-  fs.mkdirSync(stagingRoot, { recursive: true, mode: 0o700 });
-  const workerStagingDir = path.join(stagingRoot, `${jobId}-${workerId}`);
-  fs.mkdirSync(workerStagingDir, { recursive: true, mode: 0o700 });
-
-  // Confinement check & directory creation on destination directory
-  const galleryDir = ensureGalleryDirectory(canonicalBase, galleryId);
-
   const rejected: RejectedFileItem[] = [];
-  if (job.rejection_report) {
-    try {
-      rejected.push(...JSON.parse(job.rejection_report));
-    } catch {
-      // Ignored
-    }
-  }
-
-  // Scan candidates
-  const runningTotalCount = { count: 0 };
-  const photos = scanSubFolder(folderPath, "photos", rejected, runningTotalCount);
-  const videos = scanSubFolder(folderPath, "videos", rejected, runningTotalCount);
-  const allCandidates = [...photos, ...videos];
+  let workerStagingDir: string | undefined;
 
   let processedCount = 0;
 
@@ -573,6 +557,24 @@ export async function processImportJob(jobId: string, workerId = crypto.randomUU
   };
 
   try {
+    const folderPath = resolveImportFolder(job.import_folder);
+    const canonicalBase = fs.realpathSync(ENV.GALLERY_MEDIA_PATH);
+    const stagingRoot = path.join(canonicalBase, ".staging", "imports");
+    fs.mkdirSync(stagingRoot, { recursive: true, mode: 0o700 });
+    const stagingDir = path.join(stagingRoot, `${jobId}-${workerId}`);
+    fs.mkdirSync(stagingDir, { recursive: true, mode: 0o700 });
+    workerStagingDir = stagingDir;
+    const galleryDir = ensureGalleryDirectory(canonicalBase, galleryId);
+
+    // Rescan so a rejection from the analysis is not reported twice.
+    const runningTotalCount = { count: 0 };
+    const photos = scanSubFolder(folderPath, "photos", rejected, runningTotalCount);
+    const videos = scanSubFolder(folderPath, "videos", rejected, runningTotalCount);
+    const allCandidates = [...photos, ...videos];
+    if (allCandidates.length === 0) {
+      throw new Error("Aucun fichier valide ne reste dans le dossier d'import.");
+    }
+
     for (const candidate of allCandidates) {
       renewLease();
 
@@ -583,7 +585,7 @@ export async function processImportJob(jobId: string, workerId = crypto.randomUU
       }
 
       const mediaId = crypto.randomUUID();
-      const stagedOriginal = path.join(workerStagingDir, `${mediaId}.orig`);
+      const stagedOriginal = path.join(stagingDir, `${mediaId}.orig`);
 
       // 1. Stream copy and calculate hash in worker's private staging directory
       const { hash: contentHash, size: fileSize } = await streamCopyAndHash(
@@ -805,17 +807,20 @@ export async function processImportJob(jobId: string, workerId = crypto.randomUU
       UPDATE gallery_import_jobs
       SET status = 'failed',
           error_message = ?,
+          rejected_files = ?,
+          rejection_report = ?,
           lease_worker_id = NULL,
           lease_token = NULL,
           lease_expires_at = NULL,
           updated_at = ?
       WHERE id = ? AND lease_worker_id = ? AND lease_token = ?
         AND status = 'importing' AND lease_expires_at > ?
-    `).run(err instanceof Error ? err.message : String(err), Date.now(), jobId, workerId, leaseToken, Date.now());
+    `).run(err instanceof Error ? err.message : String(err), rejected.length, JSON.stringify(rejected),
+      Date.now(), jobId, workerId, leaseToken, Date.now());
     throw err;
   } finally {
     // Worker always cleans up its own staging directory
-    safeRemoveDirectory(workerStagingDir);
+    if (workerStagingDir) safeRemoveDirectory(workerStagingDir);
   }
 }
 

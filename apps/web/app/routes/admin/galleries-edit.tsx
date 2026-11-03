@@ -42,6 +42,7 @@ import {
 } from "../../lib/gallery-db.server";
 import {
   getAvailableImportFolders,
+  parseImportRejections,
   type RejectedFileItem,
 } from "../../lib/gallery-import.server";
 import { ensureGalleryImportFolder } from "../../lib/gallery-folder.server";
@@ -73,6 +74,7 @@ interface LoaderData {
     progress_total: number;
     progress_current: number;
     error_message: string | null;
+    rejected_files?: RejectedFileItem[];
   } | null;
 }
 
@@ -108,11 +110,19 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   const db = getGalleryDb();
   const activeJob = db.prepare(`
-    SELECT id, status, progress_total, progress_current, error_message
+    SELECT id, status, progress_total, progress_current, error_message, rejection_report
     FROM gallery_import_jobs
     WHERE gallery_id = ?
     ORDER BY created_at DESC LIMIT 1
-  `).get(gallery.id) as LoaderData["activeImportJob"];
+  `).get(gallery.id) as (NonNullable<LoaderData["activeImportJob"]> & { rejection_report: string | null }) | undefined;
+  const importJob = activeJob ? {
+    id: activeJob.id,
+    status: activeJob.status,
+    progress_total: activeJob.progress_total,
+    progress_current: activeJob.progress_current,
+    error_message: activeJob.error_message,
+    rejected_files: parseImportRejections(activeJob.rejection_report),
+  } : null;
 
   return Response.json(
     {
@@ -129,7 +139,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       media,
       videoPreviews: Object.fromEntries(media.filter((item) => item.media_type === "video")
         .map((item) => [item.id, getGalleryVideoPreviewStatus(gallery.id, item.id)])),
-      activeImportJob: activeJob || null,
+      activeImportJob: importJob,
     },
     { headers: createAdminHeaders() }
   );
@@ -500,6 +510,15 @@ export default function AdminGalleryEditPage() {
     rejectedFiles: RejectedFileItem[];
   } | null>(null);
   const [importStatus, setImportStatus] = useState<string | null>(activeImportJob?.status || null);
+  const [importOutcome, setImportOutcome] = useState<{
+    status: "completed" | "failed";
+    rejectedFiles: RejectedFileItem[];
+    errorMessage: string | null;
+  } | null>(() => activeImportJob?.status === "completed" || activeImportJob?.status === "failed" ? {
+    status: activeImportJob.status,
+    rejectedFiles: activeImportJob.rejected_files ?? [],
+    errorMessage: activeImportJob.error_message,
+  } : null);
   const [importProgress, setImportProgress] = useState<{ current: number; total: number }>({
     current: activeImportJob?.progress_current || 0,
     total: activeImportJob?.progress_total || 0,
@@ -593,12 +612,12 @@ export default function AdminGalleryEditPage() {
                 clearInterval(pollTimerRef.current);
                 pollTimerRef.current = null;
               }
-              if (data.status === "completed") {
-                setFeedback({ type: "success", message: "Importation terminée avec succès." });
-              } else {
-                setFeedback({ type: "error", message: data.error_message || "L'importation a échoué." });
-              }
-              revalidator.revalidate();
+              setImportOutcome({
+                status: data.status,
+                rejectedFiles: data.rejected_files ?? [],
+                errorMessage: data.error_message ?? null,
+              });
+              void revalidate();
             }
           }
         } catch {
@@ -611,7 +630,7 @@ export default function AdminGalleryEditPage() {
         }
       }, 1500);
     },
-    [gallery.id, revalidator]
+    [gallery.id, revalidate]
   );
 
   // Resume tracking an already active import job on mount and clean up on unmount
@@ -646,6 +665,7 @@ export default function AdminGalleryEditPage() {
 
       if (res.ok) {
         const data = await res.json();
+        setImportOutcome(null);
         setImportStatus("importing");
         pollImportStatus(data.jobId);
       } else {
@@ -1126,6 +1146,26 @@ export default function AdminGalleryEditPage() {
             </div>
           )}
 
+          {importOutcome && (
+            <div className={styles.analysisResults}>
+              <h3 className={styles.analysisTitle}>Résultat du dernier import</h3>
+              <p role="status" className={styles.analysisStat}>
+                {importOutcome.status === "failed"
+                  ? importOutcome.errorMessage || "L'importation a échoué."
+                  : importOutcome.rejectedFiles.length
+                    ? `Traitement terminé : ${importOutcome.rejectedFiles.length} fichier(s) ignoré(s) ou rejeté(s).`
+                    : "Importation terminée avec succès."}
+              </p>
+              {importOutcome.rejectedFiles.length > 0 && (
+                <ul className={styles.rejectedList}>
+                  {importOutcome.rejectedFiles.map((item, index) => (
+                    <li key={index}><code>{item.file}</code> : {item.reason}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
           {/* Collapsible Advanced Import from Controlled Folder */}
           <details className={styles.advancedImportDetails}>
             <summary className={styles.advancedImportSummary}>
@@ -1254,6 +1294,7 @@ export default function AdminGalleryEditPage() {
                             disabled={posterUploadingId === vid.id}
                             onChange={(e) => {
                               const file = e.target.files?.[0];
+                              e.target.value = "";
                               if (file) handlePosterUpload(vid.id, file);
                             }}
                           />

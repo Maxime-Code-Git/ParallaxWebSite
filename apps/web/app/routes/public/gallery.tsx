@@ -291,8 +291,6 @@ export default function GalleryPage() {
             className={styles.heroCoverBg}
           />
         )}
-        <div className={styles.heroOverlay} />
-
         <div className={styles.heroContent}>
           <div className={styles.heroBadge}>
             {gallery.location || (isEn ? "Private Gallery" : "Galerie privée")}
