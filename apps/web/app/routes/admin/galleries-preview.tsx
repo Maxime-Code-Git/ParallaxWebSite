@@ -16,6 +16,7 @@ import {
   parsePreviewVariants,
 } from "../../lib/gallery.server";
 import { buildPhotoSrcSet } from "../../lib/gallery-media.shared";
+import { hasGalleryVideoPreview } from "../../lib/gallery-video-preview.server";
 import { getSiteContent } from "../../lib/site-content.server";
 import { Header } from "../../components/public/Header";
 import { Footer } from "../../components/public/Footer";
@@ -31,7 +32,7 @@ interface LoaderData {
     height: number | null;
     variants?: Record<number, { width: number; height: number }> | null;
   }[];
-  videos: { id: string; originalFilename: string; mimeType: string; posterRevision: number }[];
+  videos: { id: string; originalFilename: string; posterRevision: number; hasVideoPreview: boolean }[];
   common: ReturnType<typeof getSiteContent>["common"];
 }
 
@@ -66,8 +67,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const videos = videoRows.map((m) => ({
     id: m.id,
     originalFilename: m.original_filename,
-    mimeType: m.mime_type,
     posterRevision: m.poster_revision,
+    hasVideoPreview: hasGalleryVideoPreview(gallery.id, m.id),
   }));
 
   const { common } = getSiteContent();
@@ -191,19 +192,15 @@ export default function AdminGalleryPreviewPage() {
                   <video
                     controls
                     playsInline
-                    preload="metadata"
+                    preload="none"
+                    src={`/api/admin/galleries/${galleryId}/media/${vid.id}${vid.hasVideoPreview ? "?variant=preview" : ""}`}
                     className={styles.videoPlayer}
                     poster={
                       vid.posterRevision > 0
                         ? `/api/admin/galleries/${galleryId}/media/${vid.id}/poster?v=${vid.posterRevision}`
                         : undefined
                     }
-                  >
-                    <source
-                      src={`/api/admin/galleries/${galleryId}/media/${vid.id}`}
-                      type={vid.mimeType}
-                    />
-                  </video>
+                  />
                 </div>
                 <div className={styles.videoDownloadFooter}>
                   <span className={styles.videoTitle}>{vid.originalFilename}</span>

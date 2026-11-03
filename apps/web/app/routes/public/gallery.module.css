@@ -33,15 +33,14 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
-  opacity: 0.28;
-  filter: blur(2px);
-  transform: scale(1.05);
 }
 
 .heroOverlay {
   position: absolute;
   inset: 0;
-  background: linear-gradient(180deg, rgba(12,15,23,0.6) 0%, rgba(12,15,23,0.9) 100%);
+  background:
+    radial-gradient(ellipse at center, rgb(12 15 23 / 72%), rgb(12 15 23 / 32%) 44%, transparent 75%),
+    linear-gradient(180deg, rgb(12 15 23 / 12%), rgb(12 15 23 / 28%));
 }
 
 .heroContent {
@@ -49,13 +48,14 @@
   z-index: 2;
   max-width: 800px;
   margin: 0 auto;
+  text-shadow: 0 2px 8px rgb(0 0 0 / 85%);
 }
 
 .heroBadge {
   font-size: 13px;
   letter-spacing: 0.18em;
   text-transform: uppercase;
-  color: #1E9EFF;
+  color: #9CD9FF;
   margin-bottom: 18px;
 }
 
@@ -78,7 +78,7 @@
   margin-top: 16px;
   font-size: 15px;
   letter-spacing: 0.08em;
-  color: #AEB6C6;
+  color: #E3E8F0;
 }
 
 /* Intro Section */

@@ -82,7 +82,13 @@ gallery-import/
 - **Formats** : MP4 (`video/mp4`), WebM (`video/webm`).
 - **Taille maximale par fichier** : 10 GiB.
 - **Streaming** : Lecture en continu avec support natif des en-têtes HTTP Range (RFC 7233 : 206 Partial Content, Content-Range, Accept-Ranges, 416 pour plages hors limites).
-- **Posters vidéo** : Téléversement multipart natif d'une image de couverture (limite 25 MiB, Sharp, métadonnées privées purgées).
+- **Affiches vidéo** : JPEG, PNG, WebP ou AVIF, jusqu'à 60 Mio, 120 mégapixels et 20 000 pixels par côté. Sharp applique l'orientation et réduit le côté le plus long à 1920 px, sans conserver les métadonnées de la photo.
+
+### Aperçu vidéo compressé
+
+Dans l'édition d'une galerie, sous **Films et posters vidéo**, cliquez sur **Générer un aperçu léger**. Cette action est disponible pour les films déjà importés. L'encodage se fait en arrière-plan, un film à la fois, et l'état s'actualise dans l'administration. Il requiert un exécutable `ffmpeg` accessible dans le `PATH` du service (avec les encodeurs `libx264` et `aac`). Sans FFmpeg, la lecture de l'original et le téléchargement restent disponibles.
+
+L'aperçu est un MP4 H.264/AAC, jusqu'à 1280 × 720 (ou 720 × 1280 en portrait) et 30 images/s. La galerie le lit dès qu'il est prêt ; le téléchargement individuel et les ZIP continuent de fournir l'original. La copie reste dans le stockage privé de la galerie. En cas d'échec ou de redémarrage pendant l'encodage, relancez la génération depuis l'admin.
 
 ### Previews privées persistantes
 

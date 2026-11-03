@@ -20,6 +20,7 @@ import {
   type GalleryMediaRow,
 } from "../../lib/gallery.server";
 import { buildPhotoSrcSet } from "../../lib/gallery-media.shared";
+import { hasGalleryVideoPreview } from "../../lib/gallery-video-preview.server";
 import styles from "./gallery.module.css";
 
 export interface ClientPhotoItem {
@@ -33,8 +34,8 @@ export interface ClientPhotoItem {
 interface ClientVideoItem {
   id: string;
   originalFilename: string;
-  mimeType: string;
   posterRevision: number;
+  hasVideoPreview: boolean;
 }
 
 interface LoaderData {
@@ -95,8 +96,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const videos: ClientVideoItem[] = videoRows.map((m: GalleryMediaRow) => ({
     id: m.id,
     originalFilename: m.original_filename,
-    mimeType: m.mime_type,
     posterRevision: m.poster_revision,
+    hasVideoPreview: hasGalleryVideoPreview(gallery.id, m.id),
   }));
 
   const dto = formatPublicGalleryDto(gallery, lang);
@@ -509,7 +510,8 @@ export default function GalleryPage() {
                   <video
                     controls
                     playsInline
-                    preload="metadata"
+                    preload="none"
+                    src={`/api/gallery/${gallery.publicId}/media/${vid.id}${vid.hasVideoPreview ? "?variant=preview" : ""}`}
                     className={styles.videoPlayer}
                     poster={
                       vid.posterRevision > 0
@@ -517,10 +519,6 @@ export default function GalleryPage() {
                         : undefined
                     }
                   >
-                    <source
-                      src={`/api/gallery/${gallery.publicId}/media/${vid.id}`}
-                      type={vid.mimeType}
-                    />
                     {isEn
                       ? "Your browser does not support video playback."
                       : "Votre navigateur ne prend pas en charge la lecture vidéo."}

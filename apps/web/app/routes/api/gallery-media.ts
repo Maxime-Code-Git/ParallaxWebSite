@@ -15,6 +15,7 @@ import {
   openSecureMediaFile,
 } from "../../lib/media-utils.server";
 import { ENV } from "../../lib/env.server";
+import { openGalleryVideoForPlayback } from "../../lib/gallery-video-preview.server";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   if (request.method !== "GET" && request.method !== "HEAD") {
@@ -36,12 +37,14 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   // 1. Video handling
   if (media.media_type === "video") {
-    let handle: ReturnType<typeof openSecureMediaFile>;
+    let video: ReturnType<typeof openGalleryVideoForPlayback>;
     try {
-      handle = openSecureMediaFile(ENV.GALLERY_MEDIA_PATH, [gallery.id, media.id]);
+      const usePreview = new URL(request.url).searchParams.get("variant") === "preview";
+      video = openGalleryVideoForPlayback(gallery.id, media.id, media.mime_type, usePreview);
     } catch {
       return new Response("File not found", { status: 404, headers: GALLERY_PRIVATE_HEADERS });
     }
+    const { handle, contentType } = video;
 
     const totalSize = handle.size;
     const rangeHeader = request.headers.get("Range");
@@ -72,7 +75,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             "Content-Range": `bytes ${start}-${end}/${totalSize}`,
             "Accept-Ranges": "bytes",
             "Content-Length": chunkSize.toString(),
-            "Content-Type": media.mime_type,
+            "Content-Type": contentType,
           },
         });
       }
@@ -91,7 +94,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           "Content-Range": `bytes ${start}-${end}/${totalSize}`,
           "Accept-Ranges": "bytes",
           "Content-Length": chunkSize.toString(),
-          "Content-Type": media.mime_type,
+          "Content-Type": contentType,
         },
       });
     }
@@ -105,7 +108,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           ...GALLERY_PRIVATE_HEADERS,
           "Accept-Ranges": "bytes",
           "Content-Length": totalSize.toString(),
-          "Content-Type": media.mime_type,
+          "Content-Type": contentType,
         },
       });
     }
@@ -123,7 +126,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         ...GALLERY_PRIVATE_HEADERS,
         "Accept-Ranges": "bytes",
         "Content-Length": totalSize.toString(),
-        "Content-Type": media.mime_type,
+        "Content-Type": contentType,
       },
     });
   }
