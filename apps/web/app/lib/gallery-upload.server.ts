@@ -355,6 +355,10 @@ export function countActiveSessionsForTarget(
   return count;
 }
 
+export function hasOngoingGalleryUploadFinalization(galleryId: string): boolean {
+  return Array.from(ongoingFinalizations.keys()).some((key) => key.startsWith(`${galleryId}:`));
+}
+
 export function checkDiskSpace(
   targetPath: string,
   requiredBytes: number,

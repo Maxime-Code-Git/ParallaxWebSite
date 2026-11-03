@@ -55,6 +55,8 @@ import {
 } from "../app/lib/gallery-preview.server";
 import { getSession, commitSession } from "../app/lib/session.server";
 import { computeCredentialVersion } from "../app/lib/auth.server";
+import { ensureGalleryImportFolder } from "../app/lib/gallery-folder.server";
+import { listGalleryVideoSources } from "../app/lib/gallery-import-files.server";
 
 function createRouteArgs(request: Request, params: Record<string, string> = {}) {
   const url = new URL(request.url);
@@ -535,6 +537,74 @@ describe("Admin Gallery Photo Management (Thumbnails, Deletion, Reordering, Conc
       fireEvent.click(screen.getByRole("button", { name: "Annuler" }));
       expect(screen.queryByRole("button", { name: "Confirmer le retrait" })).not.toBeInTheDocument();
       expect(getGalleryMediaList(gallery.id, "video")).toHaveLength(1);
+    });
+  });
+
+  describe("Delete a video source on the Mac mini", () => {
+    function removeSource(galleryId: string, sourceName: string, sourceVersion: string) {
+      const request = new Request(`http://127.0.0.1:3000/admin/galleries/${galleryId}`, {
+        method: "POST",
+        headers: { Cookie: adminCookie, Origin: "http://127.0.0.1:3000" },
+        body: new URLSearchParams({ intent: "delete_video_source", csrfToken, sourceName, sourceVersion }),
+      });
+      return editAction(createRouteArgs(request, { id: galleryId }));
+    }
+
+    it("lists an ignored source and removes it without touching the imported film", async () => {
+      const { gallery } = createGallery({ title: "Films", clientName: "Client", projectDate: "2026-08-01" });
+      const folder = ensureGalleryImportFolder(gallery.id);
+      const imported = crypto.randomUUID();
+      insertVideoRow(gallery.id, imported, "V2.mp4", 1);
+      const storedFilm = path.join(testMediaPath, gallery.id, imported);
+      fs.mkdirSync(path.dirname(storedFilm), { recursive: true });
+      fs.writeFileSync(storedFilm, "film fixture");
+      const duplicate = path.join(folder.videosPath, "Showreel.mp4");
+      const otherSource = path.join(folder.videosPath, "V2.mp4");
+      fs.writeFileSync(duplicate, "film fixture");
+      fs.writeFileSync(otherSource, "film fixture");
+
+      const request = new Request(`http://127.0.0.1:3000/admin/galleries/${gallery.id}`, {
+        headers: { Cookie: adminCookie },
+      });
+      const response = await editLoader(createRouteArgs(request, { id: gallery.id }));
+      const data = await response.json();
+      expect(data.videoSources.map((file: { name: string }) => file.name)).toEqual(["Showreel.mp4", "V2.mp4"]);
+      const result = await removeSource(gallery.id, "Showreel.mp4", data.videoSources[0].version);
+      expect(result.status).toBe(200);
+      expect(fs.existsSync(duplicate)).toBe(false);
+      expect(fs.readFileSync(otherSource, "utf8")).toBe("film fixture");
+      expect(fs.readFileSync(storedFilm, "utf8")).toBe("film fixture");
+      expect(getGalleryMediaList(gallery.id, "video").map((item) => item.id)).toEqual([imported]);
+    });
+
+    it("protects other folders, symlinks, replaced files and a folder in active use", async () => {
+      const { gallery } = createGallery({ title: "Films", clientName: "Client", projectDate: "2026-08-01" });
+      const { gallery: other } = createGallery({ title: "Autre", clientName: "Client", projectDate: "2026-08-01" });
+      const ownFolder = ensureGalleryImportFolder(gallery.id);
+      const otherFolder = ensureGalleryImportFolder(other.id);
+      const own = path.join(ownFolder.videosPath, "film.mov");
+      const foreign = path.join(otherFolder.videosPath, "film.mov");
+      fs.writeFileSync(own, "unrecognized video fixture");
+      fs.writeFileSync(foreign, "other video fixture");
+      fs.symlinkSync(foreign, path.join(ownFolder.videosPath, "link.mov"));
+      const files = listGalleryVideoSources(ownFolder.folderName);
+      expect(files.map((file) => file.name)).toEqual(["film.mov"]);
+      const token = files[0].version;
+
+      expect((await removeSource(gallery.id, "../film.mov", token)).status).toBe(400);
+      expect((await removeSource(gallery.id, "link.mov", token)).status).toBe(404);
+      expect((await removeSource(other.id, "film.mov", token)).status).toBe(409);
+      fs.writeFileSync(own, "replacement fixture");
+      expect((await removeSource(gallery.id, "film.mov", token)).status).toBe(409);
+
+      getGalleryDb().prepare(`
+        INSERT INTO gallery_import_jobs (id, gallery_id, import_folder, status, created_at, updated_at)
+        VALUES (?, ?, ?, 'pending', ?, ?)
+      `).run(crypto.randomUUID(), other.id, ownFolder.folderName, Date.now(), Date.now());
+      const current = listGalleryVideoSources(ownFolder.folderName)[0].version;
+      expect((await removeSource(gallery.id, "film.mov", current)).status).toBe(409);
+      expect(fs.readFileSync(own, "utf8")).toBe("replacement fixture");
+      expect(fs.readFileSync(foreign, "utf8")).toBe("other video fixture");
     });
   });
 

@@ -742,6 +742,15 @@
   margin: 0;
 }
 
+.sourceVideoPanel {
+  padding: 12px 0;
+}
+
+.sourceVideoName {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .fileInputHidden {
   display: none;
 }
