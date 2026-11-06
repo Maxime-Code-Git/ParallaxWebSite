@@ -10,8 +10,7 @@ function getProfileUrl(value: string | undefined, host: string, shortHost?: stri
     if (
       (url.protocol === "https:" || url.protocol === "http:") &&
       !url.username && !url.password && !url.port &&
-      (url.hostname === host || url.hostname.endsWith(`.${host}`) || url.hostname === shortHost) &&
-      /[^/]/.test(url.pathname)
+      (url.hostname === host || url.hostname.endsWith(`.${host}`) || url.hostname === shortHost)
     ) {
       return url.href;
     }

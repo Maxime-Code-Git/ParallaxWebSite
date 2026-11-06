@@ -91,7 +91,7 @@ describe("Editorial Routes and Actions", () => {
     expect(dataEn.home.hero.title.en).toBe("Photo & video.");
   });
 
-  it("renders old activities as portfolio links and only shows configured social profiles", async () => {
+  it("renders old activities as portfolio links and preserves a configured YouTube homepage link", async () => {
     const content = getSiteContent();
     content.home.contact.instagramUrl = "https://www.instagram.com/parallax_studio/";
     content.home.contact.youtubeUrl = "https://youtube.com";
@@ -108,7 +108,12 @@ describe("Editorial Routes and Actions", () => {
       expect(link.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
     }
     expect(within(screen.getByRole("contentinfo")).getByRole("link", { name: "Instagram" })).toBeVisible();
-    expect(screen.queryByRole("link", { name: "YouTube" })).not.toBeInTheDocument();
+    const youtubeLinks = screen.getAllByRole("link", { name: "YouTube" });
+    expect(youtubeLinks).toHaveLength(2);
+    for (const link of youtubeLinks) {
+      expect(link).toHaveAttribute("href", "https://youtube.com/");
+      expect(link.querySelector("path")).toHaveAttribute("fill", "currentColor");
+    }
   });
 
   it("persists activity destinations and resolves current localized portfolio pages", async () => {
