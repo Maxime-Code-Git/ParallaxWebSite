@@ -162,6 +162,13 @@ export function cleanCommonContent<T extends object>(common: T): T {
   return clone as unknown as T;
 }
 
+function cleanHomeActivity(item: unknown) {
+  // Keep the destination intact until the home validator checks it.
+  return item && typeof item === "object"
+    ? { ...item, ...cleanLocalizedString(item as LocalizedString) }
+    : item;
+}
+
 export function cleanHomeContent<T extends object>(home: T): T {
   if (!home || typeof home !== "object") return home;
   const clone = structuredClone(home) as Record<string, unknown>;
@@ -199,11 +206,11 @@ export function cleanHomeContent<T extends object>(home: T): T {
     if (savoirFaire.title) savoirFaire.title = cleanLocalizedString(savoirFaire.title as LocalizedString);
     if (savoirFaire.photoTitle) savoirFaire.photoTitle = cleanLocalizedString(savoirFaire.photoTitle as LocalizedString);
     if (Array.isArray(savoirFaire.photoItems)) {
-      savoirFaire.photoItems = savoirFaire.photoItems.map((item) => cleanLocalizedString(item as LocalizedString));
+      savoirFaire.photoItems = savoirFaire.photoItems.map((item) => cleanHomeActivity(item));
     }
     if (savoirFaire.videoTitle) savoirFaire.videoTitle = cleanLocalizedString(savoirFaire.videoTitle as LocalizedString);
     if (Array.isArray(savoirFaire.videoItems)) {
-      savoirFaire.videoItems = savoirFaire.videoItems.map((item) => cleanLocalizedString(item as LocalizedString));
+      savoirFaire.videoItems = savoirFaire.videoItems.map((item) => cleanHomeActivity(item));
     }
   }
   const contact = clone.contact as Record<string, unknown> | undefined;
@@ -2288,6 +2295,12 @@ export interface CommonContent {
   };
 }
 
+export type HomeActivityDestination = { kind: "category" | "project"; id: string };
+
+export interface HomeActivity extends LocalizedString {
+  destination?: HomeActivityDestination;
+}
+
 export interface HomeContent {
   seo: {
     title: LocalizedString;
@@ -2313,9 +2326,9 @@ export interface HomeContent {
   savoirFaire: {
     title: LocalizedString;
     photoTitle: LocalizedString;
-    photoItems: LocalizedString[];
+    photoItems: HomeActivity[];
     videoTitle: LocalizedString;
-    videoItems: LocalizedString[];
+    videoItems: HomeActivity[];
   };
   contact: {
     title: LocalizedString;
@@ -2949,6 +2962,25 @@ export function validateCommonContent(val: unknown): CommonContent {
   };
 }
 
+function validateHomeActivity(value: unknown, context: string): HomeActivity {
+  const obj = assertObject(value, context);
+  assertExactKeys(obj, ["fr", "en", "destination"], context);
+  const label = validateLocalizedString({ fr: obj.fr, en: obj.en }, context);
+  if (obj.destination === undefined) return label;
+
+  const destination = assertObject(obj.destination, `${context}.destination`);
+  assertExactKeys(destination, ["kind", "id"], `${context}.destination`);
+  const { kind, id } = destination;
+  if (
+    typeof id !== "string" ||
+    (kind !== "category" && kind !== "project") ||
+    !(kind === "category" ? CATEGORY_ID_REGEX : UUID_REGEX).test(id)
+  ) {
+    throw new ValidationError(`${context}.destination doit désigner une rubrique ou un projet du portfolio.`);
+  }
+  return { ...label, destination: { kind, id } };
+}
+
 export function validateHomeContent(val: unknown, options?: ValidateHomeOptions): HomeContent {
   const obj = assertObject(val, "home");
   assertExactKeys(obj, ["seo", "hero", "showreel", "duo", "savoirFaire", "contact", "sempra"], "home");
@@ -2978,7 +3010,7 @@ export function validateHomeContent(val: unknown, options?: ValidateHomeOptions)
     throw new ValidationError("home.savoirFaire.photoItems ne peut pas contenir plus de 50 éléments.");
   }
   const photoItems = sf.photoItems.map((item, idx) => {
-    const validated = validateLocalizedString(item, `home.savoirFaire.photoItems[${idx}]`);
+    const validated = validateHomeActivity(item, `home.savoirFaire.photoItems[${idx}]`);
     if (validated.fr.length > 300 || validated.en.length > 300) {
       throw new ValidationError(`L'élément photo ${idx + 1} ne doit pas dépasser 300 caractères.`);
     }
@@ -2992,7 +3024,7 @@ export function validateHomeContent(val: unknown, options?: ValidateHomeOptions)
     throw new ValidationError("home.savoirFaire.videoItems ne peut pas contenir plus de 50 éléments.");
   }
   const videoItems = sf.videoItems.map((item, idx) => {
-    const validated = validateLocalizedString(item, `home.savoirFaire.videoItems[${idx}]`);
+    const validated = validateHomeActivity(item, `home.savoirFaire.videoItems[${idx}]`);
     if (validated.fr.length > 300 || validated.en.length > 300) {
       throw new ValidationError(`L'élément vidéo ${idx + 1} ne doit pas dépasser 300 caractères.`);
     }

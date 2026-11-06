@@ -2,15 +2,18 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
-import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
+import { createElement } from "react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
+import { createRoutesStub, type LoaderFunctionArgs, type ActionFunctionArgs } from "react-router";
 import { loader as rootRedirectLoader } from "../app/routes/root-redirect";
-import { loader as homeLoader } from "../app/routes/public/home";
+import HomePage, { loader as homeLoader } from "../app/routes/public/home";
 import { loader as studioLoader } from "../app/routes/public/studio";
-import { action as adminHomeAction, loader as adminHomeLoader } from "../app/routes/admin/home";
+import AdminHomePage, { action as adminHomeAction, loader as adminHomeLoader } from "../app/routes/admin/home";
 import { action as adminStudioAction, loader as adminStudioLoader } from "../app/routes/admin/studio";
 import { getSession, commitSession } from "../app/lib/session.server";
 import { computeCredentialVersion } from "../app/lib/auth.server";
 import { getSiteContent } from "../app/lib/site-content.server";
+import { createDefaultPortfolioContent } from "../app/lib/portfolio-content.server";
 
 describe("Editorial Routes and Actions", () => {
   let tempDir: string;
@@ -50,6 +53,7 @@ describe("Editorial Routes and Actions", () => {
       RATE_LIMIT_DB_PATH: testDbFile,
       SITE_CONTENT_PATH: testContentFile,
       SITE_MEDIA_PATH: testMediaDir,
+      PORTFOLIO_CONTENT_PATH: path.join(tempDir, "portfolio.json"),
       TRUST_PROXY: "false",
     };
   });
@@ -85,6 +89,115 @@ describe("Editorial Routes and Actions", () => {
     const dataEn = await homeLoader(makeLoaderArgs(reqEn));
     expect(dataEn.lang).toBe("en");
     expect(dataEn.home.hero.title.en).toBe("Photo & video.");
+  });
+
+  it("renders old activities as portfolio links and only shows configured social profiles", async () => {
+    const content = getSiteContent();
+    content.home.contact.instagramUrl = "https://www.instagram.com/parallax_studio/";
+    content.home.contact.youtubeUrl = "https://youtube.com";
+    fs.writeFileSync(testContentFile, JSON.stringify(content));
+
+    const Routes = createRoutesStub([{ path: "/fr", Component: HomePage, loader: homeLoader }]);
+    render(createElement(Routes, { initialEntries: ["/fr"] }));
+
+    expect(await screen.findByRole("link", { name: "Portrait" })).toHaveAttribute("href", "/fr/projets");
+    const socialLinks = screen.getAllByRole("link", { name: "Instagram" });
+    expect(socialLinks).toHaveLength(2);
+    for (const link of socialLinks) {
+      expect(link).toHaveAttribute("href", content.home.contact.instagramUrl);
+      expect(link.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
+    }
+    expect(within(screen.getByRole("contentinfo")).getByRole("link", { name: "Instagram" })).toBeVisible();
+    expect(screen.queryByRole("link", { name: "YouTube" })).not.toBeInTheDocument();
+  });
+
+  it("persists activity destinations and resolves current localized portfolio pages", async () => {
+    const portfolio = createDefaultPortfolioContent();
+    const project = portfolio.projects[0];
+    const category = portfolio.categories[0];
+    const coverId = "12345678-abcd-4321-abcd-123456789012";
+    project.title = { fr: "Portrait d’artiste", en: "Artist portrait" };
+    project.coverImageId = coverId;
+    project.status = "published";
+    portfolio.media = {
+      [coverId]: {
+        imageId: coverId,
+        ownerType: "project",
+        ownerId: project.id,
+        mediaSlot: "cover",
+        originalFormat: "webp",
+        originalWidth: 1200,
+        originalHeight: 800,
+        variants: [{ name: "640p", width: 640, height: 427, webpSize: 1000, avifSize: 800 }],
+        createdAt: 1000,
+      },
+    };
+    const portfolioPath = path.join(tempDir, "portfolio.json");
+    fs.writeFileSync(portfolioPath, JSON.stringify(portfolio));
+
+    const cookie = await createValidAdminCookie("csrf-home-activity");
+    const adminUrl = "http://localhost:3000/admin/home";
+    const adminReq = new Request(adminUrl, { headers: { Cookie: cookie } });
+    const adminData = await (await adminHomeLoader(makeLoaderArgs(adminReq))).json();
+    expect(adminData.portfolioOptions.categories).toContainEqual({ id: category.id, title: category.title });
+    expect(adminData.portfolioOptions.projects.map(({ id }: { id: string }) => id)).toEqual([project.id]);
+
+    const Routes = createRoutesStub([{ path: "/admin/home", Component: AdminHomePage, loader: () => adminData }]);
+    const { container } = render(createElement(Routes, { initialEntries: ["/admin/home"] }));
+    const photoDestination = await screen.findByRole("combobox", { name: "Destination de l’élément photo 1" });
+    const videoDestination = screen.getByRole("combobox", { name: "Destination de l’élément vidéo 1" });
+    fireEvent.change(photoDestination, { target: { value: `category:${category.id}` } });
+    fireEvent.change(videoDestination, { target: { value: `project:${project.id}` } });
+    fireEvent.click(screen.getByRole("tab", { name: "English (EN)" }));
+    expect(photoDestination).toHaveValue(`category:${category.id}`);
+    expect(videoDestination).toHaveValue(`project:${project.id}`);
+    fireEvent.click(screen.getByRole("button", { name: "Descendre élément photo 1" }));
+
+    const homeData = container.querySelector<HTMLInputElement>('input[name="homeData"]')!.value;
+    const home = JSON.parse(homeData);
+    const { revision } = getSiteContent();
+    expect(home.savoirFaire.photoItems[1].destination).toEqual({ kind: "category", id: category.id });
+    expect(home.savoirFaire.videoItems[0].destination).toEqual({ kind: "project", id: project.id });
+    const request = new Request(adminUrl, {
+      method: "POST",
+      headers: { Origin: "http://localhost:3000", Cookie: cookie },
+      body: new URLSearchParams({ csrfToken: "csrf-home-activity", revision, homeData }),
+    });
+    expect((await adminHomeAction(makeActionArgs(request))).status).toBe(200);
+    expect(getSiteContent().home.savoirFaire).toEqual(home.savoirFaire);
+
+    const fr = await homeLoader(makeLoaderArgs(new Request("http://localhost:3000/fr")));
+    const en = await homeLoader(makeLoaderArgs(new Request("http://localhost:3000/en")));
+    expect(fr.home.savoirFaire.photoItems[1]).toEqual({ label: "Portrait", href: `/fr/projets/${category.slugFr}` });
+    expect(en.home.savoirFaire.videoItems[0].href).toBe(`/en/projects/${category.slugEn}/${project.slugEn}`);
+
+    category.slugEn = "documentary-films";
+    project.slugEn = "renamed-project";
+    fs.writeFileSync(portfolioPath, JSON.stringify(portfolio));
+    const renamed = await homeLoader(makeLoaderArgs(new Request("http://localhost:3000/en")));
+    expect(renamed.home.savoirFaire.videoItems[0].href).toBe("/en/projects/documentary-films/renamed-project");
+
+    project.status = "draft";
+    fs.writeFileSync(portfolioPath, JSON.stringify(portfolio));
+    const unpublished = await homeLoader(makeLoaderArgs(new Request("http://localhost:3000/en")));
+    expect(unpublished.home.savoirFaire.videoItems[0].href).toBe("/en/projects");
+  });
+
+  it("rejects an external URL supplied as an activity destination", async () => {
+    const cookie = await createValidAdminCookie("csrf-home-invalid-destination");
+    const content = getSiteContent();
+    content.home.savoirFaire.photoItems[0].destination = { kind: "category", id: "https://example.org" };
+    const request = new Request("http://localhost:3000/admin/home", {
+      method: "POST",
+      headers: { Origin: "http://localhost:3000", Cookie: cookie },
+      body: new URLSearchParams({
+        csrfToken: "csrf-home-invalid-destination",
+        revision: content.revision,
+        homeData: JSON.stringify(content.home),
+      }),
+    });
+    expect((await adminHomeAction(makeActionArgs(request))).status).toBe(422);
+    expect(getSiteContent().revision).toBe(content.revision);
   });
 
   it("public studio loader returns French content for /fr/studio and English for /en/studio", async () => {

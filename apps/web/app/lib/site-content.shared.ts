@@ -1,3 +1,7 @@
+import type { HomeContent } from "@parallax/shared";
+
+export type { HomeActivity, HomeActivityDestination, HomeContent } from "@parallax/shared";
+
 export interface LocalizedString {
   fr: string;
   en: string;
@@ -150,51 +154,6 @@ export interface CommonContent {
     privacy: LocalizedString;
     terms: LocalizedString;
     cookies: LocalizedString;
-  };
-}
-
-export interface HomeContent {
-  seo: {
-    title: LocalizedString;
-    description: LocalizedString;
-  };
-  hero: {
-    badge: LocalizedString;
-    title: LocalizedString;
-    subtitle: LocalizedString;
-  };
-  showreel: {
-    title: LocalizedString;
-    coverImageId: AllowedImageId;
-    coverImageAlt: LocalizedString;
-    videoUrl: string;
-  };
-  duo: {
-    title: LocalizedString;
-    text: LocalizedString;
-    imageId: AllowedImageId;
-    imageAlt: LocalizedString;
-  };
-  savoirFaire: {
-    title: LocalizedString;
-    photoTitle: LocalizedString;
-    photoItems: LocalizedString[];
-    videoTitle: LocalizedString;
-    videoItems: LocalizedString[];
-  };
-  contact: {
-    title: LocalizedString;
-    emailLabel: LocalizedString;
-    email: string;
-    socialLabel: LocalizedString;
-    instagramUrl: string;
-    youtubeUrl: string;
-  };
-  sempra: {
-    badge: LocalizedString;
-    title: LocalizedString;
-    buttonText: LocalizedString;
-    buttonUrl: string;
   };
 }
 

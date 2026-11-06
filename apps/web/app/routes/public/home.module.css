@@ -35,6 +35,10 @@
   color: var(--px-text-2);
 }
 
+.heroSocials {
+  margin-top: 22px;
+}
+
 /* Showreel Section */
 .showreelSection {
   padding: 0 80px 36px;
@@ -183,7 +187,7 @@
   font-size: 26px;
   font-weight: 500;
   color: var(--px-text);
-  margin-bottom: 22px;
+  margin: 0 0 22px;
 }
 
 .categoryList {
@@ -193,6 +197,36 @@
   font-size: 18px;
   color: var(--px-text-2);
   line-height: 2.2;
+}
+
+.activityLink {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 48px;
+  padding: 8px 10px 8px 0;
+  border-bottom: 1px solid var(--px-line);
+  color: var(--px-text-2);
+  line-height: 1.4;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.activityLink svg {
+  color: var(--px-accent);
+  flex: none;
+}
+
+.activityLink:hover,
+.activityLink:focus-visible {
+  color: var(--px-text);
+  border-color: var(--px-accent);
+}
+
+.activityLink:focus-visible {
+  outline: 2px solid var(--px-accent-hover);
+  outline-offset: 3px;
 }
 
 /* Contact Section */
@@ -229,16 +263,6 @@
 }
 
 .contactEmailLink:hover {
-  color: var(--px-accent-hover);
-}
-
-.contactSocialLink {
-  color: var(--px-text-2);
-  text-decoration: none;
-  transition: color 0.18s ease;
-}
-
-.contactSocialLink:hover {
   color: var(--px-accent-hover);
 }
 

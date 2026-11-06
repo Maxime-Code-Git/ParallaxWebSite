@@ -1,0 +1,51 @@
+.links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--px-text);
+}
+
+.link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 13px;
+  border: 1px solid var(--px-line);
+  border-radius: 999px;
+  color: inherit;
+  background: var(--px-surface);
+  font: 500 14px/1 var(--font-parallax);
+  text-decoration: none;
+}
+
+.link:hover,
+.link:focus-visible {
+  border-color: var(--px-accent-hover);
+}
+
+.link:focus-visible {
+  outline: 2px solid var(--px-accent-hover);
+  outline-offset: 3px;
+}
+
+.link svg {
+  width: 20px;
+  height: 20px;
+  flex: none;
+}
+
+.instagram { color: #f197c2; }
+.youtube { color: #ed3636; }
+
+.sempra .link {
+  background: transparent;
+  color: var(--sp-cream);
+  border-color: var(--sp-line);
+}
+
+.sempra .link:hover,
+.sempra .link:focus-visible {
+  border-color: var(--sp-gold-hover);
+  outline-color: var(--sp-gold-hover);
+}

@@ -1,12 +1,15 @@
 import { useState } from "react";
 import type { LoaderFunctionArgs } from "react-router";
-import { useLoaderData } from "react-router";
+import { Link, useLoaderData } from "react-router";
 import { getSiteContent } from "../../lib/site-content.server";
 import { Header } from "../../components/public/Header";
+import { SocialLinks } from "../../components/public/SocialLinks";
 import { Footer } from "../../components/public/Footer";
 import { ScrollToTop } from "../../components/public/ScrollToTop";
 import { VideoModal } from "../../components/public/VideoModal";
 import { ResponsiveSiteImage } from "../../components/public/ResponsiveSiteImage";
+import { getHomeActivityLinks, getHomePortfolioDestinations } from "../../lib/home-activity-links.server";
+import { getParallaxSocialProfiles } from "../../lib/social-profiles";
 import { ENV } from "../../lib/env.server";
 import {
   resolveSempraButtonUrl,
@@ -22,11 +25,24 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const lang: "fr" | "en" = isEn ? "en" : "fr";
 
   const siteContent = getSiteContent();
+  const home = cleanHomeContent(siteContent.home);
+  const { photoItems, videoItems, ...savoirFaire } = home.savoirFaire;
+  const portfolio = photoItems.some((item) => item.destination) || videoItems.some((item) => item.destination)
+    ? getHomePortfolioDestinations()
+    : undefined;
 
   return {
     lang,
     common: cleanCommonContent(siteContent.common),
-    home: cleanHomeContent(siteContent.home),
+    home: {
+      ...home,
+      savoirFaire: {
+        ...savoirFaire,
+        photoItems: getHomeActivityLinks(photoItems, lang, portfolio),
+        videoItems: getHomeActivityLinks(videoItems, lang, portfolio),
+      },
+    },
+    socials: getParallaxSocialProfiles(home.contact),
     media: siteContent.media || {},
     siteUrl: ENV.PUBLIC_SITE_URL,
   };
@@ -73,7 +89,7 @@ export function meta({ data }: { data?: Awaited<ReturnType<typeof loader>> }) {
 }
 
 export default function HomePage() {
-  const { lang, common, home, media } = useLoaderData<typeof loader>();
+  const { lang, common, home, media, socials } = useLoaderData<typeof loader>();
   const [showreelOpen, setShowreelOpen] = useState(false);
 
   return (
@@ -85,6 +101,11 @@ export default function HomePage() {
         <div className={styles.heroBadge}>{home.hero.badge[lang]}</div>
         <h1 className={styles.heroTitle}>{home.hero.title[lang]}</h1>
         <p className={styles.heroSubtitle}>{home.hero.subtitle[lang]}</p>
+        {(socials.instagramUrl || socials.youtubeUrl) && (
+          <div className={styles.heroSocials}>
+            <SocialLinks profiles={socials} label={home.contact.socialLabel[lang]} />
+          </div>
+        )}
       </section>
 
       {/* Showreel Section */}
@@ -150,30 +171,28 @@ export default function HomePage() {
       <section className={styles.savoirFaireSection}>
         <h2 className={styles.sectionHeader}>{home.savoirFaire.title[lang]}</h2>
         <div className={styles.savoirFaireGrid}>
-          <div>
-            <div className={styles.categoryTitle}>{home.savoirFaire.photoTitle[lang]}</div>
-            {home.savoirFaire.photoItems?.filter((item) => item && typeof item[lang] === "string" && item[lang].trim()).length > 0 && (
-              <ul className={styles.categoryList}>
-                {home.savoirFaire.photoItems
-                  .filter((item) => item && typeof item[lang] === "string" && item[lang].trim())
-                  .map((item, idx) => (
-                    <li key={idx}>{item[lang].trim()}</li>
+          {[
+            { key: "photo", title: home.savoirFaire.photoTitle[lang], items: home.savoirFaire.photoItems },
+            { key: "video", title: home.savoirFaire.videoTitle[lang], items: home.savoirFaire.videoItems },
+          ].map(({ key, title, items }) => (
+            <div key={key}>
+              <h3 className={styles.categoryTitle}>{title}</h3>
+              {items.length > 0 && (
+                <ul className={styles.categoryList}>
+                  {items.map(({ label, href }, index) => (
+                    <li key={index}>
+                      <Link to={href} className={styles.activityLink}>
+                        <span>{label}</span>
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <path d="M5 12h14m-6-6 6 6-6 6" />
+                        </svg>
+                      </Link>
+                    </li>
                   ))}
-              </ul>
-            )}
-          </div>
-          <div>
-            <div className={styles.categoryTitle}>{home.savoirFaire.videoTitle[lang]}</div>
-            {home.savoirFaire.videoItems?.filter((item) => item && typeof item[lang] === "string" && item[lang].trim()).length > 0 && (
-              <ul className={styles.categoryList}>
-                {home.savoirFaire.videoItems
-                  .filter((item) => item && typeof item[lang] === "string" && item[lang].trim())
-                  .map((item, idx) => (
-                    <li key={idx}>{item[lang].trim()}</li>
-                  ))}
-              </ul>
-            )}
-          </div>
+                </ul>
+              )}
+            </div>
+          ))}
         </div>
       </section>
 
@@ -192,26 +211,6 @@ export default function HomePage() {
                 {lang === "fr" ? "À renseigner dans l'administration" : "To be configured in admin"}
               </span>
             )}
-          </div>
-          <div>
-            <div className={styles.contactBlockLabel}>{home.contact.socialLabel[lang]}</div>
-            <a
-              href={home.contact.instagramUrl || "https://instagram.com"}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={styles.contactSocialLink}
-            >
-              Instagram
-            </a>
-            <span className={styles.contactDivider}> · </span>
-            <a
-              href={home.contact.youtubeUrl || "https://youtube.com"}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={styles.contactSocialLink}
-            >
-              YouTube
-            </a>
           </div>
         </div>
       </section>
@@ -250,7 +249,7 @@ export default function HomePage() {
       </section>
 
       {/* Footer matching SEMPRA styling */}
-      <Footer common={common} lang={lang} theme="sempra" />
+      <Footer common={common} lang={lang} theme="sempra" socials={socials} />
 
       {/* Floating scroll to top button */}
       <ScrollToTop checkSempra={true} lang={lang} hidden={showreelOpen} />

@@ -21,6 +21,7 @@ import {
 import { getPublicPortfolioContent } from "../../lib/portfolio-content.server";
 import { getSiteContent, type CommonContent } from "../../lib/site-content.server";
 import { cleanTypography, cleanCommonContent } from "../../lib/site-content.shared";
+import { getParallaxSocialProfiles, type SocialProfileUrls } from "../../lib/social-profiles";
 import { ENV } from "../../lib/env.server";
 import {
   getPortfolioOverviewUrl,
@@ -35,6 +36,7 @@ interface LoaderData {
   common: CommonContent;
   content: PortfolioContent;
   showcaseProjects: PortfolioProject[];
+  socials?: SocialProfileUrls;
   panelState: {
     isOpen: boolean;
     activeCategory: PortfolioCategory | null;
@@ -118,7 +120,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const lang: "fr" | "en" = pathname.startsWith("/en") ? "en" : "fr";
 
   const { content, publicProjects, publicCategories } = getPublicPortfolioContent();
-  const common = cleanCommonContent(getSiteContent().common);
+  const siteContent = getSiteContent();
+  const common = cleanCommonContent(siteContent.common);
 
   // Use route params: client navigations keep the .data suffix in request.url.
   let activeCategory: PortfolioCategory | null = null;
@@ -202,6 +205,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     {
       lang,
       common,
+      socials: getParallaxSocialProfiles(siteContent.home.contact),
       content,
       showcaseProjects,
       panelState: {
@@ -222,7 +226,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 }
 
 export default function PortfolioPage() {
-  const { lang, common, content, panelState, alternateUrls } =
+  const { lang, common, content, panelState, alternateUrls, socials } =
     useLoaderData<LoaderData>();
   const navigate = useNavigate();
   const location = useLocation();
@@ -824,7 +828,7 @@ export default function PortfolioPage() {
       </main>
 
       <div inert={phase !== "closed" ? true : undefined}>
-        <Footer common={common} lang={lang} />
+        <Footer common={common} lang={lang} socials={socials} />
       </div>
       </div>
 

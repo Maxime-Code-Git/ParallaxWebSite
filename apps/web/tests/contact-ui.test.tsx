@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, within } from "@testing-library/react";
 import ContactPage from "../app/routes/public/contact";
 import AdminContactPage from "../app/routes/admin/contact";
 import { DEFAULT_CONTACT_PAGE_CONTENT } from "../app/lib/site-content.shared";
@@ -138,14 +138,16 @@ describe("Contact UI Components", () => {
       expect(screen.getByRole("heading", { level: 2, name: /Coordonnées/i })).toBeInTheDocument();
       expect(screen.getByText("hello@parallax.test")).toBeInTheDocument();
       expect(screen.getByText("+32 470 12 34 56")).toBeInTheDocument();
-      expect(screen.getByRole("link", { name: "Instagram" })).toHaveAttribute(
-        "href",
-        "https://instagram.com/parallax"
-      );
-      expect(screen.getByRole("link", { name: "YouTube" })).toHaveAttribute(
-        "href",
-        "https://youtube.com/parallax"
-      );
+      for (const region of [screen.getByRole("complementary"), screen.getByRole("contentinfo")]) {
+        expect(within(region).getByRole("link", { name: "Instagram" })).toHaveAttribute(
+          "href",
+          "https://instagram.com/parallax"
+        );
+        expect(within(region).getByRole("link", { name: "YouTube" })).toHaveAttribute(
+          "href",
+          "https://youtube.com/parallax"
+        );
+      }
       expect(screen.getByText(/Nous répondons sous 48h/i)).toBeInTheDocument();
     });
 

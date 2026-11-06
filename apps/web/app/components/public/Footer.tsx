@@ -1,14 +1,17 @@
 import { Link } from "react-router";
 import type { CommonContent } from "../../lib/site-content.shared";
+import type { SocialProfileUrls } from "../../lib/social-profiles";
+import { SocialLinks } from "./SocialLinks";
 import styles from "./footer.module.css";
 
 interface FooterProps {
   common: CommonContent;
   lang: "fr" | "en";
+  socials?: SocialProfileUrls;
   theme?: "dark" | "sempra";
 }
 
-export function Footer({ common, lang, theme = "dark" }: FooterProps) {
+export function Footer({ common, lang, socials, theme = "dark" }: FooterProps) {
   const isSempra = theme === "sempra";
   const containerClass = isSempra ? styles.footerSempra : styles.footerDark;
   const linkClass = isSempra ? styles.linkSempra : styles.linkDark;
@@ -23,6 +26,13 @@ export function Footer({ common, lang, theme = "dark" }: FooterProps) {
   return (
     <footer className={containerClass}>
       <span className={styles.copyright}>{common.footer.copyright[lang]}</span>
+      {socials && (
+        <SocialLinks
+          profiles={socials}
+          label={lang === "fr" ? "Réseaux sociaux de Parallax" : "Parallax social media"}
+          theme={theme}
+        />
+      )}
       <nav className={styles.nav}>
         <Link to={legalNoticeHref} className={linkClass}>
           {common.footer.legalNotice[lang]}
