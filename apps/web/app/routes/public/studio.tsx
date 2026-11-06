@@ -5,6 +5,7 @@ import { Header } from "../../components/public/Header";
 import { Footer } from "../../components/public/Footer";
 import { ScrollToTop } from "../../components/public/ScrollToTop";
 import { ResponsiveSiteImage } from "../../components/public/ResponsiveSiteImage";
+import { getParallaxSocialProfiles } from "../../lib/social-profiles";
 import { ENV } from "../../lib/env.server";
 import {
   cleanCommonContent,
@@ -23,6 +24,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return {
     lang,
     common: cleanCommonContent(siteContent.common),
+    socials: getParallaxSocialProfiles(siteContent.home.contact),
     studio: cleanStudioContent(siteContent.studio),
     media: siteContent.media || {},
     siteUrl: ENV.PUBLIC_SITE_URL,
@@ -70,7 +72,7 @@ export function meta({ data }: { data?: Awaited<ReturnType<typeof loader>> }) {
 }
 
 export default function StudioPage() {
-  const { lang, common, studio, media } = useLoaderData<typeof loader>();
+  const { lang, common, studio, media, socials } = useLoaderData<typeof loader>();
 
   return (
     <div className={styles.container}>
@@ -133,7 +135,7 @@ export default function StudioPage() {
       </section>
 
       {/* Footer dark theme */}
-      <Footer common={common} lang={lang} theme="dark" />
+      <Footer common={common} lang={lang} theme="dark" socials={socials} />
 
       {/* Floating scroll to top button */}
       <ScrollToTop lang={lang} />

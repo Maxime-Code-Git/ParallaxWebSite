@@ -22,9 +22,12 @@ import {
 import { ENV } from "../../lib/env.server";
 import { cleanupUnreferencedMedia } from "../../lib/media-image.server";
 import {
+  type HomeActivity,
+  type HomeActivityDestination,
   type HomeContent,
   type UploadedMediaMetadata,
 } from "../../lib/site-content.shared";
+import { getHomePortfolioOptions } from "../../lib/home-activity-links.server";
 import { ImageUploader } from "../../components/admin/ImageUploader";
 import styles from "./adminForms.module.css";
 
@@ -49,6 +52,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     {
       csrfToken,
       home: content.home,
+      portfolioOptions: getHomePortfolioOptions(),
       revision: content.revision,
       isCorrupted,
       corruptionError: isCorrupted ? (corruptionError || "Erreur de format ou de validation") : undefined,
@@ -136,8 +140,57 @@ type ActionData = {
   latestRevision?: string;
 };
 
+function ActivityDestinationSelect({
+  id, label, lang, destination, options, onChange,
+}: {
+  id: string;
+  label: string;
+  lang: "fr" | "en";
+  destination?: HomeActivityDestination;
+  options: ReturnType<typeof getHomePortfolioOptions>;
+  onChange: (destination?: HomeActivityDestination) => void;
+}) {
+  const value = destination ? `${destination.kind}:${destination.id}` : "";
+  const choices = destination?.kind === "category" ? options.categories : options.projects;
+  const unavailable = destination && !choices.some(({ id }) => id === destination.id);
+
+  return (
+    <div className={styles.activityDestination}>
+      <label className={styles.label} htmlFor={id}>{label}</label>
+      <select
+        id={id}
+        className={styles.select}
+        value={value}
+        onChange={(event) => {
+          const [kind, id] = event.target.value.split(":");
+          onChange((kind === "category" || kind === "project") && id ? { kind, id } : undefined);
+        }}
+      >
+        <option value="">Portfolio général</option>
+        {unavailable && <option value={value}>Destination indisponible · portfolio général</option>}
+        {options.categories.length > 0 && (
+          <optgroup label="Rubriques publiées">
+            {options.categories.map(({ id, title }) => (
+              <option key={id} value={`category:${id}`}>{title[lang]}</option>
+            ))}
+          </optgroup>
+        )}
+        {options.projects.length > 0 && (
+          <optgroup label="Projets publiés">
+            {options.projects.map(({ id, title, categoryTitle }) => (
+              <option key={id} value={`project:${id}`}>
+                {categoryTitle ? `${categoryTitle[lang]} : ` : ""}{title[lang]}
+              </option>
+            ))}
+          </optgroup>
+        )}
+      </select>
+    </div>
+  );
+}
+
 export default function AdminHomePage() {
-  const { csrfToken, home: initialHome, revision: initialRevision, isCorrupted, corruptionError, media: initialMedia } =
+  const { csrfToken, home: initialHome, revision: initialRevision, isCorrupted, corruptionError, media: initialMedia, portfolioOptions } =
     useLoaderData<typeof loader>();
   const actionData = useActionData<ActionData>();
   const navigation = useNavigation();
@@ -174,6 +227,16 @@ export default function AdminHomePage() {
       }
       return clone;
     });
+  };
+
+  const updateActivity = (list: "photoItems" | "videoItems", index: number, patch: Partial<HomeActivity>) => {
+    setFormData((prev) => ({
+      ...prev,
+      savoirFaire: {
+        ...prev.savoirFaire,
+        [list]: prev.savoirFaire[list].map((item, idx) => idx === index ? { ...item, ...patch } : item),
+      },
+    }));
   };
 
   const handleAddPhotoItem = () => {
@@ -577,7 +640,7 @@ export default function AdminHomePage() {
           <section className={styles.sectionCard}>
             <h2 className={styles.sectionTitle}>Savoir-faire</h2>
             <p className={styles.sectionSubtitle}>
-              Listes des prestations photo et vidéo ({activeTab.toUpperCase()}).
+              Listes des prestations photo et vidéo ({activeTab.toUpperCase()}). Choisis une destination par activité : le lien s’adapte automatiquement à la langue du visiteur.
             </p>
             <div className={styles.fieldGroup}>
               <label className={styles.label} htmlFor="sf-title">
@@ -622,14 +685,7 @@ export default function AdminHomePage() {
                           className={styles.input}
                           value={item[activeTab]}
                           placeholder={`Texte (${activeTab.toUpperCase()})`}
-                          onChange={(e) => {
-                            const newItems = [...formData.savoirFaire.photoItems];
-                            newItems[idx] = { ...newItems[idx], [activeTab]: e.target.value };
-                            setFormData({
-                              ...formData,
-                              savoirFaire: { ...formData.savoirFaire, photoItems: newItems },
-                            });
-                          }}
+                          onChange={(e) => updateActivity("photoItems", idx, { [activeTab]: e.target.value })}
                         />
                         <button
                           type="button"
@@ -661,6 +717,14 @@ export default function AdminHomePage() {
                           ✕
                         </button>
                       </div>
+                      <ActivityDestinationSelect
+                        id={`sf-photo-destination-${idx}`}
+                        label={`Destination de l’élément photo ${idx + 1}`}
+                        lang={activeTab}
+                        destination={item.destination}
+                        options={portfolioOptions}
+                        onChange={(destination) => updateActivity("photoItems", idx, { destination })}
+                      />
                     </div>
                   ))
                 )}
@@ -702,14 +766,7 @@ export default function AdminHomePage() {
                           className={styles.input}
                           value={item[activeTab]}
                           placeholder={`Texte (${activeTab.toUpperCase()})`}
-                          onChange={(e) => {
-                            const newItems = [...formData.savoirFaire.videoItems];
-                            newItems[idx] = { ...newItems[idx], [activeTab]: e.target.value };
-                            setFormData({
-                              ...formData,
-                              savoirFaire: { ...formData.savoirFaire, videoItems: newItems },
-                            });
-                          }}
+                          onChange={(e) => updateActivity("videoItems", idx, { [activeTab]: e.target.value })}
                         />
                         <button
                           type="button"
@@ -741,6 +798,14 @@ export default function AdminHomePage() {
                           ✕
                         </button>
                       </div>
+                      <ActivityDestinationSelect
+                        id={`sf-video-destination-${idx}`}
+                        label={`Destination de l’élément vidéo ${idx + 1}`}
+                        lang={activeTab}
+                        destination={item.destination}
+                        options={portfolioOptions}
+                        onChange={(destination) => updateActivity("videoItems", idx, { destination })}
+                      />
                     </div>
                   ))
                 )}

@@ -975,3 +975,14 @@
   font-weight: 500;
   margin-left: 8px;
 }
+
+.activityDestination {
+  display: grid;
+  gap: 5px;
+  margin-top: 8px;
+}
+
+.activityDestination .select {
+  width: 100%;
+  min-width: 0;
+}

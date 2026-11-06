@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs, HeadersArgs } from "react-router";
 import { Form, useActionData, useLoaderData, useNavigation, Link } from "react-router";
 import { Header } from "../../components/public/Header";
+import { SocialLinks } from "../../components/public/SocialLinks";
 import { Footer } from "../../components/public/Footer";
 import { ScrollToTop } from "../../components/public/ScrollToTop";
 import {
@@ -10,6 +11,7 @@ import {
   type ContactActionResult,
   type ContactLoaderData,
 } from "../../lib/contact.server";
+import { getParallaxSocialProfiles } from "../../lib/social-profiles";
 import { cleanTypography } from "../../lib/site-content.shared";
 import styles from "./contact.module.css";
 
@@ -130,8 +132,7 @@ export default function ContactPage() {
 
   const publicEmail = homeContact.email.trim();
   const publicPhone = cardContent.phone.trim();
-  const instagramUrl = homeContact.instagramUrl.trim();
-  const youtubeUrl = homeContact.youtubeUrl.trim();
+  const socials = getParallaxSocialProfiles(homeContact);
   const responseTimeNotice = cardContent.responseTimeNotice[lang]?.trim();
   const configuredPrivacyUrl = formContent.privacyPolicyUrl.trim();
   const privacyUrl = isPrivacyPolicyPublished
@@ -445,32 +446,10 @@ export default function ContactPage() {
             )}
 
             {/* Socials */}
-            {(instagramUrl || youtubeUrl) && (
+            {(socials.instagramUrl || socials.youtubeUrl) && (
               <div className={styles.cardItem}>
                 <div className={styles.cardLabel}>{cardContent.socialLabel[lang]}</div>
-                <div className={styles.cardSocialLinks}>
-                  {instagramUrl && (
-                    <a
-                      href={instagramUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className={styles.socialLink}
-                    >
-                      Instagram
-                    </a>
-                  )}
-                  {instagramUrl && youtubeUrl && <span className={styles.socialDivider}> · </span>}
-                  {youtubeUrl && (
-                    <a
-                      href={youtubeUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className={styles.socialLink}
-                    >
-                      YouTube
-                    </a>
-                  )}
-                </div>
+                <SocialLinks profiles={socials} label={cardContent.socialLabel[lang]} />
               </div>
             )}
 
@@ -485,7 +464,7 @@ export default function ContactPage() {
       </section>
 
       {/* Footer */}
-      <Footer common={content.common} lang={lang} theme="dark" />
+      <Footer common={content.common} lang={lang} theme="dark" socials={socials} />
 
       {/* Back to top button */}
       <ScrollToTop lang={lang} />
