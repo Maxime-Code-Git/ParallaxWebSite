@@ -4,6 +4,7 @@ import {
   useLoaderData,
   type LoaderFunctionArgs,
 } from "react-router";
+import type { Route } from "./+types/galleries-preview";
 import {
   requireValidAdminSession,
   createAdminHeaders,
@@ -36,7 +37,8 @@ interface LoaderData {
   common: ReturnType<typeof getSiteContent>["common"];
 }
 
-export function meta({ data }: { data?: LoaderData }) {
+export function meta({ loaderData }: Route.MetaArgs) {
+  const data = loaderData as LoaderData | undefined;
   const title = data?.gallery ? `[Aperçu Admin] ${data.gallery.title} | Parallax` : "Aperçu Admin | Parallax";
   return [
     { title },

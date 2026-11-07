@@ -4,6 +4,7 @@ import {
   useLoaderData,
   type LoaderFunctionArgs,
 } from "react-router";
+import type { Route } from "./+types/gallery";
 import { Header } from "../../components/public/Header";
 import { Footer } from "../../components/public/Footer";
 import { ScrollToTop } from "../../components/public/ScrollToTop";
@@ -53,8 +54,9 @@ export function headers() {
   return GALLERY_PRIVATE_HEADERS;
 }
 
-export function meta({ data }: { data?: LoaderData }) {
-  if (!data) return [{ title: "Galerie privée | Parallax" }];
+export function meta({ loaderData }: Route.MetaArgs) {
+  const data = loaderData as LoaderData | undefined;
+  if (!data) return [{ title: "Galerie privée | Parallax" }, { name: "robots", content: "noindex, nofollow" }];
   const { gallery, lang } = data;
   const isEn = lang === "en";
 

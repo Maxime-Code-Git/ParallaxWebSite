@@ -11,6 +11,7 @@ import {
   type ActionFunctionArgs,
   type LoaderFunctionArgs,
 } from "react-router";
+import type { Route } from "./+types/galleries-edit";
 import {
   requireValidAdminSession,
   createAdminHeaders,
@@ -91,7 +92,8 @@ interface ActionData {
   intent?: string;
 }
 
-export function meta({ data }: { data?: LoaderData }) {
+export function meta({ loaderData }: Route.MetaArgs) {
+  const data = loaderData as LoaderData | undefined;
   const title = data?.gallery ? `Gérer ${data.gallery.title} | Parallax` : "Gérer la galerie | Parallax";
   return [
     { title },

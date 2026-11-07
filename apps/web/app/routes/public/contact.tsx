@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs, HeadersArgs } from "react-router";
 import { Form, useActionData, useLoaderData, useNavigation, Link } from "react-router";
+import type { Route } from "./+types/contact";
 import { Header } from "../../components/public/Header";
 import { SocialLinks } from "../../components/public/SocialLinks";
 import { Footer } from "../../components/public/Footer";
@@ -41,11 +42,11 @@ export function headers({ loaderHeaders, actionHeaders, errorHeaders }: HeadersA
   return headers;
 }
 
-export function meta({ data }: { data?: ContactLoaderData }) {
-  if (!data) {
+export function meta({ loaderData }: Route.MetaArgs) {
+  if (!loaderData) {
     return [{ title: "Contact | Parallax" }];
   }
-  const { content, lang, siteUrl } = data;
+  const { content, lang, siteUrl } = loaderData;
   const base = (siteUrl || "").replace(/\/$/, "");
   const pageTitle = cleanTypography(content.contactPage.seo.title[lang]);
   const pageDesc = cleanTypography(content.contactPage.seo.description[lang]);

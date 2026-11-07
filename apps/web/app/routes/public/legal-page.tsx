@@ -1,5 +1,6 @@
 import type { LoaderFunctionArgs, HeadersFunction } from "react-router";
 import { data, useLoaderData } from "react-router";
+import type { Route } from "./+types/legal-page";
 import {
   LEGAL_PAGE_URLS,
   type LegalPageKey,
@@ -97,22 +98,16 @@ export const headers: HeadersFunction = ({ loaderHeaders }) => {
   return loaderHeaders;
 };
 
-export function meta({ data }: { data?: {
-  lang: "fr" | "en";
-  pageKey: LegalPageKey;
-  alternateUrls: { fr: string; en: string };
-  siteUrl: string;
-  document: ReturnType<typeof getPublicLegalDocument>;
-} }) {
-  if (!data) {
+export function meta({ loaderData }: Route.MetaArgs) {
+  if (!loaderData) {
     return [
       { title: "Parallax" },
       { name: "robots", content: "noindex, nofollow" },
     ];
   }
 
-  const { lang, alternateUrls, siteUrl, document } = data;
-  const base = siteUrl.replace(/\/$/, "");
+  const { lang, alternateUrls, siteUrl, document } = loaderData;
+  const base = (siteUrl || "").replace(/\/$/, "");
 
   if (!document) {
     return [
@@ -121,9 +116,11 @@ export function meta({ data }: { data?: {
     ];
   }
 
-  const canonicalUrl = `${base}${alternateUrls[lang]}`;
-  const frUrl = `${base}${alternateUrls.fr}`;
-  const enUrl = `${base}${alternateUrls.en}`;
+  const cleanFr = (alternateUrls?.fr || "").split("?")[0].replace(/\/+$/, "");
+  const cleanEn = (alternateUrls?.en || "").split("?")[0].replace(/\/+$/, "");
+  const canonicalUrl = `${base}${lang === "fr" ? cleanFr : cleanEn}`;
+  const frUrl = `${base}${cleanFr}`;
+  const enUrl = `${base}${cleanEn}`;
 
   const ogImageUrl = `${base}/img/logo-parallax.png`;
 

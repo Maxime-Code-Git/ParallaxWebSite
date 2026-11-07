@@ -1,5 +1,6 @@
 import type { LoaderFunctionArgs } from "react-router";
 import { useLoaderData } from "react-router";
+import type { Route } from "./+types/studio";
 import { getSiteContent } from "../../lib/site-content.server";
 import { Header } from "../../components/public/Header";
 import { Footer } from "../../components/public/Footer";
@@ -31,11 +32,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   };
 }
 
-export function meta({ data }: { data?: Awaited<ReturnType<typeof loader>> }) {
-  if (!data) {
+export function meta({ loaderData }: Route.MetaArgs) {
+  if (!loaderData) {
     return [{ title: "Studio | Parallax" }];
   }
-  const { studio, common, lang, siteUrl } = data;
+  const { studio, common, lang, siteUrl } = loaderData;
   const base = (siteUrl || "").replace(/\/$/, "");
   const pageTitle = cleanTypography(studio.seo.title[lang]);
   const pageDesc = cleanTypography(studio.seo.description[lang]);

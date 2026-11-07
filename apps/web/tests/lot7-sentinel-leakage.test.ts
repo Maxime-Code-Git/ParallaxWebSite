@@ -139,7 +139,7 @@ describe("Lot 7 - Private Draft & Identity Sentinel Leakage Prevention", () => {
     expect(headers.get("Cache-Control")).toContain("private");
 
     // Meta tags must enforce noindex, nofollow
-    const metaTags = legalRouteMeta({ data }) as MetaTag[];
+    const metaTags = legalRouteMeta({ loaderData: data } as Parameters<typeof legalRouteMeta>[0]) as MetaTag[];
     const robotsTag = metaTags.find((tag) => tag.name === "robots");
     expect(robotsTag).toBeDefined();
     expect(robotsTag?.content).toBe("noindex, nofollow");

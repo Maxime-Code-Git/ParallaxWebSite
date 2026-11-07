@@ -205,7 +205,7 @@ describe("Portfolio Localized Routing & Directional Panels (Lot 3)", () => {
         },
       };
 
-      const metaTags = publicPortfolioMeta({ data: mockData } as never);
+      const metaTags = publicPortfolioMeta({ loaderData: mockData } as never);
       const titleTag = metaTags.find((t) => "title" in t) as { title?: string } | undefined;
       const descTag = metaTags.find((t) => "name" in t && t.name === "description") as { content?: string } | undefined;
 
@@ -269,7 +269,7 @@ describe("Portfolio Localized Routing & Directional Panels (Lot 3)", () => {
         },
       };
 
-      const metaTags = publicPortfolioMeta({ data: mockData } as never);
+      const metaTags = publicPortfolioMeta({ loaderData: mockData } as never);
       const titleTag = metaTags.find((t) => "title" in t) as { title?: string } | undefined;
       const descTag = metaTags.find((t) => "name" in t && t.name === "description") as { content?: string } | undefined;
 

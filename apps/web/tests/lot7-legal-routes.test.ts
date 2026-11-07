@@ -138,7 +138,7 @@ describe("Lot 7 - Public Legal Routes, Canonical URLs, and SEO Headers", () => {
     expect(headers.get("Cache-Control")).toContain("private");
     expect(headers.get("Cache-Control")).toContain("no-store");
 
-    const metaTags = legalMeta({ data }) as MetaTag[];
+    const metaTags = legalMeta({ loaderData: data } as Parameters<typeof legalMeta>[0]) as MetaTag[];
 
     // Canonical link
     const canonical = metaTags.find((t) => t.tagName === "link" && t.rel === "canonical");

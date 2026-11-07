@@ -9,6 +9,7 @@ import {
   type ActionFunctionArgs,
   type LoaderFunctionArgs,
 } from "react-router";
+import type { Route } from "./+types/client-login";
 import { Header } from "../../components/public/Header";
 import { Footer } from "../../components/public/Footer";
 import { ScrollToTop } from "../../components/public/ScrollToTop";
@@ -35,8 +36,8 @@ interface ActionData {
   submittedCode?: string;
 }
 
-export function meta({ data }: { data?: LoaderData }) {
-  const isEn = data?.lang === "en";
+export function meta({ loaderData }: Route.MetaArgs) {
+  const isEn = (loaderData as LoaderData | undefined)?.lang === "en";
   const title = isEn ? "Client Area | Parallax" : "Espace client | Parallax";
   const description = isEn
     ? "Access your private gallery to view and download your photos and films."

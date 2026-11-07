@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { LoaderFunctionArgs } from "react-router";
 import { Link, useLoaderData } from "react-router";
+import type { Route } from "./+types/home";
 import { getSiteContent } from "../../lib/site-content.server";
 import { Header } from "../../components/public/Header";
 import { SocialLinks } from "../../components/public/SocialLinks";
@@ -48,11 +49,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   };
 }
 
-export function meta({ data }: { data?: Awaited<ReturnType<typeof loader>> }) {
-  if (!data) {
+export function meta({ loaderData }: Route.MetaArgs) {
+  if (!loaderData) {
     return [{ title: "Parallax" }];
   }
-  const { home, common, lang, siteUrl } = data;
+  const { home, common, lang, siteUrl } = loaderData;
   const base = (siteUrl || "").replace(/\/$/, "");
   const pageTitle = cleanTypography(home.seo.title[lang]);
   const pageDesc = cleanTypography(home.seo.description[lang]);

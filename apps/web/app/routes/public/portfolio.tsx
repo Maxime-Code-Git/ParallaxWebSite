@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import {
   type LoaderFunctionArgs,
+  type MetaArgs,
   Link,
   useLoaderData,
   useLocation,
@@ -31,7 +32,7 @@ import {
 } from "../../lib/localized-urls";
 import styles from "./portfolio.module.css";
 
-interface LoaderData {
+export interface LoaderData {
   lang: "fr" | "en";
   common: CommonContent;
   content: PortfolioContent;
@@ -47,12 +48,16 @@ interface LoaderData {
     fr: string;
     en: string;
   };
+  seoUrls?: {
+    fr: string;
+    en: string;
+  };
   siteUrl: string;
 }
 
-export function meta({ data }: { data?: LoaderData }) {
-  if (!data) return [{ title: "Portfolio | Parallax" }];
-  const { lang, content, panelState, siteUrl, alternateUrls } = data;
+export function meta({ loaderData }: MetaArgs<() => LoaderData>) {
+  if (!loaderData) return [{ title: "Portfolio | Parallax" }];
+  const { lang, content, panelState, siteUrl, alternateUrls, seoUrls } = loaderData;
 
   let pageTitle = cleanTypography(
     content.overview.seo.title[lang] || `${content.overview.title[lang]} | Parallax`
@@ -82,10 +87,13 @@ export function meta({ data }: { data?: LoaderData }) {
     }
   }
 
-  const base = siteUrl.replace(/\/$/, "");
-  const canonicalUrl = `${base}${lang === "fr" ? alternateUrls.fr : alternateUrls.en}`;
-  const frUrl = `${base}${alternateUrls.fr}`;
-  const enUrl = `${base}${alternateUrls.en}`;
+  const base = (siteUrl || "").replace(/\/$/, "");
+  const cleanPathFr = (seoUrls?.fr || alternateUrls?.fr || "/fr/projets").split("?")[0].replace(/\/+$/, "") || "/fr/projets";
+  const cleanPathEn = (seoUrls?.en || alternateUrls?.en || "/en/projects").split("?")[0].replace(/\/+$/, "") || "/en/projects";
+
+  const canonicalUrl = `${base}${lang === "fr" ? cleanPathFr : cleanPathEn}`;
+  const frUrl = `${base}${cleanPathFr}`;
+  const enUrl = `${base}${cleanPathEn}`;
 
   const ogImageUrl = `${base}/img/projets-141c16b0a2.jpg`;
 
@@ -200,6 +208,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const showcaseProjects = publicProjects.filter((p) => p.showcase);
 
   const alternateUrls = getPortfolioAlternateUrls(activeProject, activeCategoryItem || activeCategory, direction, publicCategories);
+  const seoUrls = getPortfolioAlternateUrls(activeProject, activeCategoryItem || activeCategory, null, publicCategories);
 
   return Response.json(
     {
@@ -215,6 +224,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         direction,
       },
       alternateUrls,
+      seoUrls,
       siteUrl: ENV.PUBLIC_SITE_URL,
     },
     {
