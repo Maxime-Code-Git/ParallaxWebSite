@@ -334,6 +334,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
   proj.galleryAlt = galleryAlt;
   proj.video = videoObj;
   if (rawAdditionalVideos !== null || proj.additionalVideos) proj.additionalVideos = additionalVideos;
+  if (rawAdditionalVideos !== null) delete proj.draftAdditionalVideoCoverImageIds;
   proj.draftVideoCoverImageId = videoObj?.coverImageId || videoCoverImageId;
   const presentationMode = (String(formData.get("presentationMode") || "photo") as "photo" | "video");
   const ALLOWED_ASPECT_RATIOS = ["3:2", "4:5", "16:9", "1:1"] as const;
@@ -503,6 +504,7 @@ export default function AdminPortfolioEditPage() {
   // Upload status states
   const [isUploadingCover, setIsUploadingCover] = useState(false);
   const [isUploadingVideoCover, setIsUploadingVideoCover] = useState(false);
+  const [uploadingAdditionalKey, setUploadingAdditionalKey] = useState<string | null>(null);
   const [isUploadingGallery, setIsUploadingGallery] = useState(false);
   const [galleryUploadProgress, setGalleryUploadProgress] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -510,12 +512,15 @@ export default function AdminPortfolioEditPage() {
   const coverInputRef = useRef<HTMLInputElement>(null);
   const videoCoverInputRef = useRef<HTMLInputElement>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
+  const additionalCoverInputs = useRef<Record<string, HTMLInputElement | null>>({});
+  const isUploadingAny = isUploadingCover || isUploadingVideoCover || isUploadingGallery || Boolean(uploadingAdditionalKey);
 
   // Upload single image helper with dynamic revision tracking
   async function uploadImageFile(
     file: File,
     mediaSlot: "cover" | "video_cover" | "gallery",
-    targetRevision?: string
+    targetRevision?: string,
+    videoTarget?: "additional"
   ): Promise<{ imageId: string; newRevision: string }> {
     const formData = new FormData();
     formData.append("file", file);
@@ -530,6 +535,7 @@ export default function AdminPortfolioEditPage() {
         "x-portfolio-owner-id": project.id,
         "x-portfolio-media-slot": mediaSlot,
         "x-portfolio-revision": revToUse,
+        ...(videoTarget ? { "x-portfolio-video-target": videoTarget } : {}),
       },
       body: formData,
     });
@@ -546,7 +552,7 @@ export default function AdminPortfolioEditPage() {
 
   async function handleCoverChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (!file || isUploadingAny || isSaving) return;
 
     setIsUploadingCover(true);
     setUploadError(null);
@@ -563,7 +569,7 @@ export default function AdminPortfolioEditPage() {
 
   async function handleVideoCoverChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (!file || isUploadingAny || isSaving) return;
 
     setIsUploadingVideoCover(true);
     setUploadError(null);
@@ -578,9 +584,28 @@ export default function AdminPortfolioEditPage() {
     }
   }
 
+  async function handleAdditionalVideoCoverChange(event: React.ChangeEvent<HTMLInputElement>, key: string) {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    if (!file || isUploadingAny || isSaving) return;
+    setUploadingAdditionalKey(key);
+    setUploadError(null);
+    try {
+      const result = await uploadImageFile(file, "video_cover", undefined, "additional");
+      setAdditionalVideos((current) => current.map((video) =>
+        video.key === key ? { ...video, coverImageId: result.imageId } : video
+      ));
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setUploadingAdditionalKey(null);
+      input.value = "";
+    }
+  }
+
   async function handleGalleryFiles(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files || []);
-    if (files.length === 0) return;
+    if (files.length === 0 || isUploadingAny || isSaving) return;
 
     const MAX_GALLERY_FILES = MAX_PORTFOLIO_PROJECT_GALLERY_PHOTOS;
     if (
@@ -854,7 +879,7 @@ export default function AdminPortfolioEditPage() {
                           type="button"
                           className={styles.uploadBtn}
                           onClick={() => coverInputRef.current?.click()}
-                          disabled={isUploadingCover}
+                          disabled={isUploadingAny || isSaving}
                         >
                           {isUploadingCover ? "Téléversement..." : "Remplacer l'image"}
                         </button>
@@ -876,7 +901,7 @@ export default function AdminPortfolioEditPage() {
                         type="button"
                         className={styles.uploadBtn}
                         onClick={() => coverInputRef.current?.click()}
-                        disabled={isUploadingCover}
+                        disabled={isUploadingAny || isSaving}
                       >
                         {isUploadingCover ? "Téléversement en cours..." : "Choisir une image"}
                       </button>
@@ -935,7 +960,7 @@ export default function AdminPortfolioEditPage() {
                     type="button"
                     className={styles.uploadBtn}
                     onClick={() => galleryInputRef.current?.click()}
-                    disabled={isUploadingGallery || galleryImageIds.length >= MAX_PORTFOLIO_PROJECT_GALLERY_PHOTOS}
+                    disabled={isUploadingAny || isSaving || galleryImageIds.length >= MAX_PORTFOLIO_PROJECT_GALLERY_PHOTOS}
                   >
                     {galleryImageIds.length >= MAX_PORTFOLIO_PROJECT_GALLERY_PHOTOS
                       ? `Limite de ${MAX_PORTFOLIO_PROJECT_GALLERY_PHOTOS} photos atteinte`
@@ -1076,7 +1101,7 @@ export default function AdminPortfolioEditPage() {
                           type="button"
                           className={styles.uploadBtn}
                           onClick={() => videoCoverInputRef.current?.click()}
-                          disabled={isUploadingVideoCover}
+                          disabled={isUploadingAny || isSaving}
                         >
                           {isUploadingVideoCover ? "Téléversement..." : "Remplacer l'image"}
                         </button>
@@ -1095,7 +1120,7 @@ export default function AdminPortfolioEditPage() {
                         type="button"
                         className={styles.uploadBtn}
                         onClick={() => videoCoverInputRef.current?.click()}
-                        disabled={isUploadingVideoCover}
+                        disabled={isUploadingAny || isSaving}
                       >
                         {isUploadingVideoCover ? "Téléversement..." : "Choisir une couverture vidéo"}
                       </button>
@@ -1112,7 +1137,7 @@ export default function AdminPortfolioEditPage() {
               </div>
               <div className={styles.extraVideos}>
                 <h3 className={styles.extraVideosTitle}>Vidéos supplémentaires</h3>
-                <p className={styles.helperText}>Les vidéos supplémentaires utilisent l’affiche principale ou la couverture du projet.</p>
+                <p className={styles.helperText}>Choisissez une affiche pour chaque vidéo. Sans affiche dédiée, la couverture principale est utilisée.</p>
                 {additionalVideos.map((video, index) => (
                   <div key={video.key} className={styles.extraVideo}>
                     <label className={styles.label} htmlFor={`additional-video-${video.key}`}>Vidéo supplémentaire {index + 1}</label>
@@ -1125,13 +1150,62 @@ export default function AdminPortfolioEditPage() {
                       value={video.url}
                       onChange={(event) => setAdditionalVideos((current) => current.map((item) => item.key === video.key ? { ...item, url: event.target.value } : item))}
                     />
+                    <div className={styles.uploaderBox}>
+                      {video.coverImageId && (
+                        <div className={styles.previewImageWrap}>
+                          <ResponsivePortfolioImage
+                            imageId={video.coverImageId}
+                            ownerType="project"
+                            ownerId={project.id}
+                            mediaSlot="video_cover"
+                            mediaMetadata={mediaRegistry[video.coverImageId]}
+                            alt={`Couverture de la vidéo supplémentaire ${index + 1}`}
+                            isAdminPreview
+                          />
+                        </div>
+                      )}
+                      <div className={styles.uploadActions}>
+                        <button
+                          type="button"
+                          className={styles.uploadBtn}
+                          disabled={isUploadingAny || isSaving}
+                          onClick={() => additionalCoverInputs.current[video.key]?.click()}
+                          aria-label={`${video.coverImageId ? "Remplacer" : "Choisir"} la couverture de la vidéo supplémentaire ${index + 1}`}
+                        >
+                          {uploadingAdditionalKey === video.key ? "Téléversement..." : video.coverImageId ? "Remplacer la couverture" : "Choisir une couverture"}
+                        </button>
+                        {video.coverImageId && (
+                          <button
+                            type="button"
+                            className={styles.removeBtn}
+                            disabled={isUploadingAny || isSaving}
+                            aria-label={`Supprimer la couverture de la vidéo supplémentaire ${index + 1}`}
+                            onClick={() => setAdditionalVideos((current) => current.map((item) =>
+                              item.key === video.key ? { ...item, coverImageId: null } : item
+                            ))}
+                          >Supprimer la couverture</button>
+                        )}
+                      </div>
+                      <input
+                        ref={(input) => {
+                          if (input) additionalCoverInputs.current[video.key] = input;
+                          else delete additionalCoverInputs.current[video.key];
+                        }}
+                        type="file"
+                        aria-label={`Fichier de couverture de la vidéo supplémentaire ${index + 1}`}
+                        accept="image/jpeg,image/png,image/webp"
+                        className={styles.hiddenFileInput}
+                        disabled={isUploadingAny || isSaving}
+                        onChange={(event) => handleAdditionalVideoCoverChange(event, video.key)}
+                      />
+                    </div>
                     <div className={styles.uploadActions}>
                       {[-1, 1].map((direction) => (
                         <button
                           key={direction}
                           type="button"
                           className={styles.uploadBtn}
-                          disabled={direction === -1 ? index === 0 : index === additionalVideos.length - 1}
+                          disabled={isUploadingAny || isSaving || (direction === -1 ? index === 0 : index === additionalVideos.length - 1)}
                           aria-label={`${direction === -1 ? "Monter" : "Descendre"} la vidéo supplémentaire ${index + 1}`}
                           onClick={() => setAdditionalVideos((current) => {
                             const next = [...current];
@@ -1148,6 +1222,7 @@ export default function AdminPortfolioEditPage() {
                         type="button"
                         className={styles.removeBtn}
                         aria-label={`Supprimer la vidéo supplémentaire ${index + 1}`}
+                        disabled={isUploadingAny || isSaving}
                         onClick={() => setAdditionalVideos((current) => current.filter((item) => item.key !== video.key))}
                       >Supprimer</button>
                     </div>
@@ -1156,6 +1231,7 @@ export default function AdminPortfolioEditPage() {
                 <button
                   type="button"
                   className={styles.uploadBtn}
+                  disabled={isUploadingAny || isSaving}
                   onClick={() => setAdditionalVideos((current) => [...current, { key: crypto.randomUUID(), url: "", provider: "youtube", videoId: "" }])}
                 >+ Ajouter une vidéo</button>
               </div>
@@ -1354,7 +1430,7 @@ export default function AdminPortfolioEditPage() {
           </div>
           <button
             type="submit"
-            disabled={isSaving || isUploadingCover || isUploadingVideoCover || isUploadingGallery}
+            disabled={isSaving || isUploadingAny}
             className={styles.primarySaveBtn}
           >
             {isSaving ? "Enregistrement en cours..." : "Enregistrer les modifications"}

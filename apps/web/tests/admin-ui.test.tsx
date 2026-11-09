@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import AdminLoginPage from "../app/routes/admin/login";
 import AdminPortfolioEditPage from "../app/routes/admin/portfolio-edit";
 import { createDefaultPortfolioContent } from "../app/lib/portfolio-content.server";
@@ -111,6 +111,56 @@ describe("Admin UI Components", () => {
     fireEvent.click(screen.getByRole("button", { name: "Supprimer la vidéo supplémentaire 2" }));
     expect(submittedVideos().map(({ url }: { url: string }) => url)).toEqual(["https://vimeo.com/123456702"]);
     expect(screen.getByLabelText("Lien YouTube ou Vimeo")).toHaveValue(project.video.url);
+  });
+
+  it("uploads an independent cover to each extra video and retains it when videos are reordered", async () => {
+    const content = createDefaultPortfolioContent();
+    const project = content.projects[0];
+    const primaryCover = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const firstCover = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const secondCover = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    project.video = { provider: "youtube", videoId: "dQw4w9WgXcQ", url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ", coverImageId: primaryCover };
+    project.additionalVideos = [
+      { provider: "vimeo", videoId: "123456701", url: "https://vimeo.com/123456701" },
+      { provider: "vimeo", videoId: "123456702", url: "https://vimeo.com/123456702" },
+    ];
+    vi.mocked(useLoaderData).mockReturnValue({
+      project, categories: content.categories, contentRevision: content.revision, media: {}, csrfToken: "test-csrf",
+    });
+    vi.mocked(useActionData).mockReturnValue(undefined);
+    vi.mocked(useNavigation).mockReturnValue({ state: "idle" } as ReturnType<typeof useNavigation>);
+    const fetchMock = vi.fn();
+    for (const imageId of [firstCover, secondCover]) {
+      fetchMock.mockResolvedValueOnce(Response.json({
+        imageId, newRevision: imageId.replaceAll("-", ""),
+        metadata: {
+          imageId, ownerType: "project", ownerId: project.id, mediaSlot: "video_cover",
+          originalFormat: "webp", originalWidth: 640, originalHeight: 360,
+          variants: [{ name: "640p", width: 640, height: 360, webpSize: 100 }],
+        },
+      }));
+    }
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const { container } = render(<AdminPortfolioEditPage />);
+      const submitted = () => JSON.parse(container.querySelector<HTMLInputElement>('input[name="additionalVideos"]')!.value);
+      const file = new File(["webp"], "poster.webp", { type: "image/webp" });
+      fireEvent.change(screen.getByLabelText("Fichier de couverture de la vidéo supplémentaire 1"), { target: { files: [file] } });
+      await waitFor(() => expect(submitted()[0].coverImageId).toBe(firstCover));
+      expect(submitted()[1].coverImageId).toBeUndefined();
+      expect(container.querySelector<HTMLInputElement>('input[name="videoCoverImageId"]')?.value).toBe(primaryCover);
+      fireEvent.change(screen.getByLabelText("Fichier de couverture de la vidéo supplémentaire 2"), { target: { files: [file] } });
+      await waitFor(() => expect(submitted()[1].coverImageId).toBe(secondCover));
+      expect((fetchMock.mock.calls[0][1] as RequestInit).headers).toMatchObject({ "x-portfolio-video-target": "additional" });
+      expect((fetchMock.mock.calls[1][1] as RequestInit).headers).toMatchObject({ "x-portfolio-revision": firstCover.replaceAll("-", "") });
+      fireEvent.click(screen.getByRole("button", { name: "Monter la vidéo supplémentaire 2" }));
+      expect(submitted().map(({ coverImageId }: { coverImageId: string }) => coverImageId)).toEqual([secondCover, firstCover]);
+      fireEvent.click(screen.getByRole("button", { name: "Supprimer la couverture de la vidéo supplémentaire 2" }));
+      expect(submitted().map(({ coverImageId }: { coverImageId: string }) => coverImageId)).toEqual([secondCover, null]);
+      expect(container.querySelector<HTMLInputElement>('input[name="videoCoverImageId"]')?.value).toBe(primaryCover);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   describe("AdminDashboardPage", () => {

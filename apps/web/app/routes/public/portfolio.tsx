@@ -1059,46 +1059,6 @@ export default function PortfolioPage() {
                 ))}
               </div>
 
-              {/* Every project video is available without loading an external player before consent. */}
-              {effectiveProjectVideos
-                .map((video, index) => ({ video, index }))
-                .slice(effectiveProjectPresentationMode === "video" ? 1 : 0)
-                .map(({ video, index }) => {
-                  const poster = videoPoster(effectiveProject, video);
-                  return (
-                    <div className={styles.detailVideoSection} key={`${video.provider}:${video.videoId}:${index}`}>
-                      {effectiveProjectVideos.length > 1 && (
-                        <h2 className={styles.detailVideoTitle}>{lang === "fr" ? "Vidéo" : "Video"} {index + 1}</h2>
-                      )}
-                      <div className={styles.showreelCard}>
-                        {poster.imageId && (
-                          <ResponsivePortfolioImage
-                            imageId={poster.imageId}
-                            ownerType="project"
-                            ownerId={effectiveProject.id}
-                            mediaSlot={poster.slot}
-                            mediaMetadata={content.media[poster.imageId]}
-                            alt={`${effectiveProject.title[lang]} · ${lang === "fr" ? "Vidéo" : "Video"} ${index + 1}`}
-                            className={styles.showreelImg}
-                          />
-                        )}
-                        <div className={styles.showreelOverlay}>
-                          <button
-                            type="button"
-                            className={styles.playBtn}
-                            onClick={() => setActiveVideoUrl(video.url)}
-                            aria-label={index === 0 ? (lang === "fr" ? "Lire la vidéo" : "Play video") : `${lang === "fr" ? "Lire la vidéo" : "Play video"} ${index + 1}`}
-                          >
-                            <svg width="26" height="28" viewBox="0 0 26 28" fill="none" aria-hidden="true">
-                              <path d="M4 3 L23 14 L4 25 Z" fill="#F5F6F7" />
-                            </svg>
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-
               {/* Gallery Photos */}
               {effectiveProject.galleryImageIds.length > 0 && (
                 <div className={styles.detailGallerySection}>
@@ -1147,6 +1107,52 @@ export default function PortfolioPage() {
                     })}
                   </div>
                 </div>
+              )}
+              {effectiveProjectVideos.length > (effectiveProjectPresentationMode === "video" ? 1 : 0) && (
+                <section className={styles.detailVideos} aria-labelledby="project-videos-heading">
+                  <h2 id="project-videos-heading" className={styles.galleryTitle}>
+                    {lang === "fr" ? "Vidéos du projet" : "Project videos"}
+                  </h2>
+              {effectiveProjectVideos
+                .map((video, index) => ({ video, index }))
+                .slice(effectiveProjectPresentationMode === "video" ? 1 : 0)
+                .map(({ video, index }) => {
+                  const poster = videoPoster(effectiveProject, video);
+                  return (
+                    <div className={styles.detailVideoSection} key={`${video.provider}:${video.videoId}:${index}`}>
+                      {effectiveProjectVideos.length > 1 && (
+                        <h3 className={styles.detailVideoTitle}>{lang === "fr" ? "Vidéo" : "Video"} {index + 1}</h3>
+                      )}
+                      <div className={styles.showreelCard}>
+                        {poster.imageId && (
+                          <ResponsivePortfolioImage
+                            imageId={poster.imageId}
+                            ownerType="project"
+                            ownerId={effectiveProject.id}
+                            mediaSlot={poster.slot}
+                            mediaMetadata={content.media[poster.imageId]}
+                            alt={`${effectiveProject.title[lang]} · ${lang === "fr" ? "Vidéo" : "Video"} ${index + 1}`}
+                            className={styles.showreelImg}
+                          />
+                        )}
+                        <div className={styles.showreelOverlay}>
+                          <button
+                            type="button"
+                            className={styles.playBtn}
+                            onClick={() => setActiveVideoUrl(video.url)}
+                            aria-label={index === 0 ? (lang === "fr" ? "Lire la vidéo" : "Play video") : `${lang === "fr" ? "Lire la vidéo" : "Play video"} ${index + 1}`}
+                          >
+                            <svg width="26" height="28" viewBox="0 0 26 28" fill="none" aria-hidden="true">
+                              <path d="M4 3 L23 14 L4 25 Z" fill="#F5F6F7" />
+                            </svg>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                </section>
               )}
             </div>
           ) : activeSec ? (

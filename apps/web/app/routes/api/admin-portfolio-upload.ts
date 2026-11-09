@@ -263,6 +263,10 @@ export async function action({ request }: ActionFunctionArgs) {
   const ownerId = request.headers.get("x-portfolio-owner-id");
   const mediaSlot = request.headers.get("x-portfolio-media-slot") as PortfolioMediaSlot;
   const previousRevision = request.headers.get("x-portfolio-revision");
+  const videoTarget = request.headers.get("x-portfolio-video-target");
+  if (videoTarget !== null && (videoTarget !== "additional" || ownerType !== "project" || mediaSlot !== "video_cover")) {
+    return jsonError("Destination de couverture vidéo invalide.", 400);
+  }
 
   if (!ownerType || !PORTFOLIO_MEDIA_OWNER_TYPES.includes(ownerType)) {
     return jsonError("Type de propriétaire non autorisé.", 400);
@@ -441,6 +445,8 @@ export async function action({ request }: ActionFunctionArgs) {
       if (proj) {
         if (mediaSlot === "cover") {
           proj.coverImageId = processedResult.imageId;
+        } else if (mediaSlot === "video_cover" && videoTarget === "additional") {
+          proj.draftAdditionalVideoCoverImageIds = [...(proj.draftAdditionalVideoCoverImageIds || []), processedResult.imageId];
         } else if (mediaSlot === "video_cover") {
           proj.draftVideoCoverImageId = processedResult.imageId;
           if (proj.video) {

@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
 import React from "react";
-import { render, screen, fireEvent, act } from "@testing-library/react";
+import { render, screen, fireEvent, act, within } from "@testing-library/react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 
 // Mock react-router for component rendering tests
@@ -905,6 +905,12 @@ describe("Fix Admin Content & Public UI Suite", () => {
       { provider: "youtube", videoId: "abcdefghijk", url: "https://www.youtube.com/watch?v=abcdefghijk" },
       { provider: "vimeo", videoId: "123456789", url: "https://vimeo.com/123456789" },
     ];
+    const photoId = "abcdabcd-abcd-4bcd-abcd-abcdabcdabcd";
+    const posterId = "bcdebcde-bcde-4cde-bcde-bcdebcdebcde";
+    project.galleryImageIds = [photoId];
+    project.additionalVideos[0].coverImageId = posterId;
+    content.media[photoId] = createMockPortfolioMedia(photoId, "project", project.id, "gallery");
+    content.media[posterId] = createMockPortfolioMedia(posterId, "project", project.id, "video_cover");
     fs.writeFileSync(testPortfolioContentFile, JSON.stringify(content));
     const response = await publicPortfolioLoader({
       request: new Request("http://localhost:3000/fr/projets/documentaire/film-hero"),
@@ -914,7 +920,13 @@ describe("Fix Admin Content & Public UI Suite", () => {
     const { container } = render(<PortfolioPage />);
     expect(container.querySelectorAll("[class*='showreelCard']")).toHaveLength(3);
     expect(container.querySelector("iframe")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Lire la vidéo 2" }));
+    const photos = container.querySelector("[class*='detailGallerySection']")!;
+    const videos = container.querySelector("[class*='detailVideos']")!;
+    expect(videos).toBeVisible();
+    expect(photos.compareDocumentPosition(videos) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const extraVideoButton = within(videos as HTMLElement).getByRole("button", { name: "Lire la vidéo 2" });
+    expect(extraVideoButton.closest("[class*='detailVideoSection']")?.querySelector("img")?.getAttribute("src")).toContain(posterId);
+    fireEvent.click(extraVideoButton);
     expect(container.querySelector("iframe")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /Accepter et lire/i }));
     expect(container.querySelector("iframe")?.getAttribute("src")).toContain("youtube-nocookie.com/embed/abcdefghijk");

@@ -1684,3 +1684,7 @@ button.portfolioScrollToTop {
   font-weight: 500;
   color: var(--px-text);
 }
+
+.detailVideos {
+  margin-top: 40px;
+}

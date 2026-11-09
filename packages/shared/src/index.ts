@@ -720,6 +720,7 @@ export interface PortfolioProject {
   video: PortfolioVideo | null;
   additionalVideos?: PortfolioVideo[];
   draftVideoCoverImageId?: string | null;
+  draftAdditionalVideoCoverImageIds?: string[];
   presentationMode?: "photo" | "video";
   aspectRatio?: "3:2" | "4:5" | "16:9" | "1:1";
   showcase: boolean;
@@ -1467,6 +1468,22 @@ export function validatePortfolioProject(
 
   if (!validatePortfolioVideo(val.video, [...pPath, "video"], errors, mediaRegistry, "project", projectId)) {
     valid = false;
+  }
+
+  if (val.draftAdditionalVideoCoverImageIds !== undefined) {
+    if (!Array.isArray(val.draftAdditionalVideoCoverImageIds)) {
+      errors.push({ path: [...pPath, "draftAdditionalVideoCoverImageIds"], message: "Les affiches vidéo en attente doivent être une liste." });
+      valid = false;
+    } else {
+      for (const [index, imageId] of val.draftAdditionalVideoCoverImageIds.entries()) {
+        const item = typeof imageId === "string" ? mediaRegistry?.[imageId] : undefined;
+        if (typeof imageId !== "string" || !UUID_REGEX.test(imageId) ||
+          (mediaRegistry && (!item || item.ownerType !== "project" || item.ownerId !== projectId || item.mediaSlot !== "video_cover"))) {
+          errors.push({ path: [...pPath, "draftAdditionalVideoCoverImageIds", index], message: "Affiche vidéo en attente invalide ou étrangère au projet." });
+          valid = false;
+        }
+      }
+    }
   }
 
   if (val.additionalVideos !== undefined) {

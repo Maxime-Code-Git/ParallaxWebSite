@@ -6,6 +6,7 @@ import fs from "node:fs";
 import crypto from "node:crypto";
 import sharp from "sharp";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import { action as adminPortfolioUploadAction } from "../app/routes/api/admin-portfolio-upload";
 import { action as adminPortfolioEditAction } from "../app/routes/admin/portfolio-edit";
 import { loader as portfolioVariantLoader } from "../app/routes/media/portfolio-variant";
 import { loader as clientLoginLoader, action as clientLoginAction } from "../app/routes/public/client-login";
@@ -358,6 +359,77 @@ describe("Portfolio Media, Admin Thumbnails, Responsive Overlap, and Client Gall
       };
       expect(() => portfolioContentSchema.safeParse(malformed)).not.toThrow();
       expect(portfolioContentSchema.safeParse(malformed).success).toBe(false);
+    });
+
+    async function uploadAdditionalPoster(target = "additional") {
+      const image = await sharp({ create: { width: 128, height: 72, channels: 3, background: "blue" } }).jpeg().toBuffer();
+      const boundary = `poster-${crypto.randomUUID()}`;
+      const body = Buffer.concat([
+        Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="poster.jpg"\r\nContent-Type: image/jpeg\r\n\r\n`),
+        image,
+        Buffer.from(`\r\n--${boundary}--\r\n`),
+      ]);
+      const { request } = await createAuthenticatedAdminRequest(
+        "POST", "http://localhost:3000/api/admin/portfolio-upload", new Uint8Array(body), {
+          "Content-Type": `multipart/form-data; boundary=${boundary}`,
+          "x-csrf-token": "test-csrf-token-1234567890abcdef",
+          "x-portfolio-owner-type": "project",
+          "x-portfolio-owner-id": PROJ_ID,
+          "x-portfolio-media-slot": "video_cover",
+          "x-portfolio-revision": getRawPortfolioContent().content.revision,
+          "x-portfolio-video-target": target,
+        }
+      );
+      return adminPortfolioUploadAction(makeActionArgs(request));
+    }
+
+    it("pins separately uploaded posters until save without changing the primary poster or exposing drafts", async () => {
+      const primaryPoster = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+      const initial = getRawPortfolioContent().content;
+      initial.media[primaryPoster] = createMockPortfolioMedia(primaryPoster, "project", PROJ_ID, "video_cover");
+      initial.projects[0].video = { provider: "youtube", videoId: "dQw4w9WgXcQ", url: primary, coverImageId: primaryPoster };
+      initial.projects[0].draftVideoCoverImageId = primaryPoster;
+      fs.writeFileSync(testPortfolioContent, JSON.stringify(initial));
+      const response1 = await uploadAdditionalPoster();
+      expect(response1.status, await response1.clone().text()).toBe(200);
+      const poster1 = await response1.json();
+      const response2 = await uploadAdditionalPoster();
+      expect(response2.status, await response2.clone().text()).toBe(200);
+      const poster2 = await response2.json();
+
+      const uploaded = getRawPortfolioContent().content;
+      expect(uploaded.projects[0].video?.coverImageId).toBe(primaryPoster);
+      expect(uploaded.projects[0].draftVideoCoverImageId).toBe(primaryPoster);
+      expect(uploaded.projects[0].draftAdditionalVideoCoverImageIds).toEqual([poster1.imageId, poster2.imageId]);
+      expect(uploaded.projects[0].galleryImageIds).toEqual([IMG_1, IMG_2, IMG_3]);
+      expect(uploaded.media[poster1.imageId]).toBeDefined();
+      expect(uploaded.media[poster2.imageId]).toBeDefined();
+      expect(getPublicPortfolioContent().publicProjects[0].draftAdditionalVideoCoverImageIds).toBeUndefined();
+      expect(getPublicPortfolioContent().content.media[poster1.imageId]).toBeUndefined();
+      const variantRequest = new Request("http://localhost:3000/media/portfolio/preview");
+      const variantParams = { ownerType: "project", ownerId: PROJ_ID, slot: "video_cover", imageId: poster1.imageId, variant: "640p", ext: "webp" };
+      expect((await portfolioVariantLoader(makeLoaderArgs(variantRequest, variantParams))).status).toBe(404);
+
+      const saved = await saveVideos([
+        { url: "https://vimeo.com/123456701", coverImageId: poster1.imageId },
+        { url: "https://vimeo.com/123456702", coverImageId: poster2.imageId },
+      ], { videoCoverImageId: primaryPoster });
+      expect(saved.status, await saved.clone().text()).toBe(200);
+      const stored = getRawPortfolioContent().content;
+      expect(stored.projects[0].video?.coverImageId).toBe(primaryPoster);
+      expect(stored.projects[0].draftAdditionalVideoCoverImageIds).toBeUndefined();
+      expect(stored.projects[0].additionalVideos?.map(({ coverImageId }) => coverImageId)).toEqual([poster1.imageId, poster2.imageId]);
+      expect(getPublicPortfolioContent().content.media[poster1.imageId]).toBeDefined();
+      expect(getPublicPortfolioContent().content.media[poster2.imageId]).toBeDefined();
+      const publishedPoster = await portfolioVariantLoader(makeLoaderArgs(variantRequest, variantParams));
+      expect(publishedPoster.status).toBe(200);
+      await publishedPoster.arrayBuffer();
+    });
+
+    it("rejects an unknown poster destination before writing", async () => {
+      const before = fs.readFileSync(testPortfolioContent, "utf8");
+      expect((await uploadAdditionalPoster("invalid")).status).toBe(400);
+      expect(fs.readFileSync(testPortfolioContent, "utf8")).toBe(before);
     });
 
     it("rejects an additional poster owned by a different project", async () => {
