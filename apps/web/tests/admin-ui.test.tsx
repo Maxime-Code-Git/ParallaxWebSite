@@ -105,9 +105,13 @@ describe("Admin UI Components", () => {
     fireEvent.click(screen.getByRole("button", { name: "+ Ajouter une vidéo" }));
     fireEvent.change(screen.getByLabelText("Vidéo supplémentaire 1"), { target: { value: "https://vimeo.com/123456701" } });
     fireEvent.change(screen.getByLabelText("Vidéo supplémentaire 2"), { target: { value: "https://vimeo.com/123456702" } });
+    fireEvent.change(screen.getByLabelText("Titre de la vidéo principale (FR) · facultatif"), { target: { value: "Film principal" } });
+    fireEvent.change(screen.getByLabelText("Titre de la vidéo supplémentaire 2 (FR) · facultatif"), { target: { value: "Les coulisses" } });
     fireEvent.click(screen.getByRole("button", { name: "Monter la vidéo supplémentaire 2" }));
     const submittedVideos = () => JSON.parse(container.querySelector<HTMLInputElement>('input[name="additionalVideos"]')!.value);
     expect(submittedVideos().map(({ url }: { url: string }) => url)).toEqual(["https://vimeo.com/123456702", "https://vimeo.com/123456701"]);
+    expect(submittedVideos()[0].title).toEqual({ fr: "Les coulisses", en: "" });
+    expect(container.querySelector<HTMLInputElement>('input[name="videoTitleFr"]')?.value).toBe("Film principal");
     fireEvent.click(screen.getByRole("button", { name: "Supprimer la vidéo supplémentaire 2" }));
     expect(submittedVideos().map(({ url }: { url: string }) => url)).toEqual(["https://vimeo.com/123456702"]);
     expect(screen.getByLabelText("Lien YouTube ou Vimeo")).toHaveValue(project.video.url);

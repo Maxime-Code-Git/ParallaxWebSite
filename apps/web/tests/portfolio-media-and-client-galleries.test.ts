@@ -302,6 +302,23 @@ describe("Portfolio Media, Admin Thumbnails, Responsive Overlap, and Client Gall
       expect(getRawPortfolioContent().content.projects[0].additionalVideos?.map(({ url }) => url)).toEqual([two.url]);
     });
 
+    it("saves optional bilingual video titles, preserves them for older forms and allows clearing them", async () => {
+      const video = { url: "https://vimeo.com/123456701", title: { fr: "Les coulisses", en: "Behind the scenes" } };
+      const response = await saveVideos([video], { videoTitleFr: "Film principal", videoTitleEn: "Main film" });
+      expect(response.status, await response.clone().text()).toBe(200);
+      let stored = getRawPortfolioContent().content.projects[0];
+      expect(stored.video?.title).toEqual({ fr: "Film principal", en: "Main film" });
+      expect(stored.additionalVideos?.[0].title).toEqual(video.title);
+      expect((await saveVideos([{ url: video.url }])).status).toBe(200);
+      stored = getRawPortfolioContent().content.projects[0];
+      expect(stored.video?.title?.fr).toBe("Film principal");
+      expect(stored.additionalVideos?.[0].title).toEqual(video.title);
+      expect((await saveVideos([{ ...video, title: { fr: "", en: "" } }], { videoTitleFr: "", videoTitleEn: "" })).status).toBe(200);
+      stored = getRawPortfolioContent().content.projects[0];
+      expect(stored.video?.title).toEqual({ fr: "", en: "" });
+      expect(stored.additionalVideos?.[0].title).toEqual({ fr: "", en: "" });
+    });
+
     it("promotes the next video when the first URL is removed", async () => {
       const one = { url: "https://vimeo.com/123456701" };
       const two = { url: "https://vimeo.com/123456702" };
@@ -319,6 +336,8 @@ describe("Portfolio Media, Admin Thumbnails, Responsive Overlap, and Client Gall
       [null],
       [{ url: "javascript:alert(1)" }],
       [{ url: "https://example.org/video.mp4" }],
+      [{ url: "https://vimeo.com/123456701", title: false }],
+      [{ url: "https://vimeo.com/123456701", title: { fr: "x".repeat(201), en: "" } }],
     ])("rejects invalid additional video data without changing the revision: %j", async (videos) => {
       const before = fs.readFileSync(testPortfolioContent, "utf8");
       expect((await saveVideos(videos)).status).toBe(422);

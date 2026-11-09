@@ -388,7 +388,9 @@ export interface PortfolioProjectLike {
   galleryAlt?: Record<string, LocalizedString>;
   video?: {
     coverImageId?: string | null;
+    title?: LocalizedString;
   };
+  additionalVideos?: { coverImageId?: string | null; title?: LocalizedString }[];
 }
 
 export interface PortfolioOverviewLike {
@@ -526,6 +528,11 @@ export function cleanPortfolioContent<T extends object>(portfolio: T): T {
       if (proj.title) proj.title = cleanLocalizedString(proj.title);
       if (proj.summary) proj.summary = cleanLocalizedString(proj.summary);
       if (proj.coverAlt) proj.coverAlt = cleanLocalizedString(proj.coverAlt);
+      for (const video of [proj.video, ...(Array.isArray(proj.additionalVideos) ? proj.additionalVideos : [])]) {
+        if (video?.title && typeof video.title.fr === "string" && typeof video.title.en === "string") {
+          video.title = cleanLocalizedString(video.title);
+        }
+      }
       if (proj.seo) {
         if (proj.seo.title) proj.seo.title = cleanLocalizedString(proj.seo.title);
         if (proj.seo.description) proj.seo.description = cleanLocalizedString(proj.seo.description);
@@ -677,6 +684,7 @@ export interface PortfolioVideo {
   videoId: string;
   url: string;
   coverImageId?: string | null;
+  title?: LocalizedString;
 }
 
 export interface PortfolioMediaVariant {
@@ -927,6 +935,15 @@ export function validatePortfolioVideo(
     const parsed = parseVideoUrl(val.url);
     if (!parsed || parsed.provider !== val.provider || parsed.videoId !== val.videoId) {
       errors.push({ path: [...path, "url"], message: "L'URL vidéo ne correspond pas au provider et à l'ID configurés" });
+      valid = false;
+    }
+  }
+
+  if (val.title !== undefined) {
+    if (!validatePortfolioLocalizedString(val.title, [...path, "title"], errors)) {
+      valid = false;
+    } else if ((val.title as LocalizedString).fr.length > 200 || (val.title as LocalizedString).en.length > 200) {
+      errors.push({ path: [...path, "title"], message: "Le titre vidéo ne doit pas dépasser 200 caractères par langue." });
       valid = false;
     }
   }

@@ -89,6 +89,8 @@ const ALLOWED_PROJECT_FIELDS = [
   "coverImageId",
   "videoCoverImageId",
   "videoUrl",
+  "videoTitleFr",
+  "videoTitleEn",
   "additionalVideos",
   "galleryImageIds",
   "galleryAlt",
@@ -248,6 +250,9 @@ export async function action({ request, params }: ActionFunctionArgs) {
       videoId: parsed.videoId,
       url: rawVideoUrl,
       coverImageId: videoCoverImageId,
+      ...(formData.has("videoTitleFr") || formData.has("videoTitleEn")
+        ? { title: { fr: String(formData.get("videoTitleFr") || "").trim(), en: String(formData.get("videoTitleEn") || "").trim() } }
+        : proj.video?.title ? { title: proj.video.title } : {}),
     };
   }
 
@@ -274,7 +279,12 @@ export async function action({ request, params }: ActionFunctionArgs) {
           { status: 422, headers: createAdminHeaders() }
         );
       }
-      additionalVideos.push({ ...parsed, url, ...(value.coverImageId !== undefined ? { coverImageId: value.coverImageId } : {}) });
+      const previousTitle = proj.additionalVideos?.find((video) => video.provider === parsed.provider && video.videoId === parsed.videoId)?.title;
+      additionalVideos.push({
+        ...parsed, url,
+        ...(value.coverImageId !== undefined ? { coverImageId: value.coverImageId } : {}),
+        ...(value.title !== undefined ? { title: value.title } : previousTitle ? { title: previousTitle } : {}),
+      });
     }
   }
   // If the main URL is removed, promote the next entry rather than losing its videos.
@@ -384,14 +394,15 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
   try {
     const saveResult = await savePortfolioContent(nextContent, expectedRevision);
+    const savedProject = saveResult.content.projects.find((project) => project.id === proj.id)!;
     void cleanupUnreferencedPortfolioMedia().catch(() => undefined);
 
     return Response.json(
       {
         success: "Projet enregistré avec succès !",
         newRevision: saveResult.newRevision,
-        video: proj.video,
-        additionalVideos: proj.additionalVideos || [],
+        video: savedProject.video,
+        additionalVideos: savedProject.additionalVideos || [],
       },
       { headers: createAdminHeaders() }
     );
@@ -447,6 +458,7 @@ export default function AdminPortfolioEditPage() {
         updateRevision(actionData.newRevision);
         if (actionData.success) {
           setVideoUrl(actionData.video?.url || "");
+          setVideoTitle(actionData.video?.title || { fr: "", en: "" });
           setVideoCoverImageId(actionData.video?.coverImageId || null);
           setAdditionalVideos((actionData.additionalVideos || []).map((video, index) => ({ ...video, key: `existing-video-${index}` })));
         }
@@ -484,6 +496,7 @@ export default function AdminPortfolioEditPage() {
   );
   const [status, setStatus] = useState(project.status);
   const [videoUrl, setVideoUrl] = useState(project.video?.url || "");
+  const [videoTitle, setVideoTitle] = useState(project.video?.title || { fr: "", en: "" });
   const [additionalVideos, setAdditionalVideos] = useState(() =>
     (project.additionalVideos || []).map((video, index) => ({ ...video, key: `existing-video-${index}` }))
   );
@@ -698,7 +711,9 @@ export default function AdminPortfolioEditPage() {
         <input type="hidden" name="coverImageId" value={coverImageId || ""} />
         <input type="hidden" name="videoCoverImageId" value={videoCoverImageId || ""} />
         <input type="hidden" name="galleryImageIds" value={JSON.stringify(galleryImageIds)} />
-        <input type="hidden" name="additionalVideos" value={JSON.stringify(additionalVideos.map(({ url, coverImageId }) => ({ url, coverImageId })))} />
+        <input type="hidden" name="videoTitleFr" value={videoTitle.fr} />
+        <input type="hidden" name="videoTitleEn" value={videoTitle.en} />
+        <input type="hidden" name="additionalVideos" value={JSON.stringify(additionalVideos.map(({ url, coverImageId, title }) => ({ url, coverImageId, title })))} />
         <input type="hidden" name="galleryAlt" value={JSON.stringify(galleryAlt)} />
 
         <div className={styles.formGrid}>
@@ -1081,6 +1096,20 @@ export default function AdminPortfolioEditPage() {
               </div>
 
               <div className={styles.formGroup}>
+                <label className={styles.label} htmlFor="video-title">
+                  Titre de la vidéo principale ({activeLang.toUpperCase()}) · facultatif
+                </label>
+                <input
+                  id="video-title"
+                  className={styles.input}
+                  value={videoTitle[activeLang]}
+                  maxLength={200}
+                  onChange={(event) => setVideoTitle((current) => ({ ...current, [activeLang]: event.target.value }))}
+                />
+                <p className={styles.helperText}>Laissez vide pour ne pas afficher de titre.</p>
+              </div>
+
+              <div className={styles.formGroup}>
                 <label className={styles.label}>Image de couverture de la vidéo</label>
                 <div className={styles.uploaderBox}>
                   {videoCoverImageId ? (
@@ -1149,6 +1178,21 @@ export default function AdminPortfolioEditPage() {
                       placeholder="https://www.youtube.com/watch?v=…"
                       value={video.url}
                       onChange={(event) => setAdditionalVideos((current) => current.map((item) => item.key === video.key ? { ...item, url: event.target.value } : item))}
+                    />
+                    <label className={styles.label} htmlFor={`additional-video-title-${video.key}`}>
+                      Titre de la vidéo supplémentaire {index + 1} ({activeLang.toUpperCase()}) · facultatif
+                    </label>
+                    <input
+                      id={`additional-video-title-${video.key}`}
+                      className={styles.input}
+                      value={video.title?.[activeLang] || ""}
+                      maxLength={200}
+                      placeholder="Laisser vide pour ne pas afficher de titre"
+                      onChange={(event) => setAdditionalVideos((current) => current.map((item) =>
+                        item.key === video.key
+                          ? { ...item, title: { fr: item.title?.fr || "", en: item.title?.en || "", [activeLang]: event.target.value } }
+                          : item
+                      ))}
                     />
                     <div className={styles.uploaderBox}>
                       {video.coverImageId && (
