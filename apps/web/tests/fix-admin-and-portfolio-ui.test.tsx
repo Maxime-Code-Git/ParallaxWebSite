@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
 import React from "react";
-import { render, screen, fireEvent, act } from "@testing-library/react";
+import { render, screen, fireEvent, act, within } from "@testing-library/react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 
 // Mock react-router for component rendering tests
@@ -897,6 +897,86 @@ describe("Fix Admin Content & Public UI Suite", () => {
   // =========================================================================
   // 5. Video Poster Centered Play Button & Modal Consent in 4 Real Contexts
   // =========================================================================
+  it.each(["photo", "video"] as const)("renders every project video in %s mode and opens each through consent", async (mode) => {
+    const content = createPublishedPortfolioFixture();
+    const project = content.projects[0];
+    project.presentationMode = mode;
+    project.additionalVideos = [
+      { provider: "youtube", videoId: "abcdefghijk", url: "https://www.youtube.com/watch?v=abcdefghijk" },
+      { provider: "vimeo", videoId: "123456789", url: "https://vimeo.com/123456789" },
+    ];
+    const photoId = "abcdabcd-abcd-4bcd-abcd-abcdabcdabcd";
+    const posterId = "bcdebcde-bcde-4cde-bcde-bcdebcdebcde";
+    project.galleryImageIds = [photoId];
+    project.additionalVideos[0].coverImageId = posterId;
+    content.media[photoId] = createMockPortfolioMedia(photoId, "project", project.id, "gallery");
+    content.media[posterId] = createMockPortfolioMedia(posterId, "project", project.id, "video_cover");
+    fs.writeFileSync(testPortfolioContentFile, JSON.stringify(content));
+    const response = await publicPortfolioLoader({
+      request: new Request("http://localhost:3000/fr/projets/documentaire/film-hero"),
+      params: { rubrique: "documentaire", slugFr: "film-hero" },
+    } as unknown as LoaderFunctionArgs);
+    vi.mocked(useLoaderData).mockReturnValue(await response.json());
+    const { container } = render(<PortfolioPage />);
+    expect(container.querySelectorAll("[class*='showreelCard']")).toHaveLength(3);
+    expect(container.querySelector("iframe")).toBeNull();
+    const photos = container.querySelector("[class*='detailGallerySection']")!;
+    const videos = container.querySelector("[class*='detailVideos']")!;
+    expect(videos).toBeVisible();
+    expect(photos.compareDocumentPosition(videos) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const mainCard = container.querySelector("[class*='detailContainer'] [class*='showreelCard']")!;
+    expect(mainCard.compareDocumentPosition(photos) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(container.querySelector("[class*='detailVideoTitle']")).toBeNull();
+    const extraVideoButton = within(videos as HTMLElement).getByRole("button", { name: "Lire la vidéo 2" });
+    expect(extraVideoButton.closest("[class*='detailVideoSection']")?.querySelector("img")?.getAttribute("src")).toContain(posterId);
+    fireEvent.click(extraVideoButton);
+    expect(container.querySelector("iframe")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Accepter et lire/i }));
+    expect(container.querySelector("iframe")?.getAttribute("src")).toContain("youtube-nocookie.com/embed/abcdefghijk");
+  });
+
+  it.each(["fr", "en"] as const)("shows chosen video titles in %s and leaves unnamed videos without a title", async (lang) => {
+    const content = createPublishedPortfolioFixture();
+    const project = content.projects[0];
+    project.video!.title = { fr: "Film principal", en: "Main film" };
+    project.additionalVideos = [
+      { provider: "youtube", videoId: "abcdefghijk", url: "https://www.youtube.com/watch?v=abcdefghijk", title: { fr: "Les coulisses", en: "Behind the scenes" } },
+      { provider: "vimeo", videoId: "123456789", url: "https://vimeo.com/123456789" },
+    ];
+    fs.writeFileSync(testPortfolioContentFile, JSON.stringify(content));
+    const category = content.categories[0];
+    const response = await publicPortfolioLoader({
+      request: new Request(`http://localhost:3000/${lang}/${lang === "fr" ? "projets" : "projects"}/${lang === "fr" ? category.slugFr : category.slugEn}/${lang === "fr" ? project.slugFr : project.slugEn}`),
+      params: lang === "fr" ? { rubrique: category.slugFr, slugFr: project.slugFr } : { category: category.slugEn, slugEn: project.slugEn },
+    } as unknown as LoaderFunctionArgs);
+    vi.mocked(useLoaderData).mockReturnValue(await response.json());
+    const { container } = render(<PortfolioPage />);
+    expect(screen.getByRole("heading", { name: project.video!.title[lang] })).toBeVisible();
+    expect(screen.getByRole("heading", { name: project.additionalVideos[0].title![lang] })).toBeVisible();
+    expect(container.querySelectorAll("[class*='detailVideoTitle']")).toHaveLength(2);
+    expect(screen.queryByRole("heading", { name: /^(Vidéo|Video) \d+$/ })).toBeNull();
+    const section = container.querySelector("[class*='detailVideos']")!;
+    const cards = section.querySelectorAll("[class*='detailVideoSection']");
+    expect(cards[1].querySelector("[class*='detailVideoTitle']")).toBeNull();
+  });
+
+  it("includes additional videos in the category video list", async () => {
+    const content = createPublishedPortfolioFixture();
+    content.projects[0].additionalVideos = [
+      { provider: "vimeo", videoId: "123456789", url: "https://vimeo.com/123456789", title: { fr: "Film complémentaire", en: "Additional film" } },
+    ];
+    fs.writeFileSync(testPortfolioContentFile, JSON.stringify(content));
+    const response = await publicPortfolioLoader({
+      request: new Request("http://localhost:3000/fr/projets/documentaire"),
+      params: { rubrique: "documentaire" },
+    } as unknown as LoaderFunctionArgs);
+    vi.mocked(useLoaderData).mockReturnValue(await response.json());
+    const { container } = render(<PortfolioPage />);
+    fireEvent.click(screen.getByRole("button", { name: /Voir plus de vidéos/i }));
+    expect(container.querySelectorAll("#category-videos-panel [class*='videoGridItem']")).toHaveLength(3);
+    expect(screen.getByRole("button", { name: /Lire la vidéo : Film complémentaire/ })).toBeVisible();
+  });
+
   describe("5. Video Poster Centered Play Button & Modal Consent in 4 Real Contexts", () => {
     it("Context 1: Hero project video renders real picture, overlay, play button, and opens modal with consent gate", async () => {
       const req = new Request("http://localhost:3000/fr/projets/documentaire/film-hero?dir=right");

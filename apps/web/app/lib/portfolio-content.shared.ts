@@ -39,6 +39,7 @@ export {
   portfolioContentSchema,
   migratePortfolioContentV1ToV2,
   resolveProjectPresentationMode,
+  getProjectVideos,
   slugify,
   calculateEffectiveSide,
   comparePortfolioProjects,

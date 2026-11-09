@@ -6,7 +6,9 @@ import fs from "node:fs";
 import crypto from "node:crypto";
 import sharp from "sharp";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import { action as adminPortfolioUploadAction } from "../app/routes/api/admin-portfolio-upload";
 import { action as adminPortfolioEditAction } from "../app/routes/admin/portfolio-edit";
+import { loader as portfolioVariantLoader } from "../app/routes/media/portfolio-variant";
 import { loader as clientLoginLoader, action as clientLoginAction } from "../app/routes/public/client-login";
 import { loader as galleryLoader } from "../app/routes/public/gallery";
 import { loader as galleryMediaLoader } from "../app/routes/api/gallery-media";
@@ -22,8 +24,8 @@ import {
 import { getGalleryDb, closeGalleryDb } from "../app/lib/gallery-db.server";
 import { getSession, commitSession } from "../app/lib/session.server";
 import { computeCredentialVersion } from "../app/lib/auth.server";
-import { getRawPortfolioContent } from "../app/lib/portfolio-content.server";
-import type { PortfolioContent, PortfolioMediaItem } from "../app/lib/portfolio-content.shared";
+import { getRawPortfolioContent, getPublicPortfolioContent } from "../app/lib/portfolio-content.server";
+import { portfolioContentSchema, type PortfolioContent, type PortfolioMediaItem } from "../app/lib/portfolio-content.shared";
 
 const PROJ_ID = "11111111-1111-4111-8111-111111111111";
 const FOREIGN_PROJ_ID = "99999999-9999-4999-8999-999999999999";
@@ -250,6 +252,210 @@ describe("Portfolio Media, Admin Thumbnails, Responsive Overlap, and Client Gall
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
     vi.restoreAllMocks();
+  });
+
+  describe("Multiple videos on a portfolio project", () => {
+    const primary = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
+
+    async function saveVideos(videos: unknown, overrides: Record<string, string> = {}) {
+      const current = getRawPortfolioContent().content;
+      const project = current.projects[0];
+      const form = new URLSearchParams({
+        revision: current.revision, category: project.category, slugFr: project.slugFr,
+        slugEn: project.slugEn, titleFr: project.title.fr, titleEn: project.title.en,
+        summaryFr: project.summary.fr, summaryEn: project.summary.en,
+        descriptionFr: project.description.map((block) => block.text.fr).join("\n\n"),
+        descriptionEn: project.description.map((block) => block.text.en).join("\n\n"),
+        seoTitleFr: project.seo.title.fr, seoTitleEn: project.seo.title.en,
+        seoDescFr: project.seo.description.fr, seoDescEn: project.seo.description.en,
+        coverImageId: project.coverImageId || "", galleryImageIds: JSON.stringify(project.galleryImageIds),
+        status: "published", presentationMode: "video", videoUrl: primary,
+        ...overrides,
+      });
+      if (videos !== undefined) form.set("additionalVideos", JSON.stringify(videos));
+      const { request, csrfToken } = await createAuthenticatedAdminRequest("POST", undefined, form);
+      form.set("csrfToken", csrfToken);
+      return adminPortfolioEditAction(makeActionArgs(new Request(request.url, {
+        method: "POST", headers: request.headers, body: form.toString(),
+      }), { id: PROJ_ID }));
+    }
+
+    it("saves and publishes more than 50 additional videos without changing the original video or photos", async () => {
+      const videos = Array.from({ length: 75 }, (_, index) => ({ url: `https://vimeo.com/${123456700 + index}` }));
+      const response = await saveVideos(videos);
+      expect(response.status, await response.clone().text()).toBe(200);
+      const stored = getRawPortfolioContent().content.projects[0];
+      expect(stored.video?.url).toBe(primary);
+      expect(stored.additionalVideos?.map(({ url }) => url)).toEqual(videos.map(({ url }) => url));
+      expect(stored.galleryImageIds).toEqual([IMG_1, IMG_2, IMG_3]);
+      expect(getPublicPortfolioContent().publicProjects[0].additionalVideos).toHaveLength(75);
+    });
+
+    it("persists reordering and removal and preserves additional videos when an older form omits the new field", async () => {
+      const one = { url: "https://vimeo.com/123456701" };
+      const two = { url: "https://vimeo.com/123456702" };
+      expect((await saveVideos([one, two])).status).toBe(200);
+      expect((await saveVideos([two, one])).status).toBe(200);
+      expect(getRawPortfolioContent().content.projects[0].additionalVideos?.map(({ url }) => url)).toEqual([two.url, one.url]);
+      expect((await saveVideos([two])).status).toBe(200);
+      expect((await saveVideos(undefined)).status).toBe(200);
+      expect(getRawPortfolioContent().content.projects[0].additionalVideos?.map(({ url }) => url)).toEqual([two.url]);
+    });
+
+    it("saves optional bilingual video titles, preserves them for older forms and allows clearing them", async () => {
+      const video = { url: "https://vimeo.com/123456701", title: { fr: "Les coulisses", en: "Behind the scenes" } };
+      const response = await saveVideos([video], { videoTitleFr: "Film principal", videoTitleEn: "Main film" });
+      expect(response.status, await response.clone().text()).toBe(200);
+      let stored = getRawPortfolioContent().content.projects[0];
+      expect(stored.video?.title).toEqual({ fr: "Film principal", en: "Main film" });
+      expect(stored.additionalVideos?.[0].title).toEqual(video.title);
+      expect((await saveVideos([{ url: video.url }])).status).toBe(200);
+      stored = getRawPortfolioContent().content.projects[0];
+      expect(stored.video?.title?.fr).toBe("Film principal");
+      expect(stored.additionalVideos?.[0].title).toEqual(video.title);
+      expect((await saveVideos([{ ...video, title: { fr: "", en: "" } }], { videoTitleFr: "", videoTitleEn: "" })).status).toBe(200);
+      stored = getRawPortfolioContent().content.projects[0];
+      expect(stored.video?.title).toEqual({ fr: "", en: "" });
+      expect(stored.additionalVideos?.[0].title).toEqual({ fr: "", en: "" });
+    });
+
+    it("promotes the next video when the first URL is removed", async () => {
+      const one = { url: "https://vimeo.com/123456701" };
+      const two = { url: "https://vimeo.com/123456702" };
+      const response = await saveVideos([one, two], { videoUrl: "" });
+      expect(response.status).toBe(200);
+      const result = await response.json();
+      expect(result.video.url).toBe(one.url);
+      expect(result.additionalVideos.map(({ url }: { url: string }) => url)).toEqual([two.url]);
+      expect(getRawPortfolioContent().content.projects[0].video?.url).toBe(one.url);
+    });
+
+    it.each([
+      null,
+      {},
+      [null],
+      [{ url: "javascript:alert(1)" }],
+      [{ url: "https://example.org/video.mp4" }],
+      [{ url: "https://vimeo.com/123456701", title: false }],
+      [{ url: "https://vimeo.com/123456701", title: { fr: "x".repeat(201), en: "" } }],
+    ])("rejects invalid additional video data without changing the revision: %j", async (videos) => {
+      const before = fs.readFileSync(testPortfolioContent, "utf8");
+      expect((await saveVideos(videos)).status).toBe(422);
+      expect(fs.readFileSync(testPortfolioContent, "utf8")).toBe(before);
+    });
+
+    it("retains an additional video's own poster in the registry and the public projection", async () => {
+      const poster = "abcdabcd-abcd-4bcd-abcd-abcdabcdabcd";
+      const content = getRawPortfolioContent().content;
+      content.media[poster] = createMockPortfolioMedia(poster, "project", PROJ_ID, "video_cover");
+      fs.writeFileSync(testPortfolioContent, JSON.stringify(content));
+      expect((await saveVideos([{ url: "https://vimeo.com/123456701", coverImageId: poster }])).status).toBe(200);
+      expect(getRawPortfolioContent().content.media[poster]).toBeDefined();
+      expect(getPublicPortfolioContent().content.media[poster]).toBeDefined();
+
+      const directory = path.join(testPortfolioMedia, "projects", PROJ_ID, "video_cover", poster);
+      fs.mkdirSync(directory, { recursive: true });
+      const image = await sharp({ create: { width: 20, height: 20, channels: 3, background: "blue" } }).webp().toBuffer();
+      fs.writeFileSync(path.join(directory, "640p.webp"), image);
+      const request = new Request(`http://localhost:3000/media/portfolio/project/${PROJ_ID}/video_cover/${poster}/640p/webp`);
+      const params = { ownerType: "project", ownerId: PROJ_ID, slot: "video_cover", imageId: poster, variant: "640p", ext: "webp" };
+      const publicPoster = await portfolioVariantLoader(makeLoaderArgs(request, params));
+      expect(publicPoster.status).toBe(200);
+      await publicPoster.arrayBuffer();
+
+      const unpublished = getRawPortfolioContent().content;
+      unpublished.categories[0].status = "draft";
+      fs.writeFileSync(testPortfolioContent, JSON.stringify(unpublished));
+      expect((await portfolioVariantLoader(makeLoaderArgs(request, params))).status).toBe(404);
+      expect(getPublicPortfolioContent().content.media[poster]).toBeUndefined();
+    });
+
+    it("reports malformed stored video lists as validation errors without throwing", () => {
+      const content = getRawPortfolioContent().content;
+      const malformed = {
+        ...content,
+        projects: [{ ...content.projects[0], additionalVideos: { corrupted: true } }],
+      };
+      expect(() => portfolioContentSchema.safeParse(malformed)).not.toThrow();
+      expect(portfolioContentSchema.safeParse(malformed).success).toBe(false);
+    });
+
+    async function uploadAdditionalPoster(target = "additional") {
+      const image = await sharp({ create: { width: 128, height: 72, channels: 3, background: "blue" } }).jpeg().toBuffer();
+      const boundary = `poster-${crypto.randomUUID()}`;
+      const body = Buffer.concat([
+        Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="poster.jpg"\r\nContent-Type: image/jpeg\r\n\r\n`),
+        image,
+        Buffer.from(`\r\n--${boundary}--\r\n`),
+      ]);
+      const { request } = await createAuthenticatedAdminRequest(
+        "POST", "http://localhost:3000/api/admin/portfolio-upload", new Uint8Array(body), {
+          "Content-Type": `multipart/form-data; boundary=${boundary}`,
+          "x-csrf-token": "test-csrf-token-1234567890abcdef",
+          "x-portfolio-owner-type": "project",
+          "x-portfolio-owner-id": PROJ_ID,
+          "x-portfolio-media-slot": "video_cover",
+          "x-portfolio-revision": getRawPortfolioContent().content.revision,
+          "x-portfolio-video-target": target,
+        }
+      );
+      return adminPortfolioUploadAction(makeActionArgs(request));
+    }
+
+    it("pins separately uploaded posters until save without changing the primary poster or exposing drafts", async () => {
+      const primaryPoster = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+      const initial = getRawPortfolioContent().content;
+      initial.media[primaryPoster] = createMockPortfolioMedia(primaryPoster, "project", PROJ_ID, "video_cover");
+      initial.projects[0].video = { provider: "youtube", videoId: "dQw4w9WgXcQ", url: primary, coverImageId: primaryPoster };
+      initial.projects[0].draftVideoCoverImageId = primaryPoster;
+      fs.writeFileSync(testPortfolioContent, JSON.stringify(initial));
+      const response1 = await uploadAdditionalPoster();
+      expect(response1.status, await response1.clone().text()).toBe(200);
+      const poster1 = await response1.json();
+      const response2 = await uploadAdditionalPoster();
+      expect(response2.status, await response2.clone().text()).toBe(200);
+      const poster2 = await response2.json();
+
+      const uploaded = getRawPortfolioContent().content;
+      expect(uploaded.projects[0].video?.coverImageId).toBe(primaryPoster);
+      expect(uploaded.projects[0].draftVideoCoverImageId).toBe(primaryPoster);
+      expect(uploaded.projects[0].draftAdditionalVideoCoverImageIds).toEqual([poster1.imageId, poster2.imageId]);
+      expect(uploaded.projects[0].galleryImageIds).toEqual([IMG_1, IMG_2, IMG_3]);
+      expect(uploaded.media[poster1.imageId]).toBeDefined();
+      expect(uploaded.media[poster2.imageId]).toBeDefined();
+      expect(getPublicPortfolioContent().publicProjects[0].draftAdditionalVideoCoverImageIds).toBeUndefined();
+      expect(getPublicPortfolioContent().content.media[poster1.imageId]).toBeUndefined();
+      const variantRequest = new Request("http://localhost:3000/media/portfolio/preview");
+      const variantParams = { ownerType: "project", ownerId: PROJ_ID, slot: "video_cover", imageId: poster1.imageId, variant: "640p", ext: "webp" };
+      expect((await portfolioVariantLoader(makeLoaderArgs(variantRequest, variantParams))).status).toBe(404);
+
+      const saved = await saveVideos([
+        { url: "https://vimeo.com/123456701", coverImageId: poster1.imageId },
+        { url: "https://vimeo.com/123456702", coverImageId: poster2.imageId },
+      ], { videoCoverImageId: primaryPoster });
+      expect(saved.status, await saved.clone().text()).toBe(200);
+      const stored = getRawPortfolioContent().content;
+      expect(stored.projects[0].video?.coverImageId).toBe(primaryPoster);
+      expect(stored.projects[0].draftAdditionalVideoCoverImageIds).toBeUndefined();
+      expect(stored.projects[0].additionalVideos?.map(({ coverImageId }) => coverImageId)).toEqual([poster1.imageId, poster2.imageId]);
+      expect(getPublicPortfolioContent().content.media[poster1.imageId]).toBeDefined();
+      expect(getPublicPortfolioContent().content.media[poster2.imageId]).toBeDefined();
+      const publishedPoster = await portfolioVariantLoader(makeLoaderArgs(variantRequest, variantParams));
+      expect(publishedPoster.status).toBe(200);
+      await publishedPoster.arrayBuffer();
+    });
+
+    it("rejects an unknown poster destination before writing", async () => {
+      const before = fs.readFileSync(testPortfolioContent, "utf8");
+      expect((await uploadAdditionalPoster("invalid")).status).toBe(400);
+      expect(fs.readFileSync(testPortfolioContent, "utf8")).toBe(before);
+    });
+
+    it("rejects an additional poster owned by a different project", async () => {
+      const before = fs.readFileSync(testPortfolioContent, "utf8");
+      expect((await saveVideos([{ url: "https://vimeo.com/123456701", coverImageId: FOREIGN_IMG }])).status).toBe(422);
+      expect(fs.readFileSync(testPortfolioContent, "utf8")).toBe(before);
+    });
   });
 
   describe("Point 2 & 3: Project Gallery Photos Removal, Reordering and Validation", () => {

@@ -446,7 +446,12 @@ export function getPublicPortfolioContent(customPath?: string): {
 
   const publicProjects = cleanedContent.projects
     .filter((p) => p.status === "published" && !p.archived && publishedCategoryIds.has(p.category))
-    .sort(comparePortfolioProjects);
+    .sort(comparePortfolioProjects)
+    .map((project) => {
+      const publicProject = { ...project };
+      delete publicProject.draftAdditionalVideoCoverImageIds;
+      return publicProject;
+    });
 
   // Collect ONLY media IDs referenced by public categories and published projects
   const publicMediaIds = new Set<string>();
@@ -460,6 +465,9 @@ export function getPublicPortfolioContent(customPath?: string): {
   for (const p of publicProjects) {
     if (p.coverImageId) publicMediaIds.add(p.coverImageId);
     if (p.video?.coverImageId) publicMediaIds.add(p.video.coverImageId);
+    for (const video of p.additionalVideos || []) {
+      if (video.coverImageId) publicMediaIds.add(video.coverImageId);
+    }
     if (Array.isArray(p.galleryImageIds)) {
       for (const gid of p.galleryImageIds) {
         publicMediaIds.add(gid);
@@ -530,7 +538,11 @@ export function prunePortfolioMediaRegistry(
     for (const project of content.projects) {
       if (project.coverImageId) activeIds.add(project.coverImageId);
       if (project.draftVideoCoverImageId) activeIds.add(project.draftVideoCoverImageId);
+      for (const imageId of project.draftAdditionalVideoCoverImageIds || []) activeIds.add(imageId);
       if (project.video?.coverImageId) activeIds.add(project.video.coverImageId);
+      for (const video of project.additionalVideos || []) {
+        if (video.coverImageId) activeIds.add(video.coverImageId);
+      }
       for (const gid of project.galleryImageIds) {
         activeIds.add(gid);
       }
@@ -637,8 +649,18 @@ export function getReferencedPortfolioMediaIds(
       for (const p of obj.projects as Array<Record<string, unknown> | null | undefined>) {
         if (typeof p?.coverImageId === "string") referencedIds.add(p.coverImageId);
         if (typeof p?.draftVideoCoverImageId === "string") referencedIds.add(p.draftVideoCoverImageId);
+        if (Array.isArray(p?.draftAdditionalVideoCoverImageIds)) {
+          for (const imageId of p.draftAdditionalVideoCoverImageIds) {
+            if (typeof imageId === "string") referencedIds.add(imageId);
+          }
+        }
         const pVideo = p?.video as Record<string, unknown> | null | undefined;
         if (typeof pVideo?.coverImageId === "string") referencedIds.add(pVideo.coverImageId);
+        if (Array.isArray(p?.additionalVideos)) {
+          for (const video of p.additionalVideos as Array<Record<string, unknown> | null>) {
+            if (typeof video?.coverImageId === "string") referencedIds.add(video.coverImageId);
+          }
+        }
         if (Array.isArray(p?.galleryImageIds)) {
           for (const gid of p.galleryImageIds) {
             if (typeof gid === "string") referencedIds.add(gid);

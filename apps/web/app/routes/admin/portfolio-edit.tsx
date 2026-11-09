@@ -13,6 +13,7 @@ import { constantTimeEqual } from "../../lib/auth.server";
 import { validateOrigin, readStrictFormUrlEncoded, ActionSecurityError } from "../../lib/security.server";
 import {
   type PortfolioProject,
+  type PortfolioVideo,
   type PortfolioCategory,
   type PortfolioCategoryItem,
   type PortfolioMediaItem,
@@ -88,6 +89,9 @@ const ALLOWED_PROJECT_FIELDS = [
   "coverImageId",
   "videoCoverImageId",
   "videoUrl",
+  "videoTitleFr",
+  "videoTitleEn",
+  "additionalVideos",
   "galleryImageIds",
   "galleryAlt",
 ] as const;
@@ -108,7 +112,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
   let formData: URLSearchParams;
   try {
-    formData = await readStrictFormUrlEncoded(request, 100 * 1024, ALLOWED_PROJECT_FIELDS);
+    formData = await readStrictFormUrlEncoded(request, 500 * 1024, ALLOWED_PROJECT_FIELDS);
   } catch (err) {
     if (err instanceof ActionSecurityError) {
       const headers = createAdminHeaders();
@@ -246,7 +250,48 @@ export async function action({ request, params }: ActionFunctionArgs) {
       videoId: parsed.videoId,
       url: rawVideoUrl,
       coverImageId: videoCoverImageId,
+      ...(formData.has("videoTitleFr") || formData.has("videoTitleEn")
+        ? { title: { fr: String(formData.get("videoTitleFr") || "").trim(), en: String(formData.get("videoTitleEn") || "").trim() } }
+        : proj.video?.title ? { title: proj.video.title } : {}),
     };
+  }
+
+  // The new editor submits all additional entries. Older forms preserve existing ones.
+  let additionalVideos = proj.additionalVideos || [];
+  const rawAdditionalVideos = formData.get("additionalVideos");
+  if (rawAdditionalVideos !== null) {
+    let submitted: unknown;
+    try {
+      submitted = JSON.parse(rawAdditionalVideos);
+    } catch {
+      return Response.json({ error: "Liste des vidéos supplémentaires invalide." }, { status: 422, headers: createAdminHeaders() });
+    }
+    if (!Array.isArray(submitted)) {
+      return Response.json({ error: "Les vidéos supplémentaires doivent être une liste." }, { status: 422, headers: createAdminHeaders() });
+    }
+    additionalVideos = [];
+    for (const [index, value] of submitted.entries()) {
+      const url = value && typeof value === "object" && typeof value.url === "string" ? value.url.trim() : "";
+      const parsed = parseVideoUrl(url);
+      if (!parsed) {
+        return Response.json(
+          { error: `La vidéo supplémentaire ${index + 1} doit être un lien HTTPS valide YouTube ou Vimeo.` },
+          { status: 422, headers: createAdminHeaders() }
+        );
+      }
+      const previousTitle = proj.additionalVideos?.find((video) => video.provider === parsed.provider && video.videoId === parsed.videoId)?.title;
+      additionalVideos.push({
+        ...parsed, url,
+        ...(value.coverImageId !== undefined ? { coverImageId: value.coverImageId } : {}),
+        ...(value.title !== undefined ? { title: value.title } : previousTitle ? { title: previousTitle } : {}),
+      });
+    }
+  }
+  // If the main URL is removed, promote the next entry rather than losing its videos.
+  if (!videoObj && additionalVideos.length > 0) {
+    const [promoted, ...remaining] = additionalVideos;
+    videoObj = { ...promoted, coverImageId: promoted.coverImageId || videoCoverImageId };
+    additionalVideos = remaining;
   }
 
   // Build description blocks
@@ -298,7 +343,9 @@ export async function action({ request, params }: ActionFunctionArgs) {
   proj.galleryImageIds = galleryImageIds;
   proj.galleryAlt = galleryAlt;
   proj.video = videoObj;
-  proj.draftVideoCoverImageId = videoCoverImageId;
+  if (rawAdditionalVideos !== null || proj.additionalVideos) proj.additionalVideos = additionalVideos;
+  if (rawAdditionalVideos !== null) delete proj.draftAdditionalVideoCoverImageIds;
+  proj.draftVideoCoverImageId = videoObj?.coverImageId || videoCoverImageId;
   const presentationMode = (String(formData.get("presentationMode") || "photo") as "photo" | "video");
   const ALLOWED_ASPECT_RATIOS = ["3:2", "4:5", "16:9", "1:1"] as const;
   type AllowedAspectRatio = (typeof ALLOWED_ASPECT_RATIOS)[number];
@@ -316,13 +363,13 @@ export async function action({ request, params }: ActionFunctionArgs) {
   // Pre-validate publication constraints before mutating
   if (status === "published") {
     if (presentationMode === "video") {
-      if (!rawVideoUrl) {
+      if (!videoObj) {
         return Response.json(
           { error: "Un projet publié en mode Vidéo doit comporter une URL vidéo valide (YouTube ou Vimeo)." },
           { status: 422, headers: createAdminHeaders() }
         );
       }
-      if (!videoCoverImageId && !coverImageId) {
+      if (!videoObj?.coverImageId && !coverImageId) {
         return Response.json(
           { error: "Un projet publié en mode Vidéo doit posséder une affiche vidéo ou une image de couverture." },
           { status: 422, headers: createAdminHeaders() }
@@ -347,12 +394,15 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
   try {
     const saveResult = await savePortfolioContent(nextContent, expectedRevision);
+    const savedProject = saveResult.content.projects.find((project) => project.id === proj.id)!;
     void cleanupUnreferencedPortfolioMedia().catch(() => undefined);
 
     return Response.json(
       {
         success: "Projet enregistré avec succès !",
         newRevision: saveResult.newRevision,
+        video: savedProject.video,
+        additionalVideos: savedProject.additionalVideos || [],
       },
       { headers: createAdminHeaders() }
     );
@@ -386,7 +436,7 @@ interface LoaderData {
 
 export default function AdminPortfolioEditPage() {
   const { project, categories = [], contentRevision, media, csrfToken } = useLoaderData<LoaderData>();
-  const actionData = useActionData<{ error?: string; success?: string; newRevision?: string }>();
+  const actionData = useActionData<{ error?: string; success?: string; newRevision?: string; video?: PortfolioVideo | null; additionalVideos?: PortfolioVideo[] }>();
   const navigation = useNavigation();
   const isSaving = navigation.state === "submitting";
 
@@ -406,6 +456,12 @@ export default function AdminPortfolioEditPage() {
       lastActionRef.current = actionData;
       if (actionData.newRevision) {
         updateRevision(actionData.newRevision);
+        if (actionData.success) {
+          setVideoUrl(actionData.video?.url || "");
+          setVideoTitle(actionData.video?.title || { fr: "", en: "" });
+          setVideoCoverImageId(actionData.video?.coverImageId || null);
+          setAdditionalVideos((actionData.additionalVideos || []).map((video, index) => ({ ...video, key: `existing-video-${index}` })));
+        }
       }
     }
   }, [actionData]);
@@ -440,6 +496,10 @@ export default function AdminPortfolioEditPage() {
   );
   const [status, setStatus] = useState(project.status);
   const [videoUrl, setVideoUrl] = useState(project.video?.url || "");
+  const [videoTitle, setVideoTitle] = useState(project.video?.title || { fr: "", en: "" });
+  const [additionalVideos, setAdditionalVideos] = useState(() =>
+    (project.additionalVideos || []).map((video, index) => ({ ...video, key: `existing-video-${index}` }))
+  );
 
   const activeCategory = categories.find((c) => c.id === category);
   const catSlugFr = activeCategory?.slugFr || (category === "documentary" ? "documentaire" : category === "advertising" ? "publicite" : category);
@@ -457,6 +517,7 @@ export default function AdminPortfolioEditPage() {
   // Upload status states
   const [isUploadingCover, setIsUploadingCover] = useState(false);
   const [isUploadingVideoCover, setIsUploadingVideoCover] = useState(false);
+  const [uploadingAdditionalKey, setUploadingAdditionalKey] = useState<string | null>(null);
   const [isUploadingGallery, setIsUploadingGallery] = useState(false);
   const [galleryUploadProgress, setGalleryUploadProgress] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -464,12 +525,15 @@ export default function AdminPortfolioEditPage() {
   const coverInputRef = useRef<HTMLInputElement>(null);
   const videoCoverInputRef = useRef<HTMLInputElement>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
+  const additionalCoverInputs = useRef<Record<string, HTMLInputElement | null>>({});
+  const isUploadingAny = isUploadingCover || isUploadingVideoCover || isUploadingGallery || Boolean(uploadingAdditionalKey);
 
   // Upload single image helper with dynamic revision tracking
   async function uploadImageFile(
     file: File,
     mediaSlot: "cover" | "video_cover" | "gallery",
-    targetRevision?: string
+    targetRevision?: string,
+    videoTarget?: "additional"
   ): Promise<{ imageId: string; newRevision: string }> {
     const formData = new FormData();
     formData.append("file", file);
@@ -484,6 +548,7 @@ export default function AdminPortfolioEditPage() {
         "x-portfolio-owner-id": project.id,
         "x-portfolio-media-slot": mediaSlot,
         "x-portfolio-revision": revToUse,
+        ...(videoTarget ? { "x-portfolio-video-target": videoTarget } : {}),
       },
       body: formData,
     });
@@ -500,7 +565,7 @@ export default function AdminPortfolioEditPage() {
 
   async function handleCoverChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (!file || isUploadingAny || isSaving) return;
 
     setIsUploadingCover(true);
     setUploadError(null);
@@ -517,7 +582,7 @@ export default function AdminPortfolioEditPage() {
 
   async function handleVideoCoverChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (!file || isUploadingAny || isSaving) return;
 
     setIsUploadingVideoCover(true);
     setUploadError(null);
@@ -532,9 +597,28 @@ export default function AdminPortfolioEditPage() {
     }
   }
 
+  async function handleAdditionalVideoCoverChange(event: React.ChangeEvent<HTMLInputElement>, key: string) {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    if (!file || isUploadingAny || isSaving) return;
+    setUploadingAdditionalKey(key);
+    setUploadError(null);
+    try {
+      const result = await uploadImageFile(file, "video_cover", undefined, "additional");
+      setAdditionalVideos((current) => current.map((video) =>
+        video.key === key ? { ...video, coverImageId: result.imageId } : video
+      ));
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setUploadingAdditionalKey(null);
+      input.value = "";
+    }
+  }
+
   async function handleGalleryFiles(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files || []);
-    if (files.length === 0) return;
+    if (files.length === 0 || isUploadingAny || isSaving) return;
 
     const MAX_GALLERY_FILES = MAX_PORTFOLIO_PROJECT_GALLERY_PHOTOS;
     if (
@@ -627,6 +711,9 @@ export default function AdminPortfolioEditPage() {
         <input type="hidden" name="coverImageId" value={coverImageId || ""} />
         <input type="hidden" name="videoCoverImageId" value={videoCoverImageId || ""} />
         <input type="hidden" name="galleryImageIds" value={JSON.stringify(galleryImageIds)} />
+        <input type="hidden" name="videoTitleFr" value={videoTitle.fr} />
+        <input type="hidden" name="videoTitleEn" value={videoTitle.en} />
+        <input type="hidden" name="additionalVideos" value={JSON.stringify(additionalVideos.map(({ url, coverImageId, title }) => ({ url, coverImageId, title })))} />
         <input type="hidden" name="galleryAlt" value={JSON.stringify(galleryAlt)} />
 
         <div className={styles.formGrid}>
@@ -807,7 +894,7 @@ export default function AdminPortfolioEditPage() {
                           type="button"
                           className={styles.uploadBtn}
                           onClick={() => coverInputRef.current?.click()}
-                          disabled={isUploadingCover}
+                          disabled={isUploadingAny || isSaving}
                         >
                           {isUploadingCover ? "Téléversement..." : "Remplacer l'image"}
                         </button>
@@ -829,7 +916,7 @@ export default function AdminPortfolioEditPage() {
                         type="button"
                         className={styles.uploadBtn}
                         onClick={() => coverInputRef.current?.click()}
-                        disabled={isUploadingCover}
+                        disabled={isUploadingAny || isSaving}
                       >
                         {isUploadingCover ? "Téléversement en cours..." : "Choisir une image"}
                       </button>
@@ -888,7 +975,7 @@ export default function AdminPortfolioEditPage() {
                     type="button"
                     className={styles.uploadBtn}
                     onClick={() => galleryInputRef.current?.click()}
-                    disabled={isUploadingGallery || galleryImageIds.length >= MAX_PORTFOLIO_PROJECT_GALLERY_PHOTOS}
+                    disabled={isUploadingAny || isSaving || galleryImageIds.length >= MAX_PORTFOLIO_PROJECT_GALLERY_PHOTOS}
                   >
                     {galleryImageIds.length >= MAX_PORTFOLIO_PROJECT_GALLERY_PHOTOS
                       ? `Limite de ${MAX_PORTFOLIO_PROJECT_GALLERY_PHOTOS} photos atteinte`
@@ -984,7 +1071,11 @@ export default function AdminPortfolioEditPage() {
 
             {/* Video Card */}
             <div className={styles.card}>
-              <h2 className={styles.cardTitle}>Vidéo associée (optionnel)</h2>
+              <h2 className={styles.cardTitle}>Vidéos du projet</h2>
+              <p className={styles.helperText}>
+                Ajoutez autant de liens YouTube ou Vimeo que nécessaire. La première vidéo est utilisée
+                dans la carte du projet ; les suivantes apparaissent dans la fiche et la rubrique.
+              </p>
 
               <div className={styles.formGroup}>
                 <label className={styles.label} htmlFor="videoUrl">
@@ -1002,6 +1093,20 @@ export default function AdminPortfolioEditPage() {
                 <div className={styles.helperText}>
                   La vidéo ne sera chargée qu'après consentement explicite du visiteur.
                 </div>
+              </div>
+
+              <div className={styles.formGroup}>
+                <label className={styles.label} htmlFor="video-title">
+                  Titre de la vidéo principale ({activeLang.toUpperCase()}) · facultatif
+                </label>
+                <input
+                  id="video-title"
+                  className={styles.input}
+                  value={videoTitle[activeLang]}
+                  maxLength={200}
+                  onChange={(event) => setVideoTitle((current) => ({ ...current, [activeLang]: event.target.value }))}
+                />
+                <p className={styles.helperText}>Laissez vide pour ne pas afficher de titre.</p>
               </div>
 
               <div className={styles.formGroup}>
@@ -1025,7 +1130,7 @@ export default function AdminPortfolioEditPage() {
                           type="button"
                           className={styles.uploadBtn}
                           onClick={() => videoCoverInputRef.current?.click()}
-                          disabled={isUploadingVideoCover}
+                          disabled={isUploadingAny || isSaving}
                         >
                           {isUploadingVideoCover ? "Téléversement..." : "Remplacer l'image"}
                         </button>
@@ -1044,7 +1149,7 @@ export default function AdminPortfolioEditPage() {
                         type="button"
                         className={styles.uploadBtn}
                         onClick={() => videoCoverInputRef.current?.click()}
-                        disabled={isUploadingVideoCover}
+                        disabled={isUploadingAny || isSaving}
                       >
                         {isUploadingVideoCover ? "Téléversement..." : "Choisir une couverture vidéo"}
                       </button>
@@ -1058,6 +1163,121 @@ export default function AdminPortfolioEditPage() {
                     onChange={handleVideoCoverChange}
                   />
                 </div>
+              </div>
+              <div className={styles.extraVideos}>
+                <h3 className={styles.extraVideosTitle}>Vidéos supplémentaires</h3>
+                <p className={styles.helperText}>Choisissez une affiche pour chaque vidéo. Sans affiche dédiée, la couverture principale est utilisée.</p>
+                {additionalVideos.map((video, index) => (
+                  <div key={video.key} className={styles.extraVideo}>
+                    <label className={styles.label} htmlFor={`additional-video-${video.key}`}>Vidéo supplémentaire {index + 1}</label>
+                    <input
+                      id={`additional-video-${video.key}`}
+                      className={styles.input}
+                      type="url"
+                      required
+                      placeholder="https://www.youtube.com/watch?v=…"
+                      value={video.url}
+                      onChange={(event) => setAdditionalVideos((current) => current.map((item) => item.key === video.key ? { ...item, url: event.target.value } : item))}
+                    />
+                    <label className={styles.label} htmlFor={`additional-video-title-${video.key}`}>
+                      Titre de la vidéo supplémentaire {index + 1} ({activeLang.toUpperCase()}) · facultatif
+                    </label>
+                    <input
+                      id={`additional-video-title-${video.key}`}
+                      className={styles.input}
+                      value={video.title?.[activeLang] || ""}
+                      maxLength={200}
+                      placeholder="Laisser vide pour ne pas afficher de titre"
+                      onChange={(event) => setAdditionalVideos((current) => current.map((item) =>
+                        item.key === video.key
+                          ? { ...item, title: { fr: item.title?.fr || "", en: item.title?.en || "", [activeLang]: event.target.value } }
+                          : item
+                      ))}
+                    />
+                    <div className={styles.uploaderBox}>
+                      {video.coverImageId && (
+                        <div className={styles.previewImageWrap}>
+                          <ResponsivePortfolioImage
+                            imageId={video.coverImageId}
+                            ownerType="project"
+                            ownerId={project.id}
+                            mediaSlot="video_cover"
+                            mediaMetadata={mediaRegistry[video.coverImageId]}
+                            alt={`Couverture de la vidéo supplémentaire ${index + 1}`}
+                            isAdminPreview
+                          />
+                        </div>
+                      )}
+                      <div className={styles.uploadActions}>
+                        <button
+                          type="button"
+                          className={styles.uploadBtn}
+                          disabled={isUploadingAny || isSaving}
+                          onClick={() => additionalCoverInputs.current[video.key]?.click()}
+                          aria-label={`${video.coverImageId ? "Remplacer" : "Choisir"} la couverture de la vidéo supplémentaire ${index + 1}`}
+                        >
+                          {uploadingAdditionalKey === video.key ? "Téléversement..." : video.coverImageId ? "Remplacer la couverture" : "Choisir une couverture"}
+                        </button>
+                        {video.coverImageId && (
+                          <button
+                            type="button"
+                            className={styles.removeBtn}
+                            disabled={isUploadingAny || isSaving}
+                            aria-label={`Supprimer la couverture de la vidéo supplémentaire ${index + 1}`}
+                            onClick={() => setAdditionalVideos((current) => current.map((item) =>
+                              item.key === video.key ? { ...item, coverImageId: null } : item
+                            ))}
+                          >Supprimer la couverture</button>
+                        )}
+                      </div>
+                      <input
+                        ref={(input) => {
+                          if (input) additionalCoverInputs.current[video.key] = input;
+                          else delete additionalCoverInputs.current[video.key];
+                        }}
+                        type="file"
+                        aria-label={`Fichier de couverture de la vidéo supplémentaire ${index + 1}`}
+                        accept="image/jpeg,image/png,image/webp"
+                        className={styles.hiddenFileInput}
+                        disabled={isUploadingAny || isSaving}
+                        onChange={(event) => handleAdditionalVideoCoverChange(event, video.key)}
+                      />
+                    </div>
+                    <div className={styles.uploadActions}>
+                      {[-1, 1].map((direction) => (
+                        <button
+                          key={direction}
+                          type="button"
+                          className={styles.uploadBtn}
+                          disabled={isUploadingAny || isSaving || (direction === -1 ? index === 0 : index === additionalVideos.length - 1)}
+                          aria-label={`${direction === -1 ? "Monter" : "Descendre"} la vidéo supplémentaire ${index + 1}`}
+                          onClick={() => setAdditionalVideos((current) => {
+                            const next = [...current];
+                            const target = index + direction;
+                            if (target < 0 || target >= next.length) return current;
+                            [next[index], next[target]] = [next[target], next[index]];
+                            return next;
+                          })}
+                        >
+                          {direction === -1 ? "Monter" : "Descendre"}
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        className={styles.removeBtn}
+                        aria-label={`Supprimer la vidéo supplémentaire ${index + 1}`}
+                        disabled={isUploadingAny || isSaving}
+                        onClick={() => setAdditionalVideos((current) => current.filter((item) => item.key !== video.key))}
+                      >Supprimer</button>
+                    </div>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  className={styles.uploadBtn}
+                  disabled={isUploadingAny || isSaving}
+                  onClick={() => setAdditionalVideos((current) => [...current, { key: crypto.randomUUID(), url: "", provider: "youtube", videoId: "" }])}
+                >+ Ajouter une vidéo</button>
               </div>
             </div>
 
@@ -1254,7 +1474,7 @@ export default function AdminPortfolioEditPage() {
           </div>
           <button
             type="submit"
-            disabled={isSaving || isUploadingCover || isUploadingGallery}
+            disabled={isSaving || isUploadingAny}
             className={styles.primarySaveBtn}
           >
             {isSaving ? "Enregistrement en cours..." : "Enregistrer les modifications"}

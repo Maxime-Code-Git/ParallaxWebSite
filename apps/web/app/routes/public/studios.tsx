@@ -92,86 +92,8 @@ export default function StudiosGateway() {
 
   return (
     <main className={styles.gatewayPage}>
-      {/* Shared StudioLM Identity — dominant & not clickable */}
-      <header className={styles.studioLmHeader}>
-        <div className={styles.studioLmBrand}>
-          <img
-            src="/img/logo-studiolm.png"
-            alt=""
-            aria-hidden="true"
-            className={styles.studioLmLogo}
-            width="64"
-            height="68"
-          />
-          <h1 className={styles.studioLmTitle}>StudioLM</h1>
-        </div>
-      </header>
-
       {/* Two destination panels */}
       <div className={styles.panelsContainer}>
-        {/* SEMPRA Panel */}
-        <a
-          href={SEMPRA_URL}
-          className={styles.panelSempra}
-          aria-label="SEMPRA | Photographie et vidéo de mariage"
-        >
-          {sempra.imageId && (
-            <img
-              src={`/media/site/studios_sempra/${sempra.imageId}/1440p/webp`}
-              srcSet={
-                sempra.variants && sempra.variants.length > 0
-                  ? sempra.variants
-                      .map(
-                        (v) =>
-                          `/media/site/studios_sempra/${sempra.imageId}/${v.name}/webp ${v.width}w`
-                      )
-                      .join(", ")
-                  : undefined
-              }
-              sizes="(max-width: 900px) 100vw, 50vw"
-              alt=""
-              aria-hidden="true"
-              className={`${styles.bgImage} ${getFramingClass(sempra.framing)}`}
-              loading="eager"
-              decoding="async"
-            />
-          )}
-          <div className={styles.sempraOverlay} aria-hidden="true" />
-
-          <div className={styles.panelContent}>
-            <div className={styles.sempraLogoWrap}>
-              <img
-                src="/img/img-73c121e112.png"
-                alt="SEMPRA"
-                className={styles.sempraLogo}
-                width="280"
-                height="89"
-              />
-            </div>
-            <p className={styles.sempraText}>Photographie et vidéo de mariage</p>
-            <span className={styles.sempraButton}>
-              <span className={styles.buttonLabel}>Découvrir SEMPRA</span>
-              <span className={styles.sempraButtonIcon} aria-hidden="true">
-                <svg
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M5 12h14M12 5l7 7-7 7" />
-                </svg>
-              </span>
-            </span>
-          </div>
-        </a>
-
-        {/* Visual junction divider between the two universes */}
-        <div className={styles.junctionDivider} aria-hidden="true" />
-
         {/* Parallax Panel */}
         <a
           href={PARALLAX_URL}
@@ -233,7 +155,86 @@ export default function StudiosGateway() {
             </span>
           </div>
         </a>
+        {/* Visual junction divider between the two universes */}
+        <div className={styles.junctionDivider} aria-hidden="true" />
+
+        {/* SEMPRA Panel */}
+        <a
+          href={SEMPRA_URL}
+          className={styles.panelSempra}
+          aria-label="SEMPRA | Photographie et vidéo de mariage"
+        >
+          {sempra.imageId && (
+            <img
+              src={`/media/site/studios_sempra/${sempra.imageId}/1440p/webp`}
+              srcSet={
+                sempra.variants && sempra.variants.length > 0
+                  ? sempra.variants
+                      .map(
+                        (v) =>
+                          `/media/site/studios_sempra/${sempra.imageId}/${v.name}/webp ${v.width}w`
+                      )
+                      .join(", ")
+                  : undefined
+              }
+              sizes="(max-width: 900px) 100vw, 50vw"
+              alt=""
+              aria-hidden="true"
+              className={`${styles.bgImage} ${getFramingClass(sempra.framing)}`}
+              loading="eager"
+              decoding="async"
+            />
+          )}
+          <div className={styles.sempraOverlay} aria-hidden="true" />
+
+          <div className={styles.panelContent}>
+            <div className={styles.sempraLogoWrap}>
+              <img
+                src="/img/img-73c121e112.png"
+                alt="SEMPRA"
+                className={styles.sempraLogo}
+                width="280"
+                height="89"
+              />
+            </div>
+            <p className={styles.sempraText}>Photographie et vidéo de mariage</p>
+            <span className={styles.sempraButton}>
+              <span className={styles.buttonLabel}>Découvrir SEMPRA</span>
+              <span className={styles.sempraButtonIcon} aria-hidden="true">
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M5 12h14M12 5l7 7-7 7" />
+                </svg>
+              </span>
+            </span>
+          </div>
+        </a>
+
       </div>
+
+      {/* StudioLM identity below both destinations */}
+      <div className={styles.studioLmIdentity}>
+        <div className={styles.studioLmBrand}>
+          <img
+            src="/img/logo-studiolm.png"
+            alt=""
+            aria-hidden="true"
+            className={styles.studioLmLogo}
+            width="64"
+            height="68"
+          />
+          <h1 className={styles.studioLmTitle}>StudioLM</h1>
+        </div>
+      </div>
+
     </main>
   );
 }

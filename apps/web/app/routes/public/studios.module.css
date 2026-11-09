@@ -9,14 +9,14 @@
   overflow-x: hidden;
 }
 
-/* StudioLM Dominant Header */
-.studioLmHeader {
+/* StudioLM identity below the destination panels */
+.studioLmIdentity {
   display: flex;
   justify-content: center;
   align-items: center;
   padding: clamp(24px, 4.5vh, 44px) 24px clamp(20px, 3.5vh, 36px);
   background: linear-gradient(180deg, #07090e 0%, rgba(12, 15, 23, 0.95) 100%);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
   position: relative;
   z-index: 10;
 }
@@ -359,7 +359,7 @@
   }
 
   .junctionDivider {
-    top: auto;
+    top: 50%;
     bottom: auto;
     left: 0;
     right: 0;

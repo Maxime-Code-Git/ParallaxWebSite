@@ -48,7 +48,7 @@ describe("Portfolio ordering filter navigation", () => {
       fireEvent.click(screen.getByRole("button", { name: "Publiés" }));
       await waitFor(() => expect(new URLSearchParams(router.state.location.search).get("status")).toBe("published"));
       expect(new URLSearchParams(router.state.location.search).get("note")).toBe("keep");
-      expect(screen.queryByText("Navigation projet 3")).toBeNull();
+      await waitFor(() => expect(screen.queryByText("Navigation projet 3")).toBeNull());
     } finally {
       view.unmount();
       router.dispose();

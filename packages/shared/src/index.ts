@@ -185,7 +185,7 @@ export function cleanHomeContent<T extends object>(home: T): T {
     if (hero.subtitle) {
       const loc = hero.subtitle as LocalizedString;
       hero.subtitle = {
-        fr: cleanHeroSubtitle(cleanStudioName(cleanTypography(loc.fr, "fr"))),
+        fr: cleanHeroSubtitle(cleanStudioName(cleanTypography(loc.fr, "fr"))).replace(/\bbase(?=\s+en\b)/gi, (word) => word === "Base" ? "Basé" : word === "BASE" ? "BASÉ" : "basé"),
         en: cleanHeroSubtitle(cleanStudioName(cleanTypography(loc.en, "en"))),
       };
     }
@@ -388,7 +388,9 @@ export interface PortfolioProjectLike {
   galleryAlt?: Record<string, LocalizedString>;
   video?: {
     coverImageId?: string | null;
+    title?: LocalizedString;
   };
+  additionalVideos?: { coverImageId?: string | null; title?: LocalizedString }[];
 }
 
 export interface PortfolioOverviewLike {
@@ -526,6 +528,11 @@ export function cleanPortfolioContent<T extends object>(portfolio: T): T {
       if (proj.title) proj.title = cleanLocalizedString(proj.title);
       if (proj.summary) proj.summary = cleanLocalizedString(proj.summary);
       if (proj.coverAlt) proj.coverAlt = cleanLocalizedString(proj.coverAlt);
+      for (const video of [proj.video, ...(Array.isArray(proj.additionalVideos) ? proj.additionalVideos : [])]) {
+        if (video?.title && typeof video.title.fr === "string" && typeof video.title.en === "string") {
+          video.title = cleanLocalizedString(video.title);
+        }
+      }
       if (proj.seo) {
         if (proj.seo.title) proj.seo.title = cleanLocalizedString(proj.seo.title);
         if (proj.seo.description) proj.seo.description = cleanLocalizedString(proj.seo.description);
@@ -677,6 +684,7 @@ export interface PortfolioVideo {
   videoId: string;
   url: string;
   coverImageId?: string | null;
+  title?: LocalizedString;
 }
 
 export interface PortfolioMediaVariant {
@@ -718,7 +726,9 @@ export interface PortfolioProject {
   galleryImageIds: string[];
   galleryAlt?: Record<string, LocalizedString>;
   video: PortfolioVideo | null;
+  additionalVideos?: PortfolioVideo[];
   draftVideoCoverImageId?: string | null;
+  draftAdditionalVideoCoverImageIds?: string[];
   presentationMode?: "photo" | "video";
   aspectRatio?: "3:2" | "4:5" | "16:9" | "1:1";
   showcase: boolean;
@@ -811,12 +821,22 @@ function isObject(val: unknown): val is Record<string, unknown> {
   return typeof val === "object" && val !== null && !Array.isArray(val);
 }
 
+/** The historical video remains first; older documents need no migration. */
+export function getProjectVideos(
+  project: Pick<PortfolioProject, "video" | "additionalVideos">
+): PortfolioVideo[] {
+  return [...(project.video ? [project.video] : []), ...(project.additionalVideos || [])];
+}
+
 export function resolveProjectPresentationMode(
-  project: { presentationMode?: "photo" | "video"; video?: { url?: string } | null }
+  project: { presentationMode?: "photo" | "video"; video?: { url?: string } | null; additionalVideos?: { url?: string }[] }
 ): "photo" | "video" {
   if (project.presentationMode === "video") return "video";
   if (project.presentationMode === "photo") return "photo";
   if (project.video?.url && typeof project.video.url === "string" && project.video.url.trim().length > 0) {
+    return "video";
+  }
+  if (Array.isArray(project.additionalVideos) && project.additionalVideos.some((video) => video && typeof video.url === "string" && video.url.trim())) {
     return "video";
   }
   return "photo";
@@ -915,6 +935,15 @@ export function validatePortfolioVideo(
     const parsed = parseVideoUrl(val.url);
     if (!parsed || parsed.provider !== val.provider || parsed.videoId !== val.videoId) {
       errors.push({ path: [...path, "url"], message: "L'URL vidéo ne correspond pas au provider et à l'ID configurés" });
+      valid = false;
+    }
+  }
+
+  if (val.title !== undefined) {
+    if (!validatePortfolioLocalizedString(val.title, [...path, "title"], errors)) {
+      valid = false;
+    } else if ((val.title as LocalizedString).fr.length > 200 || (val.title as LocalizedString).en.length > 200) {
+      errors.push({ path: [...path, "title"], message: "Le titre vidéo ne doit pas dépasser 200 caractères par langue." });
       valid = false;
     }
   }
@@ -1456,6 +1485,36 @@ export function validatePortfolioProject(
 
   if (!validatePortfolioVideo(val.video, [...pPath, "video"], errors, mediaRegistry, "project", projectId)) {
     valid = false;
+  }
+
+  if (val.draftAdditionalVideoCoverImageIds !== undefined) {
+    if (!Array.isArray(val.draftAdditionalVideoCoverImageIds)) {
+      errors.push({ path: [...pPath, "draftAdditionalVideoCoverImageIds"], message: "Les affiches vidéo en attente doivent être une liste." });
+      valid = false;
+    } else {
+      for (const [index, imageId] of val.draftAdditionalVideoCoverImageIds.entries()) {
+        const item = typeof imageId === "string" ? mediaRegistry?.[imageId] : undefined;
+        if (typeof imageId !== "string" || !UUID_REGEX.test(imageId) ||
+          (mediaRegistry && (!item || item.ownerType !== "project" || item.ownerId !== projectId || item.mediaSlot !== "video_cover"))) {
+          errors.push({ path: [...pPath, "draftAdditionalVideoCoverImageIds", index], message: "Affiche vidéo en attente invalide ou étrangère au projet." });
+          valid = false;
+        }
+      }
+    }
+  }
+
+  if (val.additionalVideos !== undefined) {
+    if (!Array.isArray(val.additionalVideos)) {
+      errors.push({ path: [...pPath, "additionalVideos"], message: "Les vidéos supplémentaires doivent être une liste." });
+      valid = false;
+    } else {
+      val.additionalVideos.forEach((video, videoIndex) => {
+        if (!isObject(video) || !validatePortfolioVideo(video, [...pPath, "additionalVideos", videoIndex], errors, mediaRegistry, "project", projectId)) {
+          errors.push({ path: [...pPath, "additionalVideos", videoIndex], message: "Vidéo supplémentaire invalide." });
+          valid = false;
+        }
+      });
+    }
   }
 
   if (val.presentationMode !== undefined) {

@@ -68,6 +68,7 @@ export async function loader({ params }: LoaderFunctionArgs) {
           if (
             project.coverImageId === imageId ||
             project.video?.coverImageId === imageId ||
+            project.additionalVideos?.some((video) => video.coverImageId === imageId) ||
             project.galleryImageIds.includes(imageId)
           ) {
             isPubliclyReferenced = true;

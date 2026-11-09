@@ -205,6 +205,27 @@ describe("Editorial Routes and Actions", () => {
     expect(getSiteContent().revision).toBe(content.revision);
   });
 
+  it("corrects basé only in the French home subtitle and persists it on the next save", async () => {
+    const content = getSiteContent();
+    content.home.hero.subtitle = {
+      fr: "Studio de création visuelle base en Belgique",
+      en: "Visual creation studio based in Belgium",
+    };
+    fs.writeFileSync(testContentFile, JSON.stringify(content));
+    const data = await homeLoader(makeLoaderArgs(new Request("http://localhost:3000/fr")));
+    expect(data.home.hero.subtitle.fr).toBe("Studio de création visuelle basé en Belgique");
+    expect(data.home.hero.subtitle.en).toBe(content.home.hero.subtitle.en);
+    expect(getSiteContent().home.hero.subtitle.fr).toBe(content.home.hero.subtitle.fr);
+    const cookie = await createValidAdminCookie("csrf-home-accent");
+    const response = await adminHomeAction(makeActionArgs(new Request("http://localhost:3000/admin/home", {
+      method: "POST",
+      headers: { Origin: "http://localhost:3000", Cookie: cookie },
+      body: new URLSearchParams({ csrfToken: "csrf-home-accent", revision: content.revision, homeData: JSON.stringify(content.home) }),
+    })));
+    expect(response.status).toBe(200);
+    expect(getSiteContent().home.hero.subtitle.fr).toBe("Studio de création visuelle basé en Belgique");
+  });
+
   it("public studio loader returns French content for /fr/studio and English for /en/studio", async () => {
     const reqFr = new Request("http://localhost:3000/fr/studio");
     const dataFr = await studioLoader(makeLoaderArgs(reqFr));
