@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import AdminLoginPage from "../app/routes/admin/login";
+import AdminPortfolioEditPage from "../app/routes/admin/portfolio-edit";
+import { createDefaultPortfolioContent } from "../app/lib/portfolio-content.server";
 import AdminDashboardPage from "../app/routes/admin/dashboard";
 
 vi.mock("react-router", async (importOriginal) => {
@@ -87,6 +89,28 @@ describe("Admin UI Components", () => {
       expect(submitBtn).toBeInTheDocument();
       expect(submitBtn).toBeDisabled();
     });
+  });
+
+  it("adds, reorders and removes extra project videos while keeping the main video", () => {
+    const content = createDefaultPortfolioContent();
+    const project = content.projects[0];
+    project.video = { provider: "youtube", videoId: "dQw4w9WgXcQ", url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ" };
+    vi.mocked(useLoaderData).mockReturnValue({
+      project, categories: content.categories, contentRevision: content.revision, media: {}, csrfToken: "test-csrf",
+    });
+    vi.mocked(useActionData).mockReturnValue(undefined);
+    vi.mocked(useNavigation).mockReturnValue({ state: "idle" } as ReturnType<typeof useNavigation>);
+    const { container } = render(<AdminPortfolioEditPage />);
+    fireEvent.click(screen.getByRole("button", { name: "+ Ajouter une vidéo" }));
+    fireEvent.click(screen.getByRole("button", { name: "+ Ajouter une vidéo" }));
+    fireEvent.change(screen.getByLabelText("Vidéo supplémentaire 1"), { target: { value: "https://vimeo.com/123456701" } });
+    fireEvent.change(screen.getByLabelText("Vidéo supplémentaire 2"), { target: { value: "https://vimeo.com/123456702" } });
+    fireEvent.click(screen.getByRole("button", { name: "Monter la vidéo supplémentaire 2" }));
+    const submittedVideos = () => JSON.parse(container.querySelector<HTMLInputElement>('input[name="additionalVideos"]')!.value);
+    expect(submittedVideos().map(({ url }: { url: string }) => url)).toEqual(["https://vimeo.com/123456702", "https://vimeo.com/123456701"]);
+    fireEvent.click(screen.getByRole("button", { name: "Supprimer la vidéo supplémentaire 2" }));
+    expect(submittedVideos().map(({ url }: { url: string }) => url)).toEqual(["https://vimeo.com/123456702"]);
+    expect(screen.getByLabelText("Lien YouTube ou Vimeo")).toHaveValue(project.video.url);
   });
 
   describe("AdminDashboardPage", () => {

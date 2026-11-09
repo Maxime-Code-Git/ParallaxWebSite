@@ -897,6 +897,46 @@ describe("Fix Admin Content & Public UI Suite", () => {
   // =========================================================================
   // 5. Video Poster Centered Play Button & Modal Consent in 4 Real Contexts
   // =========================================================================
+  it.each(["photo", "video"] as const)("renders every project video in %s mode and opens each through consent", async (mode) => {
+    const content = createPublishedPortfolioFixture();
+    const project = content.projects[0];
+    project.presentationMode = mode;
+    project.additionalVideos = [
+      { provider: "youtube", videoId: "abcdefghijk", url: "https://www.youtube.com/watch?v=abcdefghijk" },
+      { provider: "vimeo", videoId: "123456789", url: "https://vimeo.com/123456789" },
+    ];
+    fs.writeFileSync(testPortfolioContentFile, JSON.stringify(content));
+    const response = await publicPortfolioLoader({
+      request: new Request("http://localhost:3000/fr/projets/documentaire/film-hero"),
+      params: { rubrique: "documentaire", slugFr: "film-hero" },
+    } as unknown as LoaderFunctionArgs);
+    vi.mocked(useLoaderData).mockReturnValue(await response.json());
+    const { container } = render(<PortfolioPage />);
+    expect(container.querySelectorAll("[class*='showreelCard']")).toHaveLength(3);
+    expect(container.querySelector("iframe")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Lire la vidéo 2" }));
+    expect(container.querySelector("iframe")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Accepter et lire/i }));
+    expect(container.querySelector("iframe")?.getAttribute("src")).toContain("youtube-nocookie.com/embed/abcdefghijk");
+  });
+
+  it("includes additional videos in the category video list", async () => {
+    const content = createPublishedPortfolioFixture();
+    content.projects[0].additionalVideos = [
+      { provider: "vimeo", videoId: "123456789", url: "https://vimeo.com/123456789" },
+    ];
+    fs.writeFileSync(testPortfolioContentFile, JSON.stringify(content));
+    const response = await publicPortfolioLoader({
+      request: new Request("http://localhost:3000/fr/projets/documentaire"),
+      params: { rubrique: "documentaire" },
+    } as unknown as LoaderFunctionArgs);
+    vi.mocked(useLoaderData).mockReturnValue(await response.json());
+    const { container } = render(<PortfolioPage />);
+    fireEvent.click(screen.getByRole("button", { name: /Voir plus de vidéos/i }));
+    expect(container.querySelectorAll("#category-videos-panel [class*='videoGridItem']")).toHaveLength(3);
+    expect(screen.getByRole("button", { name: /Lire la vidéo : Grand Film Documentaire · Vidéo 2/ })).toBeVisible();
+  });
+
   describe("5. Video Poster Centered Play Button & Modal Consent in 4 Real Contexts", () => {
     it("Context 1: Hero project video renders real picture, overlay, play button, and opens modal with consent gate", async () => {
       const req = new Request("http://localhost:3000/fr/projets/documentaire/film-hero?dir=right");

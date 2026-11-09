@@ -17,6 +17,8 @@ import {
   type PortfolioProject,
   type PortfolioCategory,
   resolveProjectPresentationMode,
+  getProjectVideos,
+  type PortfolioVideo,
   comparePortfolioProjects,
 } from "../../lib/portfolio-content.shared";
 import { getPublicPortfolioContent } from "../../lib/portfolio-content.server";
@@ -53,6 +55,13 @@ export interface LoaderData {
     en: string;
   };
   siteUrl: string;
+}
+
+function videoPoster(project: PortfolioProject, video: PortfolioVideo) {
+  return {
+    imageId: video.coverImageId || project.video?.coverImageId || project.coverImageId,
+    slot: video.coverImageId || project.video?.coverImageId ? "video_cover" as const : "cover" as const,
+  };
 }
 
 export function meta({ loaderData }: MetaArgs<() => LoaderData>) {
@@ -396,6 +405,8 @@ export default function PortfolioPage() {
     ? resolveProjectPresentationMode(effectiveProject)
     : "photo";
 
+  const effectiveProjectVideos = effectiveProject ? getProjectVideos(effectiveProject) : [];
+
   // Collect photos available for enlargement inside the active project detail
   const detailPhotos: {
     imageId: string;
@@ -641,27 +652,25 @@ export default function PortfolioPage() {
   if (categoryProjects.length > 0) {
     const seenVideoKeys = new Set<string>();
     for (const p of categoryProjects) {
-      if (p.video?.url && p.video.provider && p.video.videoId) {
-        const key = `${p.video.provider}:${p.video.videoId}`;
-        if (!seenVideoKeys.has(key)) {
-          seenVideoKeys.add(key);
-          const posterImageId = p.video.coverImageId || p.draftVideoCoverImageId || p.coverImageId;
-          const posterMediaSlot: "video_cover" | "cover" = p.video.coverImageId ? "video_cover" : "cover";
-          categoryVideos.push({
-            provider: p.video.provider,
-            videoId: p.video.videoId,
-            url: p.video.url,
-            posterImageId,
-            posterOwnerId: p.id,
-            posterMediaSlot,
-            title: p.title[lang],
-            projectSlug: lang === "fr" ? p.slugFr : p.slugEn,
-          });
-        }
+      const videos = getProjectVideos(p);
+      for (const [videoIndex, video] of videos.entries()) {
+        const key = `${video.provider}:${video.videoId}`;
+        if (seenVideoKeys.has(key)) continue;
+        seenVideoKeys.add(key);
+        const poster = videoPoster(p, video);
+        categoryVideos.push({
+          provider: video.provider,
+          videoId: video.videoId,
+          url: video.url,
+          posterImageId: poster.imageId,
+          posterOwnerId: p.id,
+          posterMediaSlot: poster.slot,
+          title: videos.length > 1 ? `${p.title[lang]} · ${lang === "fr" ? "Vidéo" : "Video"} ${videoIndex + 1}` : p.title[lang],
+          projectSlug: lang === "fr" ? p.slugFr : p.slugEn,
+        });
       }
     }
   }
-
 
   const dirParam = `?dir=${panelDirection}`;
 
@@ -1050,46 +1059,45 @@ export default function PortfolioPage() {
                 ))}
               </div>
 
-              {/* Video Player Section (for photo projects that include a secondary video) */}
-              {effectiveProjectPresentationMode === "photo" && effectiveProject.video?.url && (
-                <div className={styles.detailVideoSection}>
-                  <div className={styles.showreelCard}>
-                    {effectiveProject.video.coverImageId ? (
-                      <ResponsivePortfolioImage
-                        imageId={effectiveProject.video.coverImageId}
-                        ownerType="project"
-                        ownerId={effectiveProject.id}
-                        mediaSlot="video_cover"
-                        mediaMetadata={content.media[effectiveProject.video.coverImageId]}
-                        alt={effectiveProject.title[lang]}
-                        className={styles.showreelImg}
-                      />
-                    ) : effectiveProject.coverImageId ? (
-                      <ResponsivePortfolioImage
-                        imageId={effectiveProject.coverImageId}
-                        ownerType="project"
-                        ownerId={effectiveProject.id}
-                        mediaSlot="cover"
-                        mediaMetadata={content.media[effectiveProject.coverImageId]}
-                        alt={effectiveProject.title[lang]}
-                        className={styles.showreelImg}
-                      />
-                    ) : null}
-                    <div className={styles.showreelOverlay}>
-                      <button
-                        type="button"
-                        className={styles.playBtn}
-                        onClick={() => setActiveVideoUrl(effectiveProject.video!.url)}
-                        aria-label="Lire la vidéo"
-                      >
-                        <svg width="26" height="28" viewBox="0 0 26 28" fill="none">
-                          <path d="M4 3 L23 14 L4 25 Z" fill="#F5F6F7" />
-                        </svg>
-                      </button>
+              {/* Every project video is available without loading an external player before consent. */}
+              {effectiveProjectVideos
+                .map((video, index) => ({ video, index }))
+                .slice(effectiveProjectPresentationMode === "video" ? 1 : 0)
+                .map(({ video, index }) => {
+                  const poster = videoPoster(effectiveProject, video);
+                  return (
+                    <div className={styles.detailVideoSection} key={`${video.provider}:${video.videoId}:${index}`}>
+                      {effectiveProjectVideos.length > 1 && (
+                        <h2 className={styles.detailVideoTitle}>{lang === "fr" ? "Vidéo" : "Video"} {index + 1}</h2>
+                      )}
+                      <div className={styles.showreelCard}>
+                        {poster.imageId && (
+                          <ResponsivePortfolioImage
+                            imageId={poster.imageId}
+                            ownerType="project"
+                            ownerId={effectiveProject.id}
+                            mediaSlot={poster.slot}
+                            mediaMetadata={content.media[poster.imageId]}
+                            alt={`${effectiveProject.title[lang]} · ${lang === "fr" ? "Vidéo" : "Video"} ${index + 1}`}
+                            className={styles.showreelImg}
+                          />
+                        )}
+                        <div className={styles.showreelOverlay}>
+                          <button
+                            type="button"
+                            className={styles.playBtn}
+                            onClick={() => setActiveVideoUrl(video.url)}
+                            aria-label={index === 0 ? (lang === "fr" ? "Lire la vidéo" : "Play video") : `${lang === "fr" ? "Lire la vidéo" : "Play video"} ${index + 1}`}
+                          >
+                            <svg width="26" height="28" viewBox="0 0 26 28" fill="none" aria-hidden="true">
+                              <path d="M4 3 L23 14 L4 25 Z" fill="#F5F6F7" />
+                            </svg>
+                          </button>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </div>
-              )}
+                  );
+                })}
 
               {/* Gallery Photos */}
               {effectiveProject.galleryImageIds.length > 0 && (

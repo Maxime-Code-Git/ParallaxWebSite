@@ -460,6 +460,9 @@ export function getPublicPortfolioContent(customPath?: string): {
   for (const p of publicProjects) {
     if (p.coverImageId) publicMediaIds.add(p.coverImageId);
     if (p.video?.coverImageId) publicMediaIds.add(p.video.coverImageId);
+    for (const video of p.additionalVideos || []) {
+      if (video.coverImageId) publicMediaIds.add(video.coverImageId);
+    }
     if (Array.isArray(p.galleryImageIds)) {
       for (const gid of p.galleryImageIds) {
         publicMediaIds.add(gid);
@@ -531,6 +534,9 @@ export function prunePortfolioMediaRegistry(
       if (project.coverImageId) activeIds.add(project.coverImageId);
       if (project.draftVideoCoverImageId) activeIds.add(project.draftVideoCoverImageId);
       if (project.video?.coverImageId) activeIds.add(project.video.coverImageId);
+      for (const video of project.additionalVideos || []) {
+        if (video.coverImageId) activeIds.add(video.coverImageId);
+      }
       for (const gid of project.galleryImageIds) {
         activeIds.add(gid);
       }
@@ -639,6 +645,11 @@ export function getReferencedPortfolioMediaIds(
         if (typeof p?.draftVideoCoverImageId === "string") referencedIds.add(p.draftVideoCoverImageId);
         const pVideo = p?.video as Record<string, unknown> | null | undefined;
         if (typeof pVideo?.coverImageId === "string") referencedIds.add(pVideo.coverImageId);
+        if (Array.isArray(p?.additionalVideos)) {
+          for (const video of p.additionalVideos as Array<Record<string, unknown> | null>) {
+            if (typeof video?.coverImageId === "string") referencedIds.add(video.coverImageId);
+          }
+        }
         if (Array.isArray(p?.galleryImageIds)) {
           for (const gid of p.galleryImageIds) {
             if (typeof gid === "string") referencedIds.add(gid);

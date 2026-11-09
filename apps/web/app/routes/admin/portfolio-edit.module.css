@@ -486,3 +486,28 @@
   font-size: 14px;
   margin: 0 0 12px;
 }
+
+.extraVideos {
+  display: grid;
+  gap: 16px;
+  margin-top: 24px;
+}
+
+.extraVideosTitle {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.extraVideo {
+  display: grid;
+  gap: 8px;
+  padding: 16px;
+  border: 1px solid var(--px-line);
+  border-radius: 12px;
+  min-width: 0;
+}
+
+.extraVideo .uploadActions {
+  flex-wrap: wrap;
+}

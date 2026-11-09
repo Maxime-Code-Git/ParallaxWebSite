@@ -144,6 +144,15 @@ describe("Studios Gateway Route (/studios)", () => {
     });
   });
 
+  it("places Parallax before SEMPRA and the StudioLM identity below both panels in DOM order", () => {
+    const { container } = render(<StudiosGateway />);
+    const links = container.querySelectorAll("a");
+    expect(links[0]).toHaveAttribute("href", PARALLAX_URL);
+    expect(links[1]).toHaveAttribute("href", SEMPRA_URL);
+    const heading = screen.getByRole("heading", { level: 1, name: "StudioLM" });
+    expect(links[1].compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   describe("3. StudioLM Identity", () => {
     it("displays the exact text 'StudioLM' in a prominent heading", () => {
       render(<StudiosGateway />);

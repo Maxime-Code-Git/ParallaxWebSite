@@ -1,3 +1,4 @@
+import { getProjectVideos } from "../../lib/portfolio-content.shared";
 import { useState, useRef, useEffect } from "react";
 import {
   type LoaderFunctionArgs,
@@ -113,7 +114,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const publishedProjects = content.projects.filter(
     (p) => p.category === categoryId && p.status === "published" && !p.archived
   );
-  const publishedVideosCount = publishedProjects.filter((p) => Boolean(p.video?.url)).length;
+  const publishedVideosCount = publishedProjects.reduce((count, project) => count + getProjectVideos(project).length, 0);
 
   return Response.json(
     {
