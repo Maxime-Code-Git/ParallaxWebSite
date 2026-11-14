@@ -10,10 +10,12 @@ import HomePage, { loader as homeLoader } from "../app/routes/public/home";
 import { loader as studioLoader } from "../app/routes/public/studio";
 import AdminHomePage, { action as adminHomeAction, loader as adminHomeLoader } from "../app/routes/admin/home";
 import { action as adminStudioAction, loader as adminStudioLoader } from "../app/routes/admin/studio";
+import { action as adminServicesAction } from "../app/routes/admin/services";
 import { getSession, commitSession } from "../app/lib/session.server";
 import { computeCredentialVersion } from "../app/lib/auth.server";
 import { getSiteContent } from "../app/lib/site-content.server";
 import { createDefaultPortfolioContent } from "../app/lib/portfolio-content.server";
+import { SERVICE_AREA_MAX_LENGTH, SERVICE_OFFER_COUNT, SERVICE_OFFER_FIELDS, SERVICE_PAGE_FIELDS, SERVICE_PAGE_IDS } from "@parallax/shared";
 
 describe("Editorial Routes and Actions", () => {
   let tempDir: string;
@@ -89,6 +91,44 @@ describe("Editorial Routes and Actions", () => {
     const dataEn = await homeLoader(makeLoaderArgs(reqEn));
     expect(dataEn.lang).toBe("en");
     expect(dataEn.home.hero.title.en).toBe("Photo and video studio in Brussels");
+  });
+
+  it("accepts a complete service form at its text limits and preserves existing site content", async () => {
+    const csrf = "csrf-service-text-limits";
+    const cookie = await createValidAdminCookie(csrf);
+    const original = getSiteContent();
+    const form = new URLSearchParams({ csrfToken: csrf, revision: original.revision });
+    const addText = (field: string, maxLength: number) => {
+      form.set(`${field}.fr`, "界".repeat(maxLength));
+      form.set(`${field}.en`, "語".repeat(maxLength));
+    };
+
+    addText("area", SERVICE_AREA_MAX_LENGTH);
+    for (const id of SERVICE_PAGE_IDS) {
+      for (const [key, length] of Object.entries(SERVICE_PAGE_FIELDS)) {
+        addText(`${id}.${key}`, length);
+      }
+      for (let index = 0; index < SERVICE_OFFER_COUNT; index++) {
+        for (const [key, length] of Object.entries(SERVICE_OFFER_FIELDS)) {
+          addText(`${id}.offerings.${index}.${key}`, length);
+        }
+      }
+    }
+
+    const save = () => adminServicesAction(makeActionArgs(new Request("http://localhost:3000/admin/services", {
+      method: "POST",
+      headers: { Origin: "http://localhost:3000", Cookie: cookie },
+      body: form,
+    })));
+
+    expect((await save()).data).toEqual({ saved: true });
+    const updated = getSiteContent();
+    expect(updated.home).toEqual(original.home);
+    expect(updated.services?.photo.intro.en).toBe("語".repeat(SERVICE_PAGE_FIELDS.intro));
+    expect(updated.services?.area.fr).toBe("界".repeat(SERVICE_AREA_MAX_LENGTH));
+
+    expect((await save()).init).toMatchObject({ status: 409 });
+    expect(getSiteContent()).toEqual(updated);
   });
 
   it("renders old activities as portfolio links and preserves a configured YouTube homepage link", async () => {

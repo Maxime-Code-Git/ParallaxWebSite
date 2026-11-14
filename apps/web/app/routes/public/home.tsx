@@ -11,7 +11,7 @@ import { VideoModal } from "../../components/public/VideoModal";
 import { ResponsiveSiteImage } from "../../components/public/ResponsiveSiteImage";
 import { getHomeActivityLinks, getHomePortfolioDestinations } from "../../lib/home-activity-links.server";
 import { getParallaxSocialProfiles } from "../../lib/social-profiles";
-import { serviceArea, services } from "../../lib/service-content";
+import { getServicesContent, services } from "../../lib/service-content";
 import { ENV } from "../../lib/env.server";
 import {
   resolveSempraButtonUrl,
@@ -27,6 +27,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const lang: "fr" | "en" = isEn ? "en" : "fr";
 
   const siteContent = getSiteContent();
+  const serviceContent = getServicesContent(siteContent);
   const home = cleanHomeContent(siteContent.home);
   const { photoItems, videoItems, ...savoirFaire } = home.savoirFaire;
   const portfolio = photoItems.some((item) => item.destination) || videoItems.some((item) => item.destination)
@@ -35,6 +36,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   return {
     lang,
+    serviceArea: serviceContent.area[lang],
+    serviceLabels: { photo: serviceContent.photo.linkLabel[lang], video: serviceContent.video.linkLabel[lang] },
     common: cleanCommonContent(siteContent.common),
     home: {
       ...home,
@@ -104,7 +107,7 @@ export function meta({ loaderData }: Route.MetaArgs) {
 }
 
 export default function HomePage() {
-  const { lang, common, home, media, socials } = useLoaderData<typeof loader>();
+  const { lang, common, home, media, socials, serviceArea, serviceLabels } = useLoaderData<typeof loader>();
   const [showreelOpen, setShowreelOpen] = useState(false);
 
   return (
@@ -187,9 +190,9 @@ export default function HomePage() {
         <h2 className={styles.sectionHeader}>{home.savoirFaire.title[lang]}</h2>
         <div className={styles.savoirFaireGrid}>
           {[
-            { service: services.photo, key: "photo", title: home.savoirFaire.photoTitle[lang], items: home.savoirFaire.photoItems },
-            { service: services.video, key: "video", title: home.savoirFaire.videoTitle[lang], items: home.savoirFaire.videoItems },
-          ].map(({ key, service, title, items }) => (
+            { key: "photo" as const, title: home.savoirFaire.photoTitle[lang], items: home.savoirFaire.photoItems },
+            { key: "video" as const, title: home.savoirFaire.videoTitle[lang], items: home.savoirFaire.videoItems },
+          ].map(({ key, title, items }) => (
             <div key={key}>
               <h3 className={styles.categoryTitle}>{title}</h3>
               {items.length > 0 && (
@@ -206,8 +209,8 @@ export default function HomePage() {
                   ))}
                 </ul>
               )}
-              <Link className={styles.serviceLink} to={service.paths[lang]}>
-                {service.linkLabel[lang]}
+              <Link className={styles.serviceLink} to={services[key].paths[lang]}>
+                {serviceLabels[key]}
               </Link>
             </div>
           ))}
@@ -217,7 +220,7 @@ export default function HomePage() {
       {/* Contact Section */}
       <section id="contact" className={styles.contactSection}>
         <h2 className={styles.contactTitle}>{home.contact.title[lang]}</h2>
-        <p className={styles.contactArea}>{serviceArea[lang]}</p>
+        <p className={styles.contactArea}>{serviceArea}</p>
         <div className={styles.contactItems}>
           <div>
             <div className={styles.contactBlockLabel}>{home.contact.emailLabel[lang]}</div>

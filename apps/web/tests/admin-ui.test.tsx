@@ -190,6 +190,7 @@ describe("Admin UI Components", () => {
       const expectedModules = [
         "Accueil",
         "Projets et portfolio",
+        "Services photo et vidéo",
         "Studio",
         "Passerelle StudioLM",
         "Contact",
@@ -204,7 +205,7 @@ describe("Admin UI Components", () => {
       }
 
       const activeBadges = screen.getAllByText("Actif");
-      expect(activeBadges.length).toBe(9);
+      expect(activeBadges.length).toBe(expectedModules.length);
 
       const nextLotBadges = screen.queryAllByText("Lot suivant");
       expect(nextLotBadges.length).toBe(0);

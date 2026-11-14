@@ -14,7 +14,7 @@ import {
 } from "../../lib/contact.server";
 import { getParallaxSocialProfiles } from "../../lib/social-profiles";
 import { cleanTypography } from "../../lib/site-content.shared";
-import { serviceArea } from "../../lib/service-content";
+import { getServicesContent } from "../../lib/service-content";
 import styles from "./contact.module.css";
 
 export async function loader(args: LoaderFunctionArgs) {
@@ -84,7 +84,7 @@ export function meta({ loaderData }: Route.MetaArgs) {
 }
 
 export default function ContactPage() {
-  const { lang, content, token, prefillType, flashSuccess, flashSuccessId, smtpAvailable, isPrivacyPolicyPublished } =
+  const { lang, content, token, prefillType, flashSuccess, flashSuccessId, smtpAvailable, isPrivacyPolicyPublished, serviceArea } =
     useLoaderData<ContactLoaderData>();
   const actionData = useActionData<ContactActionResult>();
   const navigation = useNavigation();
@@ -457,7 +457,7 @@ export default function ContactPage() {
 
             <div className={styles.cardItem}>
               <div className={styles.cardLabel}>{lang === "fr" ? "Zone d’intervention" : "Service area"}</div>
-              <p className={styles.serviceArea}>{serviceArea[lang]}</p>
+              <p className={styles.serviceArea}>{serviceArea ?? getServicesContent({}).area[lang]}</p>
             </div>
 
             {/* Response Time Notice */}

@@ -1,13 +1,20 @@
-export const serviceArea = {
+import type { ServicesContent } from "@parallax/shared";
+
+const serviceArea = {
   fr: "Nous intervenons à Bruxelles, notamment à Uccle, ainsi qu’à Nivelles, à Ath et ailleurs en Belgique selon le projet.",
   en: "We work across Brussels, including Uccle, as well as Nivelles, Ath and elsewhere in Belgium, depending on the project.",
 };
 
 export const services = {
+  photo: { paths: { fr: "/fr/photographie-bruxelles", en: "/en/photography-brussels" }, categorySlugs: ["produit", "instant-de-vie", "sports"] },
+  video: { paths: { fr: "/fr/production-video-bruxelles", en: "/en/video-production-brussels" }, categorySlugs: ["publicite", "documentaire"] },
+};
+
+const defaultServices: ServicesContent = {
+  area: serviceArea,
   photo: {
-    paths: { fr: "/fr/photographie-bruxelles", en: "/en/photography-brussels" },
-    categorySlugs: ["produit", "instant-de-vie", "sports"],
     title: { fr: "Photographe professionnel à Bruxelles", en: "Professional photographer in Brussels" },
+    seoTitle: { fr: "Photographe professionnel à Bruxelles", en: "Professional photographer in Brussels" },
     description: {
       fr: "Maxime réalise vos photos de produits, portraits et reportages à Bruxelles, Uccle, Nivelles et Ath. Découvrez les projets photo de Parallax.",
       en: "Maxime shoots products, portraits and events in Brussels, Uccle, Nivelles and Ath. Explore Parallax's photography projects.",
@@ -43,9 +50,8 @@ export const services = {
     quoteLabel: { fr: "Demander un devis photo", en: "Request a photography quote" },
   },
   video: {
-    paths: { fr: "/fr/production-video-bruxelles", en: "/en/video-production-brussels" },
-    categorySlugs: ["publicite", "documentaire"],
     title: { fr: "Production vidéo à Bruxelles", en: "Video production in Brussels" },
+    seoTitle: { fr: "Production vidéo à Bruxelles", en: "Video production in Brussels" },
     description: {
       fr: "Ludovic réalise films de marque, vidéos pour les réseaux sociaux et clips à Bruxelles, Uccle, Nivelles et Ath. Découvrez les projets vidéo de Parallax.",
       en: "Ludovic makes brand films, social media videos and music videos in Brussels, Uccle, Nivelles and Ath. Explore Parallax's video projects.",
@@ -81,3 +87,7 @@ export const services = {
     quoteLabel: { fr: "Demander un devis vidéo", en: "Request a video quote" },
   },
 };
+
+export function getServicesContent(site: { services?: ServicesContent }): ServicesContent {
+  return site.services ?? defaultServices;
+}

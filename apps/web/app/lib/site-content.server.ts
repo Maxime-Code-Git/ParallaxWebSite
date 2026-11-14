@@ -79,6 +79,7 @@ import {
   migrateSiteContentV2ToV3,
   validateSiteContent,
   validateStudiosContent,
+  validateServicesContent,
 } from "@parallax/shared";
 
 export {
@@ -605,6 +606,24 @@ export function saveCompanyContent(
 export function getStudiosContent(): StudiosContent {
   const content = getSiteContent();
   return cleanStudiosContent(content?.studios);
+}
+
+export function saveServicesContent(services: unknown, previousRevision: string): string {
+  const current = getRawSiteContent();
+  if (current.isCorrupted) throw new CorruptedContentError();
+  if (current.content.revision !== previousRevision) {
+    throw new RevisionConflictError(undefined, current.content.revision);
+  }
+
+  const revision = crypto.randomBytes(16).toString("hex");
+  const next = {
+    ...current.content,
+    revision,
+    updatedAt: new Date().toISOString(),
+    services: validateServicesContent(services),
+  };
+  atomicWriteJson(getSiteContentFilePath(), validateSiteContent(next));
+  return revision;
 }
 
 export function saveStudiosContent(

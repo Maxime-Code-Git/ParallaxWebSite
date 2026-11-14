@@ -45,6 +45,7 @@ export default [
   route("admin", "routes/admin/login.tsx"),
   route("admin/dashboard", "routes/admin/dashboard.tsx"),
   route("admin/home", "routes/admin/home.tsx"),
+  route("admin/services", "routes/admin/services.tsx"),
   route("admin/studio", "routes/admin/studio.tsx"),
   route("admin/studios", "routes/admin/studios.tsx"),
   route("admin/contact", "routes/admin/contact.tsx"),

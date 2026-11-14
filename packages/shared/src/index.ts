@@ -2876,6 +2876,76 @@ export interface SiteContentV2 {
   media?: Record<string, UploadedMediaMetadata>;
 }
 
+export const SERVICE_PAGE_IDS = ["photo", "video"] as const;
+export const SERVICE_PAGE_FIELDS = {
+  title: 120,
+  seoTitle: 120,
+  description: 320,
+  intro: 1200,
+  linkLabel: 80,
+  quoteLabel: 80,
+} as const;
+export const SERVICE_OFFER_FIELDS = { title: 120, text: 600 } as const;
+export const SERVICE_OFFER_COUNT = 3;
+export const SERVICE_AREA_MAX_LENGTH = 320;
+
+export type ServicePageId = (typeof SERVICE_PAGE_IDS)[number];
+export type ServiceOffer = Record<keyof typeof SERVICE_OFFER_FIELDS, LocalizedString>;
+export type ServicePageContent = Record<keyof typeof SERVICE_PAGE_FIELDS, LocalizedString> & {
+  offerings: ServiceOffer[];
+};
+export interface ServicesContent {
+  area: LocalizedString;
+  photo: ServicePageContent;
+  video: ServicePageContent;
+}
+
+function validateServiceText(value: unknown, maxLength: number, context: string): LocalizedString {
+  const localized = validateLocalizedString(value, context);
+  const fr = localized.fr.trim();
+  const en = localized.en.trim();
+  if (!fr || !en || fr.length > maxLength || en.length > maxLength) {
+    throw new ValidationError(`${context} doit contenir de 1 à ${maxLength} caractères dans chaque langue.`);
+  }
+  return { fr, en };
+}
+
+function validateServiceOffer(value: unknown, context: string): ServiceOffer {
+  const offer = assertObject(value, context);
+  assertExactKeys(offer, Object.keys(SERVICE_OFFER_FIELDS), context);
+  return {
+    title: validateServiceText(offer.title, SERVICE_OFFER_FIELDS.title, `${context}.title`),
+    text: validateServiceText(offer.text, SERVICE_OFFER_FIELDS.text, `${context}.text`),
+  };
+}
+
+function validateServicePage(value: unknown, context: string): ServicePageContent {
+  const page = assertObject(value, context);
+  assertExactKeys(page, [...Object.keys(SERVICE_PAGE_FIELDS), "offerings"], context);
+  if (!Array.isArray(page.offerings) || page.offerings.length !== SERVICE_OFFER_COUNT) {
+    throw new ValidationError(`${context} doit contenir ${SERVICE_OFFER_COUNT} prestations.`);
+  }
+  return {
+    title: validateServiceText(page.title, SERVICE_PAGE_FIELDS.title, `${context}.title`),
+    seoTitle: validateServiceText(page.seoTitle, SERVICE_PAGE_FIELDS.seoTitle, `${context}.seoTitle`),
+    description: validateServiceText(page.description, SERVICE_PAGE_FIELDS.description, `${context}.description`),
+    intro: validateServiceText(page.intro, SERVICE_PAGE_FIELDS.intro, `${context}.intro`),
+    linkLabel: validateServiceText(page.linkLabel, SERVICE_PAGE_FIELDS.linkLabel, `${context}.linkLabel`),
+    quoteLabel: validateServiceText(page.quoteLabel, SERVICE_PAGE_FIELDS.quoteLabel, `${context}.quoteLabel`),
+    offerings: page.offerings.map((offer, index) => validateServiceOffer(offer, `${context}.offerings[${index}]`)),
+  };
+}
+
+export function validateServicesContent(value: unknown): ServicesContent {
+  const content = assertObject(value, "Pages de service");
+  assertExactKeys(content, ["area", ...SERVICE_PAGE_IDS], "Pages de service");
+  return {
+    area: validateServiceText(content.area, SERVICE_AREA_MAX_LENGTH, "Zone d’intervention"),
+    photo: validateServicePage(content.photo, "Photographie"),
+    video: validateServicePage(content.video, "Production vidéo"),
+  };
+}
+
 export interface SiteContent {
   schemaVersion: 3;
   revision: string;
@@ -2887,6 +2957,7 @@ export interface SiteContent {
   company: CompanyContent;
   legalPages: LegalPagesContent;
   studios?: StudiosContent;
+  services?: ServicesContent;
   media?: Record<string, UploadedMediaMetadata>;
 }
 
@@ -3994,34 +4065,12 @@ export function validateSiteContent(val: unknown): SiteContent {
   }
 
   if (obj.schemaVersion === 3) {
-    const hasStudios = obj.studios !== undefined;
-    const allowedKeys = hasStudios
-      ? [
-          "schemaVersion",
-          "revision",
-          "updatedAt",
-          "common",
-          "home",
-          "studio",
-          "contactPage",
-          "company",
-          "legalPages",
-          "media",
-          "studios",
-        ]
-      : [
-          "schemaVersion",
-          "revision",
-          "updatedAt",
-          "common",
-          "home",
-          "studio",
-          "contactPage",
-          "company",
-          "legalPages",
-          "media",
-        ];
-    assertExactKeys(obj, allowedKeys, "siteContent");
+    assertExactKeys(
+      obj,
+      ["schemaVersion", "revision", "updatedAt", "common", "home", "studio", "contactPage",
+        "company", "legalPages", "media", "studios", "services"],
+      "siteContent"
+    );
     return {
       schemaVersion: 3,
       revision: obj.revision.toLowerCase(),
@@ -4032,7 +4081,8 @@ export function validateSiteContent(val: unknown): SiteContent {
       contactPage: validateContactPageContent(obj.contactPage),
       company: validateCompanyContent(obj.company),
       legalPages: validateLegalPagesContent(obj.legalPages),
-      ...(hasStudios ? { studios: validateStudiosContent(obj.studios) } : {}),
+      ...(obj.studios !== undefined ? { studios: validateStudiosContent(obj.studios) } : {}),
+      ...(obj.services !== undefined ? { services: validateServicesContent(obj.services) } : {}),
       media,
     };
   }
