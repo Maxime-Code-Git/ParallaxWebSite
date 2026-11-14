@@ -11,6 +11,7 @@ import { VideoModal } from "../../components/public/VideoModal";
 import { ResponsiveSiteImage } from "../../components/public/ResponsiveSiteImage";
 import { getHomeActivityLinks, getHomePortfolioDestinations } from "../../lib/home-activity-links.server";
 import { getParallaxSocialProfiles } from "../../lib/social-profiles";
+import { serviceArea, services } from "../../lib/service-content";
 import { ENV } from "../../lib/env.server";
 import {
   resolveSempraButtonUrl,
@@ -53,7 +54,7 @@ export function meta({ loaderData }: Route.MetaArgs) {
   if (!loaderData) {
     return [{ title: "Parallax" }];
   }
-  const { home, common, lang, siteUrl } = loaderData;
+  const { home, common, lang, siteUrl, socials } = loaderData;
   const base = (siteUrl || "").replace(/\/$/, "");
   const pageTitle = cleanTypography(home.seo.title[lang]);
   const pageDesc = cleanTypography(home.seo.description[lang]);
@@ -64,8 +65,21 @@ export function meta({ loaderData }: Route.MetaArgs) {
   const ogImageUrl = `${base}/img/index-0ff090a6e4.jpg`;
   const brand = cleanTypography(common?.brandName) || "Parallax";
 
+  const profiles = [socials?.instagramUrl, socials?.youtubeUrl].filter((url): url is string => Boolean(url));
+
   return [
     { title: pageTitle },
+    ...(lang === "fr" ? [{
+      "script:ld+json": {
+        "@context": "https://schema.org",
+        "@type": "Organization",
+        "@id": `${frUrl}#organization`,
+        name: brand,
+        url: frUrl,
+        logo: `${base}/img/logo-parallax.png`,
+        ...(profiles.length > 0 && { sameAs: profiles }),
+      },
+    }] : []),
     { name: "description", content: pageDesc },
     { name: "robots", content: "index, follow" },
     { tagName: "link", rel: "canonical", href: canonicalUrl },
@@ -173,9 +187,9 @@ export default function HomePage() {
         <h2 className={styles.sectionHeader}>{home.savoirFaire.title[lang]}</h2>
         <div className={styles.savoirFaireGrid}>
           {[
-            { key: "photo", title: home.savoirFaire.photoTitle[lang], items: home.savoirFaire.photoItems },
-            { key: "video", title: home.savoirFaire.videoTitle[lang], items: home.savoirFaire.videoItems },
-          ].map(({ key, title, items }) => (
+            { service: services.photo, key: "photo", title: home.savoirFaire.photoTitle[lang], items: home.savoirFaire.photoItems },
+            { service: services.video, key: "video", title: home.savoirFaire.videoTitle[lang], items: home.savoirFaire.videoItems },
+          ].map(({ key, service, title, items }) => (
             <div key={key}>
               <h3 className={styles.categoryTitle}>{title}</h3>
               {items.length > 0 && (
@@ -192,6 +206,9 @@ export default function HomePage() {
                   ))}
                 </ul>
               )}
+              <Link className={styles.serviceLink} to={service.paths[lang]}>
+                {service.linkLabel[lang]}
+              </Link>
             </div>
           ))}
         </div>
@@ -200,6 +217,7 @@ export default function HomePage() {
       {/* Contact Section */}
       <section id="contact" className={styles.contactSection}>
         <h2 className={styles.contactTitle}>{home.contact.title[lang]}</h2>
+        <p className={styles.contactArea}>{serviceArea[lang]}</p>
         <div className={styles.contactItems}>
           <div>
             <div className={styles.contactBlockLabel}>{home.contact.emailLabel[lang]}</div>

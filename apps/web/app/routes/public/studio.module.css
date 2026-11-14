@@ -181,3 +181,15 @@
     line-height: 1.6;
   }
 }
+
+.serviceLink {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--px-text);
+  text-underline-offset: 4px;
+}
+
+.serviceLink:hover {
+  color: var(--px-accent-hover);
+}

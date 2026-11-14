@@ -8,15 +8,16 @@ import {
 
 export function getHomePortfolioDestinations() {
   try {
-    const { publicCategories, publicProjects } = getPublicPortfolioContent();
+    const { content, publicCategories, publicProjects } = getPublicPortfolioContent();
     return {
       categories: publicCategories,
       projects: publicProjects,
+      media: content.media,
     };
   } catch (error) {
     // Portfolio data may be temporarily unavailable. Keep the homepage usable.
     console.error("Destinations des activités du portfolio indisponibles.", error);
-    return { categories: [], projects: [] };
+    return { categories: [], projects: [], media: {} };
   }
 }
 

@@ -1,5 +1,5 @@
 import type { LoaderFunctionArgs } from "react-router";
-import { useLoaderData } from "react-router";
+import { Link, useLoaderData } from "react-router";
 import type { Route } from "./+types/studio";
 import { getSiteContent } from "../../lib/site-content.server";
 import { Header } from "../../components/public/Header";
@@ -13,6 +13,7 @@ import {
   cleanStudioContent,
   cleanTypography,
 } from "../../lib/site-content.shared";
+import { services } from "../../lib/service-content";
 import styles from "./studio.module.css";
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -122,6 +123,12 @@ export default function StudioPage() {
                 </div>
                 <h3 className={styles.memberName}>{member.name}</h3>
                 <div className={styles.memberRole}>{member.role[lang]}</div>
+                {member.id === "maxime" && (
+                  <Link className={styles.serviceLink} to={services.photo.paths[lang]}>{services.photo.linkLabel[lang]}</Link>
+                )}
+                {member.id === "ludovic" && (
+                  <Link className={styles.serviceLink} to={services.video.paths[lang]}>{services.video.linkLabel[lang]}</Link>
+                )}
               </article>
             );
           })}

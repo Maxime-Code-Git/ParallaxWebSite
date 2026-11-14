@@ -1,4 +1,5 @@
 import type { LoaderFunctionArgs } from "react-router";
+import { services } from "../../lib/service-content";
 import { ENV } from "../../lib/env.server";
 import { getSiteContent, getPublicLegalDocument } from "../../lib/site-content.server";
 import { getPublicPortfolioContent } from "../../lib/portfolio-content.server";
@@ -74,6 +75,10 @@ export async function loader(_args?: LoaderFunctionArgs) {
   addBilingualPair("/fr", "/en", siteLastmod, "1.0", "weekly");
   addBilingualPair("/fr/studio", "/en/studio", siteLastmod, "0.8", "monthly");
   addBilingualPair("/fr/contact", "/en/contact", siteLastmod, "0.8", "monthly");
+
+  for (const { paths } of Object.values(services)) {
+    addBilingualPair(paths.fr, paths.en);
+  }
 
   // 2. Portfolio Overview
   addBilingualPair("/fr/projets", "/en/projects", portfolioLastmod, "0.9", "weekly");

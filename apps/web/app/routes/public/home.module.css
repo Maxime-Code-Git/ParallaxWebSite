@@ -229,6 +229,19 @@
   outline-offset: 3px;
 }
 
+.serviceLink {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  margin-top: 12px;
+  color: var(--px-text);
+  text-underline-offset: 4px;
+}
+
+.serviceLink:hover {
+  color: var(--px-accent-hover);
+}
+
 /* Contact Section */
 .contactSection {
   padding: 80px 80px 52px;
@@ -241,6 +254,12 @@
   font-weight: 500;
   letter-spacing: -0.02em;
   color: var(--px-text);
+}
+
+.contactArea {
+  margin: 0 0 24px;
+  color: var(--px-text-2);
+  line-height: 1.6;
 }
 
 .contactItems {
