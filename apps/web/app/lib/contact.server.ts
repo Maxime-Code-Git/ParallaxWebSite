@@ -13,6 +13,7 @@ import {
   failContactClaim,
   type ContactClaimAcquireResult,
 } from "./rate-limit.server";
+import { getServicesContent } from "./service-content";
 import { getSiteContent, getPublicLegalDocument } from "./site-content.server";
 import {
   type CommonContent,
@@ -31,6 +32,7 @@ const MAX_SUBMISSION_AGE_MS = 2 * 60 * 60 * 1000; // 2 hours
 const MAX_BODY_BYTES = 64 * 1024; // 64 KiB
 
 export interface ContactLoaderData {
+  serviceArea?: string;
   lang: "fr" | "en";
   content: {
     common: CommonContent;
@@ -410,6 +412,7 @@ export async function handleContactLoader(args: LoaderFunctionArgs, forcedLang?:
   return data<ContactLoaderData>(
     {
       lang,
+      serviceArea: getServicesContent(content).area[lang],
       content: {
         common: cleanCommonContent(content.common),
         contactPage: cleanContactContent(content.contactPage),

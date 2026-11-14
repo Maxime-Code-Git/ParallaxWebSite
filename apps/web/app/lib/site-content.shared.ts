@@ -1,4 +1,4 @@
-import type { HomeContent } from "@parallax/shared";
+import type { HomeContent, ServicesContent } from "@parallax/shared";
 
 export type { HomeActivity, HomeActivityDestination, HomeContent } from "@parallax/shared";
 
@@ -1945,6 +1945,7 @@ export interface SiteContent {
   company: CompanyContent;
   legalPages: LegalPagesContent;
   studios?: StudiosContent;
+  services?: ServicesContent;
   media?: Record<string, UploadedMediaMetadata>;
 }
 

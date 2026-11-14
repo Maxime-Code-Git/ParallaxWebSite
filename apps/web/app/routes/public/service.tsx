@@ -8,7 +8,7 @@ import { ENV } from "../../lib/env.server";
 import { getHomePortfolioDestinations } from "../../lib/home-activity-links.server";
 import { getPortfolioOverviewUrl, getPortfolioProjectUrl } from "../../lib/localized-urls";
 import { getProjectVideos, resolveProjectPresentationMode } from "../../lib/portfolio-content.shared";
-import { serviceArea, services } from "../../lib/service-content";
+import { getServicesContent, services } from "../../lib/service-content";
 import { getSiteContent } from "../../lib/site-content.server";
 import { cleanCommonContent } from "../../lib/site-content.shared";
 import { getParallaxSocialProfiles } from "../../lib/social-profiles";
@@ -26,6 +26,7 @@ export function loader({ url }: LoaderFunctionArgs) {
   if (!serviceKey) throw new Response("Not Found", { status: 404 });
 
   const site = getSiteContent();
+  const content = getServicesContent(site);
   const { categories, projects, media } = getHomePortfolioDestinations();
   const preferredCategories = new Set(
     categories.filter(({ slugFr }) => services[serviceKey].categorySlugs.includes(slugFr)).map(({ id }) => id)
@@ -53,6 +54,9 @@ export function loader({ url }: LoaderFunctionArgs) {
   return {
     lang,
     serviceKey,
+    page: content[serviceKey],
+    area: content.area,
+    otherLinkLabel: content[serviceKey === "photo" ? "video" : "photo"].linkLabel[lang],
     siteUrl: ENV.PUBLIC_SITE_URL,
     common: cleanCommonContent(site.common),
     socials: getParallaxSocialProfiles(site.home.contact),
@@ -66,12 +70,12 @@ export function loader({ url }: LoaderFunctionArgs) {
 export function meta({ loaderData }: Route.MetaArgs) {
   if (!loaderData) return [{ title: "Parallax" }];
 
-  const { lang, serviceKey, siteUrl, common } = loaderData;
+  const { lang, serviceKey, siteUrl, common, page } = loaderData;
   const service = services[serviceKey];
   const base = siteUrl.replace(/\/$/, "");
   const canonical = base + service.paths[lang];
-  const title = `${service.title[lang]} | ${common.brandName}`;
-  const description = service.description[lang];
+  const title = `${page.seoTitle[lang]} | ${common.brandName}`;
+  const description = page.description[lang];
 
   return [
     { title },
@@ -90,7 +94,7 @@ export function meta({ loaderData }: Route.MetaArgs) {
 }
 
 export default function ServicePage() {
-  const { lang, serviceKey, common, projects, socials, contactType } = useLoaderData<typeof loader>();
+  const { lang, serviceKey, common, projects, socials, contactType, page, area, otherLinkLabel } = useLoaderData<typeof loader>();
   const service = services[serviceKey];
   const other = services[serviceKey === "photo" ? "video" : "photo"];
   const contactUrl = `/${lang}/contact${contactType ? `?type=${contactType}` : ""}`;
@@ -100,17 +104,17 @@ export default function ServicePage() {
       <Header common={common} lang={lang} currentRoute="service" alternateUrls={service.paths} />
       <main className={styles.main}>
         <section className={styles.hero}>
-          <h1>{service.title[lang]}</h1>
-          <p>{service.intro[lang]}</p>
-          <p>{serviceArea[lang]}</p>
-          <Link className={styles.quote} to={contactUrl}>{service.quoteLabel[lang]}</Link>
+          <h1>{page.title[lang]}</h1>
+          <p>{page.intro[lang]}</p>
+          <p>{area[lang]}</p>
+          <Link className={styles.quote} to={contactUrl}>{page.quoteLabel[lang]}</Link>
         </section>
 
         <section className={styles.section}>
           <h2>{labels[lang].offers}</h2>
           <ul className={styles.grid}>
-            {service.offerings.map(({ title, text }) => (
-              <li key={title.fr}>
+            {page.offerings.map(({ title, text }, index) => (
+              <li key={index}>
                 <h3>{title[lang]}</h3>
                 <p>{text[lang]}</p>
               </li>
@@ -142,7 +146,7 @@ export default function ServicePage() {
           )}
           <div className={styles.links}>
             <Link to={getPortfolioOverviewUrl(lang)}>{labels[lang].portfolio}</Link>
-            <Link to={other.paths[lang]}>{other.linkLabel[lang]}</Link>
+            <Link to={other.paths[lang]}>{otherLinkLabel}</Link>
           </div>
         </section>
       </main>

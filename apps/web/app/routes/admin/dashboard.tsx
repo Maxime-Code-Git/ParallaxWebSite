@@ -67,6 +67,14 @@ const MODULES: DashboardModule[] = [
     href: "/admin/portfolio",
   },
   {
+    id: "services",
+    title: "Services photo et vidéo",
+    description: "Textes, prestations, appels au devis et référencement des pages FR et EN.",
+    status: "Actif",
+    isActive: true,
+    href: "/admin/services",
+  },
+  {
     id: "studio",
     title: "Studio",
     description: "Présentation de l'équipe, portraits Ludovic & Maxime, rôles et approche.",

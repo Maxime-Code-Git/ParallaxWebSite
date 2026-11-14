@@ -13,7 +13,7 @@ import {
   cleanStudioContent,
   cleanTypography,
 } from "../../lib/site-content.shared";
-import { services } from "../../lib/service-content";
+import { getServicesContent, services } from "../../lib/service-content";
 import styles from "./studio.module.css";
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -22,9 +22,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const lang: "fr" | "en" = isEn ? "en" : "fr";
 
   const siteContent = getSiteContent();
+  const serviceContent = getServicesContent(siteContent);
 
   return {
     lang,
+    serviceLabels: { photo: serviceContent.photo.linkLabel[lang], video: serviceContent.video.linkLabel[lang] },
     common: cleanCommonContent(siteContent.common),
     socials: getParallaxSocialProfiles(siteContent.home.contact),
     studio: cleanStudioContent(siteContent.studio),
@@ -74,7 +76,7 @@ export function meta({ loaderData }: Route.MetaArgs) {
 }
 
 export default function StudioPage() {
-  const { lang, common, studio, media, socials } = useLoaderData<typeof loader>();
+  const { lang, common, studio, media, socials, serviceLabels } = useLoaderData<typeof loader>();
 
   return (
     <div className={styles.container}>
@@ -124,10 +126,10 @@ export default function StudioPage() {
                 <h3 className={styles.memberName}>{member.name}</h3>
                 <div className={styles.memberRole}>{member.role[lang]}</div>
                 {member.id === "maxime" && (
-                  <Link className={styles.serviceLink} to={services.photo.paths[lang]}>{services.photo.linkLabel[lang]}</Link>
+                  <Link className={styles.serviceLink} to={services.photo.paths[lang]}>{serviceLabels.photo}</Link>
                 )}
                 {member.id === "ludovic" && (
-                  <Link className={styles.serviceLink} to={services.video.paths[lang]}>{services.video.linkLabel[lang]}</Link>
+                  <Link className={styles.serviceLink} to={services.video.paths[lang]}>{serviceLabels.video}</Link>
                 )}
               </article>
             );
