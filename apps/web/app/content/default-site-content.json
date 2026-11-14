@@ -52,26 +52,26 @@
   "home": {
     "seo": {
       "title": {
-        "fr": "Parallax - Studio photo & vidéo",
-        "en": "Parallax - Photo & video studio"
+        "fr": "Studio photo et vidéo à Bruxelles | Parallax",
+        "en": "Photo and video studio in Brussels | Parallax"
       },
       "description": {
-        "fr": "Parallax, studio photo et vidéo par Maxime et Ludovic. Clips, publicités, portraits et documentaires.",
-        "en": "Parallax, photo and video studio by Maxime and Ludovic. Music videos, commercials, portraits and documentaries."
+        "fr": "Parallax, studio photo et vidéo à Bruxelles. Maxime réalise vos photos et Ludovic vos vidéos. Projets à Uccle, Nivelles, Ath et ailleurs en Belgique.",
+        "en": "Parallax is a photo and video studio in Brussels. Maxime leads photography and Ludovic leads video. Available in Uccle, Nivelles, Ath and across Belgium."
       }
     },
     "hero": {
       "badge": {
-        "fr": "Studio photo & vidéo",
-        "en": "Photo & video studio"
+        "fr": "Parallax",
+        "en": "Parallax"
       },
       "title": {
-        "fr": "Photo & vidéo.",
-        "en": "Photo & video."
+        "fr": "Studio photo et vidéo à Bruxelles",
+        "en": "Photo and video studio in Brussels"
       },
       "subtitle": {
-        "fr": "Clips · Publicité · Portraits · Documentaire",
-        "en": "Music videos · Advertising · Portraits · Documentary"
+        "fr": "Portraits, photos de produits, films de marque et clips.",
+        "en": "Portraits, product photography, brand films and music videos."
       }
     },
     "showreel": {
@@ -92,8 +92,8 @@
         "en": "Maxime & Ludovic"
       },
       "text": {
-        "fr": "Nous sommes Maxime et Ludovic, un duo photo et vidéo. Ensemble, nous réalisons clips, publicités et portraits avec la même exigence.",
-        "en": "We are Maxime and Ludovic, a photo and video duo. Together we create music videos, commercials and portraits with the same standard."
+        "fr": "Maxime signe la photographie et Ludovic la vidéo. Vous pouvez faire appel à l’un de nous pour un projet ou réunir les deux métiers sur une même campagne.",
+        "en": "Maxime leads photography and Ludovic leads video. Work with either of us on a project or bring both disciplines together for one campaign."
       },
       "imageId": "index-duo",
       "imageAlt": {
@@ -187,12 +187,12 @@
   "studio": {
     "seo": {
       "title": {
-        "fr": "Parallax - Le studio",
-        "en": "Parallax - The studio"
+        "fr": "Maxime et Ludovic, le duo derrière Parallax",
+        "en": "Meet Maxime and Ludovic | Parallax"
       },
       "description": {
-        "fr": "Découvrez le studio Parallax, fondé par Maxime et Ludovic. Notre équipe, notre approche et notre vision.",
-        "en": "Discover Parallax studio, founded by Maxime and Ludovic. Our team, approach and vision."
+        "fr": "Découvrez Parallax, le duo bruxellois de Studio LM. Maxime est photographe et Ludovic vidéaste. Ils travaillent avec des marques, des artistes et des lieux.",
+        "en": "Meet the Brussels duo behind Parallax, part of Studio LM. Maxime is a photographer and Ludovic a videographer. They work with brands, artists and venues."
       }
     },
     "hero": {
@@ -201,8 +201,8 @@
         "en": "The studio"
       },
       "text": {
-        "fr": "Parallax est le pôle création d'images de Studio LM, basé en Belgique. Nous concevons et réalisons photo et vidéo pour les marques, les artistes et les lieux - du clip musical au spot publicitaire, du portrait au documentaire. Une même exigence, quel que soit le format.",
-        "en": "Parallax is the image-making arm of Studio LM, based in Belgium. We design and produce photo and video for brands, artists and venues - from music videos to commercials, from portraits to documentary. The same standard, whatever the format."
+        "fr": "Parallax est le studio photo et vidéo de Studio LM. Depuis Bruxelles, Maxime réalise portraits, photos de produits et reportages. Ludovic réalise films publicitaires, clips et documentaires. On travaille séparément ou en duo, selon les besoins du projet.",
+        "en": "Parallax is Studio LM’s photo and video studio. From Brussels, Maxime shoots portraits, products and events. Ludovic makes commercials, music videos and documentaries. We work individually or as a duo, depending on the project."
       }
     },
     "team": {
@@ -257,18 +257,18 @@
   "contactPage": {
     "seo": {
       "title": {
-        "fr": "Contact | Parallax - Studio photo & vidéo",
-        "en": "Contact | Parallax - Photo & video studio"
+        "fr": "Contact et devis photo et vidéo | Parallax Bruxelles",
+        "en": "Contact and photo or video quotes | Parallax Brussels"
       },
       "description": {
-        "fr": "Contactez le studio Parallax pour vos projets photo et vidéo. Clips musicaux, publicités, portraits et documentaires.",
-        "en": "Contact Parallax studio for your photo and video projects. Music videos, commercials, portraits and documentaries."
+        "fr": "Parlez-nous de votre projet photo, vidéo ou des deux. Parallax intervient à Bruxelles, Uccle, Nivelles et Ath, avec déplacement selon le projet.",
+        "en": "Tell us about your photography or video project. Parallax serves Brussels, Uccle, Nivelles and Ath and travels depending on the project."
       }
     },
     "hero": {
       "title": {
-        "fr": "Vous préférez écrire ? Remplissez le formulaire ci-dessous.",
-        "en": "Prefer to write? Fill in the form below."
+        "fr": "Parlons de votre projet photo ou vidéo",
+        "en": "Tell us about your photo or video project"
       }
     },
     "form": {
@@ -313,6 +313,22 @@
         "en": "Select…"
       },
       "projectTypes": [
+        {
+          "id": "photo",
+          "enabled": true,
+          "label": {
+            "fr": "Photographie",
+            "en": "Photography"
+          }
+        },
+        {
+          "id": "video",
+          "enabled": true,
+          "label": {
+            "fr": "Production vidéo",
+            "en": "Video production"
+          }
+        },
         {
           "id": "music-video",
           "enabled": true,

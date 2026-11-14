@@ -83,12 +83,12 @@ describe("Editorial Routes and Actions", () => {
     const reqFr = new Request("http://localhost:3000/fr");
     const dataFr = await homeLoader(makeLoaderArgs(reqFr));
     expect(dataFr.lang).toBe("fr");
-    expect(dataFr.home.hero.title.fr).toBe("Photo & vidéo.");
+    expect(dataFr.home.hero.title.fr).toBe("Studio photo et vidéo à Bruxelles");
 
     const reqEn = new Request("http://localhost:3000/en");
     const dataEn = await homeLoader(makeLoaderArgs(reqEn));
     expect(dataEn.lang).toBe("en");
-    expect(dataEn.home.hero.title.en).toBe("Photo & video.");
+    expect(dataEn.home.hero.title.en).toBe("Photo and video studio in Brussels");
   });
 
   it("renders old activities as portfolio links and preserves a configured YouTube homepage link", async () => {

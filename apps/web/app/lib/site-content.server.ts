@@ -134,6 +134,13 @@ export function getRawSiteContent(): { content: SiteContent; isCorrupted: boolea
     const parsed = JSON.parse(content);
     const rawVersion = parsed.schemaVersion === undefined ? 1 : parsed.schemaVersion;
     const validated = validateSiteContent(parsed);
+    const projectTypes = validated.contactPage.form.projectTypes;
+    const serviceTypes = defaultContent.contactPage.form.projectTypes.filter(({ id }) => id === "photo" || id === "video");
+    for (const serviceType of serviceTypes) {
+      if (!projectTypes.some(({ id }) => id === serviceType.id)) {
+        projectTypes.push(structuredClone(serviceType));
+      }
+    }
     if (rawVersion === 1 || rawVersion === 2) {
       try {
         atomicWriteJson(filePath, validated);

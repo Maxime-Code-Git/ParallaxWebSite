@@ -1,3 +1,4 @@
+import { services } from "./lib/service-content";
 import { type RouteConfig, index, route } from "@react-router/dev/routes";
 
 export default [
@@ -11,6 +12,12 @@ export default [
   route("en/studio", "routes/public/studio.tsx", { id: "en-studio" }),
   route("fr/contact", "routes/public/contact.tsx", { id: "fr-contact" }),
   route("en/contact", "routes/public/contact.tsx", { id: "en-contact" }),
+
+  // Public service landing pages
+  ...Object.entries(services).flatMap(([service, { paths }]) => [
+    route(paths.fr.slice(1), "routes/public/service.tsx", { id: `fr-service-${service}` }),
+    route(paths.en.slice(1), "routes/public/service.tsx", { id: `en-service-${service}` }),
+  ]),
 
   // Public portfolio FR (Persistent single route container)
   route("fr/projets/:rubrique?/:slugFr?", "routes/public/portfolio.tsx", { id: "fr-portfolio" }),

@@ -14,6 +14,7 @@ import {
 } from "../../lib/contact.server";
 import { getParallaxSocialProfiles } from "../../lib/social-profiles";
 import { cleanTypography } from "../../lib/site-content.shared";
+import { serviceArea } from "../../lib/service-content";
 import styles from "./contact.module.css";
 
 export async function loader(args: LoaderFunctionArgs) {
@@ -453,6 +454,11 @@ export default function ContactPage() {
                 <SocialLinks profiles={socials} label={cardContent.socialLabel[lang]} />
               </div>
             )}
+
+            <div className={styles.cardItem}>
+              <div className={styles.cardLabel}>{lang === "fr" ? "Zone d’intervention" : "Service area"}</div>
+              <p className={styles.serviceArea}>{serviceArea[lang]}</p>
+            </div>
 
             {/* Response Time Notice */}
             {responseTimeNotice && (

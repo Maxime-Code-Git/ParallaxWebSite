@@ -6,7 +6,7 @@ import styles from "./header.module.css";
 interface HeaderProps {
   common: CommonContent;
   lang: "fr" | "en";
-  currentRoute: "home" | "studio" | "portfolio" | "contact" | "client-area" | "gallery" | "legal";
+  currentRoute: "home" | "studio" | "service" | "portfolio" | "contact" | "client-area" | "gallery" | "legal";
   alternateUrls?: { fr: string; en: string };
 }
 
