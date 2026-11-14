@@ -19,8 +19,8 @@ const labels = {
   en: { offers: "Services", projects: "Selected work", portfolio: "View the portfolio" },
 };
 
-export function loader({ request }: LoaderFunctionArgs) {
-  const path = new URL(request.url).pathname.toLowerCase().replace(/\/$/, "");
+export function loader({ url }: LoaderFunctionArgs) {
+  const path = url.pathname.toLowerCase().replace(/\/$/, "");
   const lang: "fr" | "en" = path.startsWith("/en/") ? "en" : "fr";
   const serviceKey = (["photo", "video"] as const).find((key) => services[key].paths[lang] === path);
   if (!serviceKey) throw new Response("Not Found", { status: 404 });
