@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import styles from "./videoModal.module.css";
+import { getVideoOrientation, type VideoOrientation } from "../../lib/video";
 import {
   detectVideoProvider,
   type VideoProvider,
@@ -17,6 +18,7 @@ interface VideoModalProps {
   onClose: () => void;
   videoUrl: string;
   lang: "fr" | "en";
+  orientation?: VideoOrientation;
 }
 
 export function parseVideoEmbedUrl(url: string | null | undefined): string | null {
@@ -72,7 +74,7 @@ export function parseVideoEmbedUrl(url: string | null | undefined): string | nul
   return null;
 }
 
-export function VideoModal({ isOpen, onClose, videoUrl, lang }: VideoModalProps) {
+export function VideoModal({ isOpen, onClose, videoUrl, lang, orientation }: VideoModalProps) {
   const [activeConsent, setActiveConsent] = useState<{
     mediaUrl: string;
     provider: VideoProvider;
@@ -329,7 +331,13 @@ export function VideoModal({ isOpen, onClose, videoUrl, lang }: VideoModalProps)
 
   return (
     <div className={styles.backdrop} onClick={handleClose} role="dialog" aria-modal="true">
-      <div ref={modalRef} className={styles.modal} onClick={(e) => e.stopPropagation()}>
+      <div
+        ref={modalRef}
+        className={isPlayerAuthorized && getVideoOrientation(videoUrl, orientation) === "portrait"
+          ? `${styles.modal} ${styles.portraitModal}`
+          : styles.modal}
+        onClick={(e) => e.stopPropagation()}
+      >
         <button
           type="button"
           onClick={handleClose}

@@ -10,6 +10,7 @@ import {
 import { Header } from "../../components/public/Header";
 import { Footer } from "../../components/public/Footer";
 import { ScrollToTop } from "../../components/public/ScrollToTop";
+import { getVideoOrientation, type VideoOrientation } from "../../lib/video";
 import { VideoModal } from "../../components/public/VideoModal";
 import { ResponsivePortfolioImage } from "../../components/public/ResponsivePortfolioImage";
 import {
@@ -65,45 +66,53 @@ function videoPoster(project: PortfolioProject, video: PortfolioVideo) {
 }
 
 function ProjectDetailVideo({
-  project, video, index, lang, media, onPlay,
+  project, video, index, lang, media, onPlay, featured = false,
 }: {
   project: PortfolioProject;
   video: PortfolioVideo;
   index: number;
   lang: "fr" | "en";
   media: PortfolioContent["media"];
-  onPlay: (url: string) => void;
+  onPlay: (video: PortfolioVideo) => void;
+  featured?: boolean;
 }) {
   const poster = videoPoster(project, video);
   const title = video.title?.[lang]?.trim();
   const playLabel = lang === "fr" ? "Lire la vidéo" : "Play video";
 
+  const orientation = getVideoOrientation(video.url, video.orientation);
+  const Heading = featured ? "h2" : "h3";
+
   return (
-    <div className={styles.detailVideoSection}>
-      {title && <h3 className={styles.detailVideoTitle}>{title}</h3>}
-      <div className={styles.showreelCard}>
-        {poster.imageId && (
-          <ResponsivePortfolioImage
-            imageId={poster.imageId}
-            ownerType="project"
-            ownerId={project.id}
-            mediaSlot={poster.slot}
-            mediaMetadata={media[poster.imageId]}
-            alt={title || project.title[lang]}
-            className={styles.showreelImg}
-          />
-        )}
-        <div className={styles.showreelOverlay}>
-          <button
-            type="button"
-            className={styles.playBtn}
-            onClick={() => onPlay(video.url)}
-            aria-label={title ? `${playLabel} : ${title}` : index === 0 ? playLabel : `${playLabel} ${index + 1}`}
-          >
-            <svg width="26" height="28" viewBox="0 0 26 28" fill="none" aria-hidden="true">
-              <path d="M4 3 L23 14 L4 25 Z" fill="#F5F6F7" />
-            </svg>
-          </button>
+    <div className={featured ? undefined : styles.detailVideoSection}>
+      {title && <Heading className={styles.detailVideoTitle}>{title}</Heading>}
+      <div className={featured ? `${styles.detailCoverWrap} ${styles.detailVideoCover}` : undefined}>
+        <div className={styles.showreelCard} data-video-orientation={orientation}>
+          {poster.imageId && (
+            <ResponsivePortfolioImage
+              imageId={poster.imageId}
+              ownerType="project"
+              ownerId={project.id}
+              mediaSlot={poster.slot}
+              mediaMetadata={media[poster.imageId]}
+              alt={title || project.title[lang]}
+              className={styles.showreelImg}
+              sizes={orientation === "portrait" ? "(max-width: 380px) 100vw, 340px" : undefined}
+              loading={featured ? "eager" : "lazy"}
+            />
+          )}
+          <div className={styles.showreelOverlay}>
+            <button
+              type="button"
+              className={styles.playBtn}
+              onClick={() => onPlay(video)}
+              aria-label={title ? `${playLabel} : ${title}` : index === 0 ? playLabel : `${playLabel} ${index + 1}`}
+            >
+              <svg width="26" height="28" viewBox="0 0 26 28" fill="none" aria-hidden="true">
+                <path d="M4 3 L23 14 L4 25 Z" fill="#F5F6F7" />
+              </svg>
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -307,7 +316,7 @@ export default function PortfolioPage() {
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const [lightboxLoading, setLightboxLoading] = useState(false);
   const [lightboxError, setLightboxError] = useState(false);
-  const [activeVideoUrl, setActiveVideoUrl] = useState<string | null>(null);
+  const [activeVideo, setActiveVideo] = useState<Pick<PortfolioVideo, "url" | "orientation"> | null>(null);
   const [isReducedMotion, setIsReducedMotion] = useState(false);
 
   useEffect(() => {
@@ -518,7 +527,7 @@ export default function PortfolioPage() {
   // Handle ESC and Arrow keys (with priority to VideoModal, then Lightbox, then Panel)
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
-      if (activeVideoUrl) {
+      if (activeVideo) {
         // Handled by VideoModal
         return;
       }
@@ -557,7 +566,7 @@ export default function PortfolioPage() {
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [phase, activeVideoUrl, lightboxIndex, detailPhotos.length, lang, isReducedMotion]);
+  }, [phase, activeVideo, lightboxIndex, detailPhotos.length, lang, isReducedMotion]);
 
   // Focus trap within lightboxRef
   useEffect(() => {
@@ -597,7 +606,7 @@ export default function PortfolioPage() {
 
     function handleTab(e: KeyboardEvent) {
       if (e.key !== "Tab") return;
-      if (activeVideoUrl || lightboxIndex !== null) return;
+      if (activeVideo || lightboxIndex !== null) return;
 
       const focusable = Array.from(
         panelEl.querySelectorAll<HTMLElement>(
@@ -629,7 +638,7 @@ export default function PortfolioPage() {
 
     window.addEventListener("keydown", handleTab);
     return () => window.removeEventListener("keydown", handleTab);
-  }, [phase, activeVideoUrl, lightboxIndex]);
+  }, [phase, activeVideo, lightboxIndex]);
 
 
   const activeSec = effectiveCategory
@@ -688,6 +697,7 @@ export default function PortfolioPage() {
     provider: "youtube" | "vimeo";
     videoId: string;
     url: string;
+    orientation: VideoOrientation;
     posterImageId: string | null;
     posterOwnerId: string;
     posterMediaSlot: "video_cover" | "cover";
@@ -709,6 +719,7 @@ export default function PortfolioPage() {
           provider: video.provider,
           videoId: video.videoId,
           url: video.url,
+          orientation: getVideoOrientation(video.url, video.orientation),
           posterImageId: poster.imageId,
           posterOwnerId: p.id,
           posterMediaSlot: poster.slot,
@@ -1017,52 +1028,15 @@ export default function PortfolioPage() {
 
               {/* Hero Media according to Presentation Mode */}
               {effectiveProjectPresentationMode === "video" && effectiveProject.video?.url ? (
-                <>
-                  {effectiveProject.video.title?.[lang]?.trim() && (
-                    <h2 className={styles.detailVideoTitle}>{effectiveProject.video.title[lang]}</h2>
-                  )}
-                  <div className={styles.detailCoverWrap}>
-                  <div className={styles.showreelCard}>
-                    {effectiveProject.video.coverImageId ? (
-                      <ResponsivePortfolioImage
-                        imageId={effectiveProject.video.coverImageId}
-                        ownerType="project"
-                        ownerId={effectiveProject.id}
-                        mediaSlot="video_cover"
-                        mediaMetadata={content.media[effectiveProject.video.coverImageId]}
-                        alt={effectiveProject.title[lang]}
-                        className={styles.showreelImg}
-                        loading="eager"
-                      />
-                    ) : effectiveProject.coverImageId ? (
-                      <ResponsivePortfolioImage
-                        imageId={effectiveProject.coverImageId}
-                        ownerType="project"
-                        ownerId={effectiveProject.id}
-                        mediaSlot="cover"
-                        mediaMetadata={content.media[effectiveProject.coverImageId]}
-                        alt={effectiveProject.title[lang]}
-                        className={styles.showreelImg}
-                        loading="eager"
-                      />
-                    ) : null}
-                    <div className={styles.showreelOverlay}>
-                      <button
-                        type="button"
-                        className={styles.playBtn}
-                        onClick={() => setActiveVideoUrl(effectiveProject.video!.url)}
-                        aria-label={effectiveProject.video.title?.[lang]?.trim()
-                          ? `${lang === "fr" ? "Lire la vidéo" : "Play video"} : ${effectiveProject.video.title[lang]}`
-                          : lang === "fr" ? "Lire la vidéo" : "Play video"}
-                      >
-                        <svg width="26" height="28" viewBox="0 0 26 28" fill="none">
-                          <path d="M4 3 L23 14 L4 25 Z" fill="#F5F6F7" />
-                        </svg>
-                      </button>
-                    </div>
-                  </div>
-                  </div>
-                </>
+                <ProjectDetailVideo
+                  project={effectiveProject}
+                  video={effectiveProject.video}
+                  index={0}
+                  lang={lang}
+                  media={content.media}
+                  onPlay={setActiveVideo}
+                  featured
+                />
               ) : effectiveProject.coverImageId ? (
                 <div className={styles.detailCoverWrap}>
                   <button
@@ -1121,7 +1095,7 @@ export default function PortfolioPage() {
                   index={0}
                   lang={lang}
                   media={content.media}
-                  onPlay={setActiveVideoUrl}
+                  onPlay={setActiveVideo}
                 />
               )}
 
@@ -1184,7 +1158,7 @@ export default function PortfolioPage() {
                       index={index + 1}
                       lang={lang}
                       media={content.media}
-                      onPlay={setActiveVideoUrl}
+                      onPlay={setActiveVideo}
                     />
                   ))}
                 </section>
@@ -1231,20 +1205,20 @@ export default function PortfolioPage() {
                     const isEven = pIdx % 2 === 0;
 
                     if (isVideoMode && p.video?.url) {
-                      // VIDEO PRESENTATION MODE (16:9 centered card with play button, separate meta below)
+                      const video = p.video;
                       const posterImageId =
-                        p.video.coverImageId || p.draftVideoCoverImageId || p.coverImageId;
+                        video.coverImageId || p.coverImageId;
 
                       return (
                         <div key={p.id} className={styles.videoProjectRow}>
                           <div className={styles.videoCardWrapper}>
-                            <div className={styles.videoCard169}>
+                            <div className={styles.videoCard169} data-video-orientation={getVideoOrientation(video.url, video.orientation)}>
                               {posterImageId ? (
                                 <ResponsivePortfolioImage
                                   imageId={posterImageId}
                                   ownerType="project"
                                   ownerId={p.id}
-                                  mediaSlot={p.video.coverImageId ? "video_cover" : "cover"}
+                                  mediaSlot={video.coverImageId ? "video_cover" : "cover"}
                                   mediaMetadata={content.media[posterImageId]}
                                   alt={p.coverAlt[lang] || p.title[lang]}
                                   className={styles.videoPosterImg}
@@ -1256,7 +1230,7 @@ export default function PortfolioPage() {
                                 <button
                                   type="button"
                                   className={styles.videoPlayBtn}
-                                  onClick={() => setActiveVideoUrl(p.video!.url)}
+                                  onClick={() => setActiveVideo(video)}
                                   aria-label={`Lire la vidéo : ${p.title[lang]}`}
                                 >
                                   <svg width="22" height="24" viewBox="0 0 26 28" fill="none">
@@ -1482,7 +1456,7 @@ export default function PortfolioPage() {
                 <div id="category-videos-panel" className={styles.videosGrid}>
                   {categoryVideos.map((vid, idx) => (
                     <div key={`${vid.provider}:${vid.videoId}-${idx}`} className={styles.videoGridItem}>
-                      <div className={styles.videoThumbCard}>
+                      <div className={styles.videoThumbCard} data-video-orientation={vid.orientation}>
                         {vid.posterImageId ? (
                           <ResponsivePortfolioImage
                             imageId={vid.posterImageId}
@@ -1500,7 +1474,7 @@ export default function PortfolioPage() {
                           <button
                             type="button"
                             className={styles.videoPlayBtn}
-                            onClick={() => setActiveVideoUrl(vid.url)}
+                            onClick={() => setActiveVideo(vid)}
                             aria-label={`${lang === "fr" ? "Lire la vidéo" : "Play video"} : ${vid.title || vid.projectTitle}`}
                           >
                             <svg width="22" height="24" viewBox="0 0 26 28" fill="none">
@@ -1539,7 +1513,7 @@ export default function PortfolioPage() {
                           type="button"
                           className={styles.playBtn}
                           onClick={() =>
-                            setActiveVideoUrl(activeSec.showreelVideo!.url)
+                            setActiveVideo(activeSec.showreelVideo)
                           }
                           aria-label="Lire le showreel"
                         >
@@ -1560,7 +1534,7 @@ export default function PortfolioPage() {
         {phase !== "closed" && (
           <ScrollToTop
             targetRef={panelRef}
-            hidden={phase !== "open" || Boolean(activeVideoUrl) || lightboxIndex !== null}
+            hidden={phase !== "open" || Boolean(activeVideo) || lightboxIndex !== null}
             className={styles.portfolioScrollToTop}
             lang={lang}
             viewKey={location.pathname}
@@ -1578,11 +1552,12 @@ export default function PortfolioPage() {
       )}
 
       {/* Video Modal with explicit consent */}
-      {activeVideoUrl && (
+      {activeVideo && (
         <VideoModal
-          isOpen={Boolean(activeVideoUrl)}
-          onClose={() => setActiveVideoUrl(null)}
-          videoUrl={activeVideoUrl}
+          isOpen={Boolean(activeVideo)}
+          onClose={() => setActiveVideo(null)}
+          videoUrl={activeVideo.url}
+          orientation={activeVideo.orientation}
           lang={lang}
         />
       )}

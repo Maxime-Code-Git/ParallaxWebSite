@@ -330,6 +330,27 @@ describe("Portfolio Media, Admin Thumbnails, Responsive Overlap, and Client Gall
       expect(getRawPortfolioContent().content.projects[0].video?.url).toBe(one.url);
     });
 
+    it("saves each video format and restores automatic detection on request", async () => {
+      const short = { url: "https://www.youtube.com/shorts/abcdefghijk", orientation: "landscape" };
+      expect((await saveVideos([short], { videoOrientation: "portrait" })).status).toBe(200);
+      let project = getPublicPortfolioContent().publicProjects[0];
+      expect(project.video?.orientation).toBe("portrait");
+      expect(project.additionalVideos?.[0].orientation).toBe("landscape");
+
+      expect((await saveVideos([{ ...short, orientation: "invalid" }])).status).toBe(422);
+      expect(getPublicPortfolioContent().publicProjects[0]).toEqual(project);
+
+      expect((await saveVideos([{ url: short.url }])).status).toBe(200);
+      project = getPublicPortfolioContent().publicProjects[0];
+      expect(project.video?.orientation).toBe("portrait");
+      expect(project.additionalVideos?.[0].orientation).toBe("landscape");
+
+      expect((await saveVideos([{ ...short, orientation: "auto" }], { videoOrientation: "auto" })).status).toBe(200);
+      project = getPublicPortfolioContent().publicProjects[0];
+      expect(project.video?.orientation).toBeUndefined();
+      expect(project.additionalVideos?.[0].orientation).toBeUndefined();
+    });
+
     it.each([
       null,
       {},

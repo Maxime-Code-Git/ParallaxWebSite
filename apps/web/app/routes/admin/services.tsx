@@ -6,6 +6,7 @@ import {
   SERVICE_OFFER_FIELDS,
   SERVICE_PAGE_FIELDS,
   SERVICE_PAGE_IDS,
+  SERVICE_STARTING_PRICE_MAX_EUROS,
   type LocalizedString,
 } from "@parallax/shared";
 import { composeAdminHeaders, createAdminHeaders, requireValidAdminSession } from "../../lib/admin-auth.server";
@@ -31,6 +32,18 @@ const offerFields = [
 const pageNames = { photo: "Photographie", video: "Production vidéo" };
 // Percent-encoded UTF-8 can use up to nine bytes per UTF-16 code unit.
 const maxFormBytes = 192 * 1024;
+const priceFields = SERVICE_PAGE_IDS.flatMap((id) =>
+  Array.from({ length: SERVICE_OFFER_COUNT }, (_, index) => `${id}.offerings.${index}.startingPrice`)
+);
+
+function parseStartingPrice(value: string | null): number | undefined {
+  const amount = value?.trim();
+  if (!amount) return undefined;
+  if (!/^\d{1,6}(?:[,.]\d{1,2})?$/.test(amount)) {
+    throw new ValidationError(`Saisissez un prix de départ en euros, jusqu’à ${SERVICE_STARTING_PRICE_MAX_EUROS} €, avec au plus deux décimales.`);
+  }
+  return Math.round(Number(amount.replace(",", ".")) * 100);
+}
 
 const fieldPrefixes = [
   "area",
@@ -71,7 +84,8 @@ export async function action({ request }: ActionFunctionArgs) {
       throw new ActionSecurityError("Origine de la requête invalide.", 403);
     }
     const form = await readStrictFormUrlEncoded(request, maxFormBytes, [
-      "csrfToken", "revision", ...fieldPrefixes.flatMap((prefix) => languages.map((lang) => `${prefix}.${lang}`)),
+      "csrfToken", "revision", ...priceFields,
+      ...fieldPrefixes.flatMap((prefix) => languages.map((lang) => `${prefix}.${lang}`)),
     ]);
     const csrf = form.get("csrfToken");
     const expected = session.get("csrfToken");
@@ -89,6 +103,7 @@ export async function action({ request }: ActionFunctionArgs) {
       offerings: Array.from({ length: SERVICE_OFFER_COUNT }, (_, index) => ({
         title: readText(`${id}.offerings.${index}.title`),
         text: readText(`${id}.offerings.${index}.text`),
+        startingPriceCents: parseStartingPrice(form.get(`${id}.offerings.${index}.startingPrice`)),
       })),
     });
 
@@ -202,6 +217,29 @@ export default function AdminServicesPage() {
                     ))}
                   </div>
                 ))}
+              </div>
+
+              <div className={styles.fieldGroup}>
+                <h3 className={styles.cardTitle}>Prix de départ des prestations</h3>
+                <p className={styles.sectionSubtitle}>Montant en euros commun aux deux langues. Laissez vide pour masquer le prix.</p>
+                {content[id].offerings.map((offer, index) => {
+                  const name = `${id}.offerings.${index}.startingPrice`;
+                  return (
+                    <div key={name} className={styles.fieldGroup}>
+                      <label className={styles.label} htmlFor={name}>{index + 1}. {offer.title.fr} (€)</label>
+                      <input
+                        id={name}
+                        name={name}
+                        inputMode="decimal"
+                        maxLength={9}
+                        defaultValue={offer.startingPriceCents === undefined
+                          ? ""
+                          : String(offer.startingPriceCents / 100).replace(".", ",")}
+                        className={styles.input}
+                      />
+                    </div>
+                  );
+                })}
               </div>
             </section>
           ))}

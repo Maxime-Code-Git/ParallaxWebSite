@@ -114,6 +114,8 @@ describe("Editorial Routes and Actions", () => {
         }
       }
     }
+    form.set("photo.offerings.0.startingPrice", "350,50");
+    form.set("video.offerings.2.startingPrice", "1250");
 
     const save = () => adminServicesAction(makeActionArgs(new Request("http://localhost:3000/admin/services", {
       method: "POST",
@@ -126,9 +128,18 @@ describe("Editorial Routes and Actions", () => {
     expect(updated.home).toEqual(original.home);
     expect(updated.services?.photo.intro.en).toBe("語".repeat(SERVICE_PAGE_FIELDS.intro));
     expect(updated.services?.area.fr).toBe("界".repeat(SERVICE_AREA_MAX_LENGTH));
+    expect(updated.services?.photo.offerings.map((offer) => offer.startingPriceCents)).toEqual([35050, undefined, undefined]);
+    expect(updated.services?.video.offerings[2].startingPriceCents).toBe(125000);
 
     expect((await save()).init).toMatchObject({ status: 409 });
     expect(getSiteContent()).toEqual(updated);
+    form.set("revision", updated.revision);
+    form.set("photo.offerings.0.startingPrice", "-3");
+    expect((await save()).init).toMatchObject({ status: 422 });
+    expect(getSiteContent()).toEqual(updated);
+    form.set("photo.offerings.0.startingPrice", "");
+    expect((await save()).data).toEqual({ saved: true });
+    expect(getSiteContent().services?.photo.offerings[0].startingPriceCents).toBeUndefined();
   });
 
   it("renders old activities as portfolio links and preserves a configured YouTube homepage link", async () => {

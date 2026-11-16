@@ -806,6 +806,20 @@ button.portfolioScrollToTop {
   display: block;
 }
 
+.detailVideoCover {
+  aspect-ratio: auto;
+  background: transparent;
+  border: 0;
+}
+
+.showreelCard[data-video-orientation="portrait"],
+.videoCard169[data-video-orientation="portrait"],
+.videoThumbCard[data-video-orientation="portrait"] {
+  aspect-ratio: 9 / 16;
+  max-width: 340px;
+  margin-inline: auto;
+}
+
 .detailBody {
   font-size: 18px;
   line-height: 1.7;

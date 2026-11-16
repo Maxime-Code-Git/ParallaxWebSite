@@ -98,6 +98,11 @@ export default function ServicePage() {
   const service = services[serviceKey];
   const other = services[serviceKey === "photo" ? "video" : "photo"];
   const contactUrl = `/${lang}/contact${contactType ? `?type=${contactType}` : ""}`;
+  const formatPrice = (cents: number) => (cents / 100).toLocaleString(lang === "fr" ? "fr-BE" : "en-BE", {
+    style: "currency",
+    currency: "EUR",
+    minimumFractionDigits: cents % 100 === 0 ? 0 : 2,
+  });
 
   return (
     <div className={styles.page}>
@@ -112,11 +117,16 @@ export default function ServicePage() {
 
         <section className={styles.section}>
           <h2>{labels[lang].offers}</h2>
-          <ul className={styles.grid}>
-            {page.offerings.map(({ title, text }, index) => (
+          <ul className={`${styles.grid} ${styles.offers}`}>
+            {page.offerings.map(({ title, text, startingPriceCents }, index) => (
               <li key={index}>
                 <h3>{title[lang]}</h3>
                 <p>{text[lang]}</p>
+                {startingPriceCents !== undefined && (
+                  <p className={styles.price}>
+                    {lang === "fr" ? "À partir de" : "From"} {formatPrice(startingPriceCents)}
+                  </p>
+                )}
               </li>
             ))}
           </ul>
