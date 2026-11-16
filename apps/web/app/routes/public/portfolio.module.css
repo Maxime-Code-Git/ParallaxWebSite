@@ -1123,6 +1123,7 @@ button.portfolioScrollToTop {
 
 .lightboxContent {
   position: relative;
+  touch-action: pan-y pinch-zoom;
   width: min(calc(100vw - 160px), 1600px);
   height: min(calc(100vh - 120px), 920px);
   height: min(calc(100dvh - 120px), 920px);

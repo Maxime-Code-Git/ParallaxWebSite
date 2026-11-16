@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import {
   type LoaderFunctionArgs,
   type MetaArgs,
@@ -10,6 +10,7 @@ import {
 import { Header } from "../../components/public/Header";
 import { Footer } from "../../components/public/Footer";
 import { ScrollToTop } from "../../components/public/ScrollToTop";
+import { usePhotoSwipe } from "../../components/public/usePhotoSwipe";
 import { getVideoOrientation, type VideoOrientation } from "../../lib/video";
 import { VideoModal } from "../../components/public/VideoModal";
 import { ResponsivePortfolioImage } from "../../components/public/ResponsivePortfolioImage";
@@ -494,6 +495,15 @@ export default function PortfolioPage() {
     }
   }
 
+  const photoCount = detailPhotos.length;
+  const navigatePhoto = useCallback((direction: -1 | 1) => {
+    if (photoCount < 2) return;
+    setLightboxIndex((index) => index === null ? null : (index + direction + photoCount) % photoCount);
+    setLightboxLoading(true);
+    setLightboxError(false);
+  }, [photoCount]);
+  const photoSwipe = usePhotoSwipe(navigatePhoto, photoCount > 1);
+
   // Restore focus to overview tile after panel closes and React removes inert
   useEffect(() => {
     if (phase === "closed" && triggerRef.current?.isConnected) {
@@ -539,22 +549,9 @@ export default function PortfolioPage() {
           setLightboxIndex(null);
           return;
         }
-        if (e.key === "ArrowLeft" && detailPhotos.length > 1) {
+        if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && photoCount > 1) {
           e.preventDefault();
-          setLightboxIndex((prev) =>
-            prev !== null ? (prev - 1 + detailPhotos.length) % detailPhotos.length : 0
-          );
-          setLightboxLoading(true);
-          setLightboxError(false);
-          return;
-        }
-        if (e.key === "ArrowRight" && detailPhotos.length > 1) {
-          e.preventDefault();
-          setLightboxIndex((prev) =>
-            prev !== null ? (prev + 1) % detailPhotos.length : 0
-          );
-          setLightboxLoading(true);
-          setLightboxError(false);
+          navigatePhoto(e.key === "ArrowLeft" ? -1 : 1);
           return;
         }
         return;
@@ -566,7 +563,7 @@ export default function PortfolioPage() {
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [phase, activeVideo, lightboxIndex, detailPhotos.length, lang, isReducedMotion]);
+  }, [phase, activeVideo, lightboxIndex, photoCount, navigatePhoto, lang, isReducedMotion]);
 
   // Focus trap within lightboxRef
   useEffect(() => {
@@ -1605,9 +1602,7 @@ export default function PortfolioPage() {
                 className={`${styles.lightboxNavBtn} ${styles.lightboxPrevBtn}`}
                 onClick={(e) => {
                   e.stopPropagation();
-                  setLightboxIndex((lightboxIndex - 1 + detailPhotos.length) % detailPhotos.length);
-                  setLightboxLoading(true);
-                  setLightboxError(false);
+                  navigatePhoto(-1);
                 }}
                 aria-label={lang === "fr" ? "Photo précédente" : "Previous photo"}
               >
@@ -1621,9 +1616,7 @@ export default function PortfolioPage() {
                 className={`${styles.lightboxNavBtn} ${styles.lightboxNextBtn}`}
                 onClick={(e) => {
                   e.stopPropagation();
-                  setLightboxIndex((lightboxIndex + 1) % detailPhotos.length);
-                  setLightboxLoading(true);
-                  setLightboxError(false);
+                  navigatePhoto(1);
                 }}
                 aria-label={lang === "fr" ? "Photo suivante" : "Next photo"}
               >
@@ -1634,7 +1627,7 @@ export default function PortfolioPage() {
             </>
           )}
 
-          <div className={styles.lightboxContent} onClick={(e) => e.stopPropagation()}>
+          <div className={styles.lightboxContent} {...photoSwipe} onClick={(e) => e.stopPropagation()}>
             {lightboxLoading && !lightboxError && (
               <div className={styles.lightboxStatus} role="status" aria-live="polite">
                 {lang === "fr" ? "Chargement de la photo..." : "Loading photo..."}
