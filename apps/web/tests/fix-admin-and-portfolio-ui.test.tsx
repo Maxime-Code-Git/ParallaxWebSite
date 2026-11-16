@@ -902,7 +902,7 @@ describe("Fix Admin Content & Public UI Suite", () => {
     const project = content.projects[0];
     project.presentationMode = mode;
     project.additionalVideos = [
-      { provider: "youtube", videoId: "abcdefghijk", url: "https://www.youtube.com/watch?v=abcdefghijk" },
+      { provider: "youtube", videoId: "abcdefghijk", url: "https://www.youtube.com/shorts/abcdefghijk" },
       { provider: "vimeo", videoId: "123456789", url: "https://vimeo.com/123456789" },
     ];
     const photoId = "abcdabcd-abcd-4bcd-abcd-abcdabcdabcd";
@@ -925,14 +925,17 @@ describe("Fix Admin Content & Public UI Suite", () => {
     expect(videos).toBeVisible();
     expect(photos.compareDocumentPosition(videos) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     const mainCard = container.querySelector("[class*='detailContainer'] [class*='showreelCard']")!;
+    expect(mainCard).toHaveAttribute("data-video-orientation", "landscape");
     expect(mainCard.compareDocumentPosition(photos) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(container.querySelector("[class*='detailVideoTitle']")).toBeNull();
     const extraVideoButton = within(videos as HTMLElement).getByRole("button", { name: "Lire la vidéo 2" });
+    expect(extraVideoButton.closest("[data-video-orientation]")).toHaveAttribute("data-video-orientation", "portrait");
     expect(extraVideoButton.closest("[class*='detailVideoSection']")?.querySelector("img")?.getAttribute("src")).toContain(posterId);
     fireEvent.click(extraVideoButton);
     expect(container.querySelector("iframe")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /Accepter et lire/i }));
     expect(container.querySelector("iframe")?.getAttribute("src")).toContain("youtube-nocookie.com/embed/abcdefghijk");
+    expect(container.querySelector("iframe")?.closest("[class*='portraitModal']")).toBeTruthy();
   });
 
   it.each(["fr", "en"] as const)("shows chosen video titles in %s and leaves unnamed videos without a title", async (lang) => {

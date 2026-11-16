@@ -508,24 +508,26 @@ export default function GalleryPage() {
           <div className={styles.videoList}>
             {videos.map((vid) => (
               <div key={vid.id} className={styles.videoCard}>
-                <div className={styles.videoWrapper}>
-                  <video
-                    controls
-                    playsInline
-                    preload="none"
-                    src={`/api/gallery/${gallery.publicId}/media/${vid.id}${vid.hasVideoPreview ? "?variant=preview" : ""}`}
-                    className={styles.videoPlayer}
-                    poster={
-                      vid.posterRevision > 0
-                        ? `/api/gallery/${gallery.publicId}/media/${vid.id}/poster?v=${vid.posterRevision}`
-                        : undefined
-                    }
-                  >
-                    {isEn
-                      ? "Your browser does not support video playback."
-                      : "Votre navigateur ne prend pas en charge la lecture vidéo."}
-                  </video>
-                </div>
+                <video
+                  controls
+                  playsInline
+                  preload="none"
+                  src={`/api/gallery/${gallery.publicId}/media/${vid.id}${vid.hasVideoPreview ? "?variant=preview" : ""}`}
+                  className={styles.videoPlayer}
+                  onLoadedMetadata={(event) => {
+                    const video = event.currentTarget;
+                    if (video.videoWidth && video.videoHeight) video.dataset.sized = "true";
+                  }}
+                  poster={
+                    vid.posterRevision > 0
+                      ? `/api/gallery/${gallery.publicId}/media/${vid.id}/poster?v=${vid.posterRevision}`
+                      : undefined
+                  }
+                >
+                  {isEn
+                    ? "Your browser does not support video playback."
+                    : "Votre navigateur ne prend pas en charge la lecture vidéo."}
+                </video>
 
                 <div className={styles.videoDownloadFooter}>
                   <span className={styles.videoTitle}>{vid.originalFilename}</span>

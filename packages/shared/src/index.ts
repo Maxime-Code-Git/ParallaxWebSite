@@ -568,6 +568,15 @@ export interface ParsedVideo {
   videoId: string;
 }
 
+export type VideoOrientation = "portrait" | "landscape";
+
+export function getVideoOrientation(url: string, orientation?: VideoOrientation): VideoOrientation {
+  if (orientation) return orientation;
+  return parseVideoUrl(url)?.provider === "youtube" && new URL(url.trim()).pathname.startsWith("/shorts/")
+    ? "portrait"
+    : "landscape";
+}
+
 export function parseVideoUrl(url: string | null | undefined): ParsedVideo | null {
   if (!url || typeof url !== "string") return null;
   const trimmed = url.trim();
@@ -683,6 +692,7 @@ export interface PortfolioVideo {
   provider: "youtube" | "vimeo";
   videoId: string;
   url: string;
+  orientation?: VideoOrientation;
   coverImageId?: string | null;
   title?: LocalizedString;
 }
@@ -946,6 +956,11 @@ export function validatePortfolioVideo(
       errors.push({ path: [...path, "title"], message: "Le titre vidéo ne doit pas dépasser 200 caractères par langue." });
       valid = false;
     }
+  }
+
+  if (val.orientation !== undefined && val.orientation !== "portrait" && val.orientation !== "landscape") {
+    errors.push({ path: [...path, "orientation"], message: "Le format vidéo doit être vertical ou horizontal." });
+    valid = false;
   }
 
   if (val.coverImageId !== null && val.coverImageId !== undefined) {
@@ -2886,11 +2901,14 @@ export const SERVICE_PAGE_FIELDS = {
   quoteLabel: 80,
 } as const;
 export const SERVICE_OFFER_FIELDS = { title: 120, text: 600 } as const;
+export const SERVICE_STARTING_PRICE_MAX_EUROS = 999_999;
 export const SERVICE_OFFER_COUNT = 3;
 export const SERVICE_AREA_MAX_LENGTH = 320;
 
 export type ServicePageId = (typeof SERVICE_PAGE_IDS)[number];
-export type ServiceOffer = Record<keyof typeof SERVICE_OFFER_FIELDS, LocalizedString>;
+export type ServiceOffer = Record<keyof typeof SERVICE_OFFER_FIELDS, LocalizedString> & {
+  startingPriceCents?: number;
+};
 export type ServicePageContent = Record<keyof typeof SERVICE_PAGE_FIELDS, LocalizedString> & {
   offerings: ServiceOffer[];
 };
@@ -2912,10 +2930,16 @@ function validateServiceText(value: unknown, maxLength: number, context: string)
 
 function validateServiceOffer(value: unknown, context: string): ServiceOffer {
   const offer = assertObject(value, context);
-  assertExactKeys(offer, Object.keys(SERVICE_OFFER_FIELDS), context);
+  assertExactKeys(offer, [...Object.keys(SERVICE_OFFER_FIELDS), "startingPriceCents"], context);
+  const price = offer.startingPriceCents;
+  if (price !== undefined && (typeof price !== "number" || !Number.isSafeInteger(price) ||
+    price <= 0 || price > SERVICE_STARTING_PRICE_MAX_EUROS * 100)) {
+    throw new ValidationError(`${context} doit avoir un prix de départ positif avec au plus deux décimales.`);
+  }
   return {
     title: validateServiceText(offer.title, SERVICE_OFFER_FIELDS.title, `${context}.title`),
     text: validateServiceText(offer.text, SERVICE_OFFER_FIELDS.text, `${context}.text`),
+    ...(price !== undefined ? { startingPriceCents: price } : {}),
   };
 }
 

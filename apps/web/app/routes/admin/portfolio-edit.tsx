@@ -28,7 +28,7 @@ import {
   cleanupUnreferencedPortfolioMedia,
 } from "../../lib/portfolio-content.server";
 import { RevisionConflictError, ValidationError } from "../../lib/site-content.server";
-import { parseVideoUrl } from "../../lib/video";
+import { parseVideoUrl, type VideoOrientation } from "../../lib/video";
 import { ResponsivePortfolioImage } from "../../components/public/ResponsivePortfolioImage";
 import styles from "./portfolio-edit.module.css";
 
@@ -91,6 +91,7 @@ const ALLOWED_PROJECT_FIELDS = [
   "videoUrl",
   "videoTitleFr",
   "videoTitleEn",
+  "videoOrientation",
   "additionalVideos",
   "galleryImageIds",
   "galleryAlt",
@@ -162,6 +163,10 @@ export async function action({ request, params }: ActionFunctionArgs) {
   const coverImageId = formData.get("coverImageId") ? String(formData.get("coverImageId")) : null;
   const videoCoverImageId = formData.get("videoCoverImageId") ? String(formData.get("videoCoverImageId")) : null;
   const rawVideoUrl = String(formData.get("videoUrl") || "").trim();
+  const rawOrientation = formData.get("videoOrientation");
+  if (rawOrientation !== null && rawOrientation !== "auto" && rawOrientation !== "portrait" && rawOrientation !== "landscape") {
+    return Response.json({ error: "Format vidéo invalide." }, { status: 422, headers: createAdminHeaders() });
+  }
 
   // Strict server-side validation of galleryImageIds
   const rawGids = formData.get("galleryImageIds");
@@ -245,11 +250,15 @@ export async function action({ request, params }: ActionFunctionArgs) {
         { status: 422, headers: createAdminHeaders() }
       );
     }
+    const orientation = rawOrientation === null && proj.video?.videoId === parsed.videoId && proj.video.provider === parsed.provider
+      ? proj.video.orientation
+      : rawOrientation === "portrait" || rawOrientation === "landscape" ? rawOrientation : undefined;
     videoObj = {
       provider: parsed.provider,
       videoId: parsed.videoId,
       url: rawVideoUrl,
       coverImageId: videoCoverImageId,
+      ...(orientation ? { orientation } : {}),
       ...(formData.has("videoTitleFr") || formData.has("videoTitleEn")
         ? { title: { fr: String(formData.get("videoTitleFr") || "").trim(), en: String(formData.get("videoTitleEn") || "").trim() } }
         : proj.video?.title ? { title: proj.video.title } : {}),
@@ -279,11 +288,12 @@ export async function action({ request, params }: ActionFunctionArgs) {
           { status: 422, headers: createAdminHeaders() }
         );
       }
-      const previousTitle = proj.additionalVideos?.find((video) => video.provider === parsed.provider && video.videoId === parsed.videoId)?.title;
+      const previousVideo = proj.additionalVideos?.find((video) => video.provider === parsed.provider && video.videoId === parsed.videoId);
       additionalVideos.push({
         ...parsed, url,
         ...(value.coverImageId !== undefined ? { coverImageId: value.coverImageId } : {}),
-        ...(value.title !== undefined ? { title: value.title } : previousTitle ? { title: previousTitle } : {}),
+        title: value.title !== undefined ? value.title : previousVideo?.title,
+        orientation: value.orientation === "auto" ? undefined : value.orientation !== undefined ? value.orientation : previousVideo?.orientation,
       });
     }
   }
@@ -434,6 +444,28 @@ interface LoaderData {
   csrfToken: string;
 }
 
+function VideoOrientationField({ id, name, value, label, onChange }: {
+  id: string;
+  name?: string;
+  value: VideoOrientation | undefined;
+  label: string;
+  onChange: (orientation: VideoOrientation | undefined) => void;
+}) {
+  return (
+    <>
+      <label className={styles.label} htmlFor={id}>{label}</label>
+      <select id={id} name={name} className={styles.input} value={value ?? "auto"} onChange={(event) => {
+        const selected = event.target.value;
+        onChange(selected === "portrait" || selected === "landscape" ? selected : undefined);
+      }}>
+        <option value="auto">Automatique (vertical pour les liens YouTube Shorts)</option>
+        <option value="portrait">Vertical (9:16)</option>
+        <option value="landscape">Horizontal (16:9)</option>
+      </select>
+    </>
+  );
+}
+
 export default function AdminPortfolioEditPage() {
   const { project, categories = [], contentRevision, media, csrfToken } = useLoaderData<LoaderData>();
   const actionData = useActionData<{ error?: string; success?: string; newRevision?: string; video?: PortfolioVideo | null; additionalVideos?: PortfolioVideo[] }>();
@@ -458,6 +490,7 @@ export default function AdminPortfolioEditPage() {
         updateRevision(actionData.newRevision);
         if (actionData.success) {
           setVideoUrl(actionData.video?.url || "");
+          setVideoOrientation(actionData.video?.orientation);
           setVideoTitle(actionData.video?.title || { fr: "", en: "" });
           setVideoCoverImageId(actionData.video?.coverImageId || null);
           setAdditionalVideos((actionData.additionalVideos || []).map((video, index) => ({ ...video, key: `existing-video-${index}` })));
@@ -496,6 +529,7 @@ export default function AdminPortfolioEditPage() {
   );
   const [status, setStatus] = useState(project.status);
   const [videoUrl, setVideoUrl] = useState(project.video?.url || "");
+  const [videoOrientation, setVideoOrientation] = useState(project.video?.orientation);
   const [videoTitle, setVideoTitle] = useState(project.video?.title || { fr: "", en: "" });
   const [additionalVideos, setAdditionalVideos] = useState(() =>
     (project.additionalVideos || []).map((video, index) => ({ ...video, key: `existing-video-${index}` }))
@@ -713,7 +747,9 @@ export default function AdminPortfolioEditPage() {
         <input type="hidden" name="galleryImageIds" value={JSON.stringify(galleryImageIds)} />
         <input type="hidden" name="videoTitleFr" value={videoTitle.fr} />
         <input type="hidden" name="videoTitleEn" value={videoTitle.en} />
-        <input type="hidden" name="additionalVideos" value={JSON.stringify(additionalVideos.map(({ url, coverImageId, title }) => ({ url, coverImageId, title })))} />
+        <input type="hidden" name="additionalVideos" value={JSON.stringify(additionalVideos.map(({ url, coverImageId, title, orientation }) => ({
+          url, coverImageId, title, orientation: orientation ?? "auto",
+        })))} />
         <input type="hidden" name="galleryAlt" value={JSON.stringify(galleryAlt)} />
 
         <div className={styles.formGrid}>
@@ -1096,6 +1132,11 @@ export default function AdminPortfolioEditPage() {
               </div>
 
               <div className={styles.formGroup}>
+                <VideoOrientationField id="videoOrientation" name="videoOrientation" value={videoOrientation}
+                  onChange={setVideoOrientation} label="Format de la vidéo principale" />
+              </div>
+
+              <div className={styles.formGroup}>
                 <label className={styles.label} htmlFor="video-title">
                   Titre de la vidéo principale ({activeLang.toUpperCase()}) · facultatif
                 </label>
@@ -1178,6 +1219,14 @@ export default function AdminPortfolioEditPage() {
                       placeholder="https://www.youtube.com/watch?v=…"
                       value={video.url}
                       onChange={(event) => setAdditionalVideos((current) => current.map((item) => item.key === video.key ? { ...item, url: event.target.value } : item))}
+                    />
+                    <VideoOrientationField
+                      id={`additional-video-format-${video.key}`}
+                      label={`Format de la vidéo supplémentaire ${index + 1}`}
+                      value={video.orientation}
+                      onChange={(orientation) => setAdditionalVideos((current) => current.map((item) =>
+                        item.key === video.key ? { ...item, orientation } : item
+                      ))}
                     />
                     <label className={styles.label} htmlFor={`additional-video-title-${video.key}`}>
                       Titre de la vidéo supplémentaire {index + 1} ({activeLang.toUpperCase()}) · facultatif
