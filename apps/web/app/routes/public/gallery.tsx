@@ -8,6 +8,7 @@ import type { Route } from "./+types/gallery";
 import { Header } from "../../components/public/Header";
 import { Footer } from "../../components/public/Footer";
 import { ScrollToTop } from "../../components/public/ScrollToTop";
+import { usePhotoSwipe } from "../../components/public/usePhotoSwipe";
 import { getSiteContent } from "../../lib/site-content.server";
 import {
   requireGalleryAccess,
@@ -215,6 +216,18 @@ export default function GalleryPage() {
     }
   }, []);
 
+  const photoCount = photos.length;
+  const navigatePhoto = useCallback((direction: -1 | 1) => {
+    if (lightboxIndex === null) return false;
+    const next = lightboxIndex + direction;
+    if (next < 0 || next >= photoCount) return false;
+    setLightboxIndex(next);
+    setLightboxLoading(true);
+    setLightboxError(false);
+    return true;
+  }, [lightboxIndex, photoCount]);
+  const photoSwipe = usePhotoSwipe(dialogRef, navigatePhoto, lightboxIndex !== null && photoCount > 1);
+
   // Keyboard controls for lightbox: focus trap, Escape and arrow keys
   useEffect(() => {
     if (lightboxIndex === null) return;
@@ -224,16 +237,8 @@ export default function GalleryPage() {
         closeLightbox();
         return;
       }
-      if (e.key === "ArrowLeft" && lightboxIndex > 0) {
-        setLightboxIndex(lightboxIndex - 1);
-        setLightboxLoading(true);
-        setLightboxError(false);
-        return;
-      }
-      if (e.key === "ArrowRight" && lightboxIndex < photos.length - 1) {
-        setLightboxIndex(lightboxIndex + 1);
-        setLightboxLoading(true);
-        setLightboxError(false);
+      if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+        navigatePhoto(e.key === "ArrowLeft" ? -1 : 1);
         return;
       }
       if (e.key === "Tab" && dialogRef.current) {
@@ -262,7 +267,7 @@ export default function GalleryPage() {
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [closeLightbox, lightboxIndex, photos.length]);
+  }, [closeLightbox, lightboxIndex, navigatePhoto]);
 
   // Clean up body class on unmount
   useEffect(() => {
@@ -588,9 +593,7 @@ export default function GalleryPage() {
             className={`${styles.lightboxNavBtn} ${styles.lightboxPrev}`}
             onClick={(e) => {
               e.stopPropagation();
-              setLightboxIndex(lightboxIndex! - 1);
-              setLightboxLoading(true);
-              setLightboxError(false);
+              navigatePhoto(-1);
             }}
             aria-label={isEn ? "Previous photo" : "Photo précédente"}
           >
@@ -604,9 +607,7 @@ export default function GalleryPage() {
             className={`${styles.lightboxNavBtn} ${styles.lightboxNext}`}
             onClick={(e) => {
               e.stopPropagation();
-              setLightboxIndex(lightboxIndex! + 1);
-              setLightboxLoading(true);
-              setLightboxError(false);
+              navigatePhoto(1);
             }}
             aria-label={isEn ? "Next photo" : "Photo suivante"}
           >
@@ -614,7 +615,7 @@ export default function GalleryPage() {
           </button>
         )}
 
-        <div className={styles.lightboxContent} onClick={(e) => e.stopPropagation()}>
+        <div className={styles.lightboxContent} {...photoSwipe.touchHandlers} onClick={(e) => e.stopPropagation()}>
           {lightboxLoading && !lightboxError && (
             <div className={styles.lightboxStatus} role="status" aria-live="polite">
               {isEn ? "Loading high-resolution preview..." : "Chargement de la prévisualisation..."}
@@ -634,8 +635,12 @@ export default function GalleryPage() {
               src={`/api/gallery/${gallery.publicId}/media/${activePhoto.id}?width=1920&format=webp`}
               alt={activePhoto.originalFilename}
               className={styles.lightboxImage}
-              onLoad={() => setLightboxLoading(false)}
+              onLoad={() => {
+                setLightboxLoading(false);
+                photoSwipe.onPhotoLoad();
+              }}
               onError={() => {
+                photoSwipe.onPhotoError();
                 setLightboxLoading(false);
                 setLightboxError(true);
               }}

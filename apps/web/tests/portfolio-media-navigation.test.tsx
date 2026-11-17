@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
 import React from "react";
-import { render, screen, fireEvent, within } from "@testing-library/react";
+import { render, screen, createEvent, fireEvent, within } from "@testing-library/react";
 
 // Mock react-router for component rendering tests
 vi.mock("react-router", async (importOriginal) => {
@@ -468,7 +468,7 @@ describe("Portfolio Media Navigation & Enhancements Suite", () => {
   });
 
   describe("3. Photo Lightbox / Viewer in Project Detail View", () => {
-    it("opens photo lightbox on cover or gallery image click, supports navigation and keyboard Esc", () => {
+    it("opens the photo lightbox and navigates using touch, trackpad, buttons and keyboard", () => {
       const photoProject = mockContent.projects.find((p) => p.id === UUID_PROJ_PHOTO)!;
 
       vi.mocked(useLocation).mockReturnValue(mockLocation("/fr/projets/documentaire/alpes-sauvages", "?dir=right"));
@@ -521,6 +521,45 @@ describe("Portfolio Media Navigation & Enhancements Suite", () => {
       // Test keyboard ArrowLeft navigation
       fireEvent.keyDown(window, { key: "ArrowLeft" });
       expect(screen.getByText("1 / 3")).toBeTruthy();
+
+      const image = lightbox.querySelector("img")!;
+      const touch = { identifier: 1, clientX: 170, clientY: 150 };
+      const swipe = (clientX: number, clientY: number) => {
+        fireEvent.touchStart(image, { touches: [touch] });
+        fireEvent.touchEnd(image, { touches: [], changedTouches: [{ ...touch, clientX, clientY }] });
+      };
+      swipe(65, 155);
+      expect(screen.getByRole("dialog", { name: "Photo 2 sur 3" })).toBeVisible();
+      swipe(285, 148);
+      expect(screen.getByRole("dialog", { name: "Photo 1 sur 3" })).toBeVisible();
+      swipe(150, 140);
+      swipe(155, 45);
+      fireEvent.touchStart(image, { touches: [touch, { ...touch, identifier: 2 }] });
+      fireEvent.touchEnd(image, { touches: [], changedTouches: [{ ...touch, clientX: 65 }] });
+      expect(screen.getByRole("dialog", { name: "Photo 1 sur 3" })).toBeVisible();
+      swipe(280, 152);
+      expect(screen.getByRole("dialog", { name: "Photo 3 sur 3" })).toBeVisible();
+
+      const wheel = (time: number, deltaX: number, deltaY = 0, ctrlKey = false) => {
+        const event = createEvent.wheel(image, { deltaX, deltaY, ctrlKey, cancelable: true });
+        Object.defineProperty(event, "timeStamp", { value: time });
+        fireEvent(image, event);
+        return event.defaultPrevented;
+      };
+      expect(wheel(10, 15, 150)).toBe(false);
+      expect(wheel(20, 100, 0, true)).toBe(false);
+      expect(wheel(30, 25)).toBe(true);
+      expect(screen.getByRole("dialog", { name: "Photo 3 sur 3" })).toBeVisible();
+      expect(wheel(48, 35)).toBe(true);
+      expect(screen.getByRole("dialog", { name: "Photo 1 sur 3" })).toBeVisible();
+      expect(wheel(120, 130)).toBe(true);
+      expect(screen.getByRole("dialog", { name: "Photo 1 sur 3" })).toBeVisible();
+      expect(wheel(145, -34, 27)).toBe(true);
+      expect(screen.getByRole("dialog", { name: "Photo 3 sur 3" })).toBeVisible();
+      expect(wheel(160, -42)).toBe(true);
+      expect(screen.getByRole("dialog", { name: "Photo 3 sur 3" })).toBeVisible();
+      expect(wheel(285, -34)).toBe(true);
+      expect(screen.getByRole("dialog", { name: "Photo 2 sur 3" })).toBeVisible();
 
       // Test keyboard Escape closes lightbox without closing the panel
       fireEvent.keyDown(window, { key: "Escape" });

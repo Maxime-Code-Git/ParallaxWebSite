@@ -384,6 +384,7 @@
 
 .lightboxContent {
   position: relative;
+  touch-action: pan-y pinch-zoom;
   max-width: 92vw;
   max-height: 88vh;
   display: flex;
@@ -481,6 +482,11 @@
 }
 
 .lightboxStatus {
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
+  border-radius: 8px;
+  background: rgba(12, 15, 23, 0.9);
   color: #8A92A6;
   font-size: 14px;
   padding: 32px;
