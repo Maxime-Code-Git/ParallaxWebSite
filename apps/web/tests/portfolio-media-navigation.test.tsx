@@ -554,8 +554,12 @@ describe("Portfolio Media Navigation & Enhancements Suite", () => {
       expect(screen.getByRole("dialog", { name: "Photo 1 sur 3" })).toBeVisible();
       expect(wheel(120, 130)).toBe(true);
       expect(screen.getByRole("dialog", { name: "Photo 1 sur 3" })).toBeVisible();
-      expect(wheel(370, -60)).toBe(true);
+      expect(wheel(145, -34, 27)).toBe(true);
       expect(screen.getByRole("dialog", { name: "Photo 3 sur 3" })).toBeVisible();
+      expect(wheel(160, -42)).toBe(true);
+      expect(screen.getByRole("dialog", { name: "Photo 3 sur 3" })).toBeVisible();
+      expect(wheel(285, -34)).toBe(true);
+      expect(screen.getByRole("dialog", { name: "Photo 2 sur 3" })).toBeVisible();
 
       // Test keyboard Escape closes lightbox without closing the panel
       fireEvent.keyDown(window, { key: "Escape" });

@@ -218,12 +218,13 @@ export default function GalleryPage() {
 
   const photoCount = photos.length;
   const navigatePhoto = useCallback((direction: -1 | 1) => {
-    if (lightboxIndex === null) return;
+    if (lightboxIndex === null) return false;
     const next = lightboxIndex + direction;
-    if (next < 0 || next >= photoCount) return;
+    if (next < 0 || next >= photoCount) return false;
     setLightboxIndex(next);
     setLightboxLoading(true);
     setLightboxError(false);
+    return true;
   }, [lightboxIndex, photoCount]);
   const photoSwipe = usePhotoSwipe(dialogRef, navigatePhoto, lightboxIndex !== null && photoCount > 1);
 
@@ -614,7 +615,7 @@ export default function GalleryPage() {
           </button>
         )}
 
-        <div className={styles.lightboxContent} {...photoSwipe} onClick={(e) => e.stopPropagation()}>
+        <div className={styles.lightboxContent} {...photoSwipe.touchHandlers} onClick={(e) => e.stopPropagation()}>
           {lightboxLoading && !lightboxError && (
             <div className={styles.lightboxStatus} role="status" aria-live="polite">
               {isEn ? "Loading high-resolution preview..." : "Chargement de la prévisualisation..."}
@@ -634,8 +635,12 @@ export default function GalleryPage() {
               src={`/api/gallery/${gallery.publicId}/media/${activePhoto.id}?width=1920&format=webp`}
               alt={activePhoto.originalFilename}
               className={styles.lightboxImage}
-              onLoad={() => setLightboxLoading(false)}
+              onLoad={() => {
+                setLightboxLoading(false);
+                photoSwipe.onPhotoLoad();
+              }}
               onError={() => {
+                photoSwipe.onPhotoError();
                 setLightboxLoading(false);
                 setLightboxError(true);
               }}

@@ -1153,6 +1153,11 @@ button.portfolioScrollToTop {
 }
 
 .lightboxStatus {
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
+  border-radius: 8px;
+  background: rgba(8, 10, 16, 0.9);
   color: #C7CED9;
   font-size: 15px;
   padding: 20px;

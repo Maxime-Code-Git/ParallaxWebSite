@@ -496,13 +496,15 @@ export default function PortfolioPage() {
   }
 
   const photoCount = detailPhotos.length;
+  const lightboxOpen = lightboxIndex !== null;
   const navigatePhoto = useCallback((direction: -1 | 1) => {
-    if (photoCount < 2) return;
+    if (photoCount < 2) return false;
     setLightboxIndex((index) => index === null ? null : (index + direction + photoCount) % photoCount);
     setLightboxLoading(true);
     setLightboxError(false);
+    return true;
   }, [photoCount]);
-  const photoSwipe = usePhotoSwipe(lightboxRef, navigatePhoto, lightboxIndex !== null && photoCount > 1);
+  const photoSwipe = usePhotoSwipe(lightboxRef, navigatePhoto, lightboxOpen && photoCount > 1);
 
   // Restore focus to overview tile after panel closes and React removes inert
   useEffect(() => {
@@ -527,12 +529,10 @@ export default function PortfolioPage() {
 
   // Focus lightbox close button on open
   useEffect(() => {
-    if (lightboxIndex !== null) {
-      setTimeout(() => {
-        lightboxCloseBtnRef.current?.focus();
-      }, 0);
-    }
-  }, [lightboxIndex]);
+    if (!lightboxOpen) return;
+    const timer = window.setTimeout(() => lightboxCloseBtnRef.current?.focus(), 0);
+    return () => window.clearTimeout(timer);
+  }, [lightboxOpen]);
 
   // Handle ESC and Arrow keys (with priority to VideoModal, then Lightbox, then Panel)
   useEffect(() => {
@@ -1627,7 +1627,7 @@ export default function PortfolioPage() {
             </>
           )}
 
-          <div className={styles.lightboxContent} {...photoSwipe} onClick={(e) => e.stopPropagation()}>
+          <div className={styles.lightboxContent} {...photoSwipe.touchHandlers} onClick={(e) => e.stopPropagation()}>
             {lightboxLoading && !lightboxError && (
               <div className={styles.lightboxStatus} role="status" aria-live="polite">
                 {lang === "fr" ? "Chargement de la photo..." : "Loading photo..."}
@@ -1653,8 +1653,12 @@ export default function PortfolioPage() {
               sizes="100vw"
               loading="eager"
               preferLargest
-              onLoad={() => setLightboxLoading(false)}
+              onLoad={() => {
+                setLightboxLoading(false);
+                photoSwipe.onPhotoLoad();
+              }}
               onError={() => {
+                photoSwipe.onPhotoError();
                 setLightboxLoading(false);
                 setLightboxError(true);
               }}
