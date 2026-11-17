@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
 import React from "react";
-import { render, screen, fireEvent, within } from "@testing-library/react";
+import { render, screen, createEvent, fireEvent, within } from "@testing-library/react";
 
 // Mock react-router for component rendering tests
 vi.mock("react-router", async (importOriginal) => {
@@ -468,7 +468,7 @@ describe("Portfolio Media Navigation & Enhancements Suite", () => {
   });
 
   describe("3. Photo Lightbox / Viewer in Project Detail View", () => {
-    it("opens the photo lightbox and navigates using touch, buttons and keyboard", () => {
+    it("opens the photo lightbox and navigates using touch, trackpad, buttons and keyboard", () => {
       const photoProject = mockContent.projects.find((p) => p.id === UUID_PROJ_PHOTO)!;
 
       vi.mocked(useLocation).mockReturnValue(mockLocation("/fr/projets/documentaire/alpes-sauvages", "?dir=right"));
@@ -538,6 +538,23 @@ describe("Portfolio Media Navigation & Enhancements Suite", () => {
       fireEvent.touchEnd(image, { touches: [], changedTouches: [{ ...touch, clientX: 65 }] });
       expect(screen.getByRole("dialog", { name: "Photo 1 sur 3" })).toBeVisible();
       swipe(280, 152);
+      expect(screen.getByRole("dialog", { name: "Photo 3 sur 3" })).toBeVisible();
+
+      const wheel = (time: number, deltaX: number, deltaY = 0, ctrlKey = false) => {
+        const event = createEvent.wheel(image, { deltaX, deltaY, ctrlKey, cancelable: true });
+        Object.defineProperty(event, "timeStamp", { value: time });
+        fireEvent(image, event);
+        return event.defaultPrevented;
+      };
+      expect(wheel(10, 15, 150)).toBe(false);
+      expect(wheel(20, 100, 0, true)).toBe(false);
+      expect(wheel(30, 25)).toBe(true);
+      expect(screen.getByRole("dialog", { name: "Photo 3 sur 3" })).toBeVisible();
+      expect(wheel(48, 35)).toBe(true);
+      expect(screen.getByRole("dialog", { name: "Photo 1 sur 3" })).toBeVisible();
+      expect(wheel(120, 130)).toBe(true);
+      expect(screen.getByRole("dialog", { name: "Photo 1 sur 3" })).toBeVisible();
+      expect(wheel(370, -60)).toBe(true);
       expect(screen.getByRole("dialog", { name: "Photo 3 sur 3" })).toBeVisible();
 
       // Test keyboard Escape closes lightbox without closing the panel

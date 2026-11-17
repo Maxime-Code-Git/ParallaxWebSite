@@ -225,7 +225,7 @@ export default function GalleryPage() {
     setLightboxLoading(true);
     setLightboxError(false);
   }, [lightboxIndex, photoCount]);
-  const photoSwipe = usePhotoSwipe(navigatePhoto, photoCount > 1);
+  const photoSwipe = usePhotoSwipe(dialogRef, navigatePhoto, lightboxIndex !== null && photoCount > 1);
 
   // Keyboard controls for lightbox: focus trap, Escape and arrow keys
   useEffect(() => {

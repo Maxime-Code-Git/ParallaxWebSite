@@ -502,7 +502,7 @@ export default function PortfolioPage() {
     setLightboxLoading(true);
     setLightboxError(false);
   }, [photoCount]);
-  const photoSwipe = usePhotoSwipe(navigatePhoto, photoCount > 1);
+  const photoSwipe = usePhotoSwipe(lightboxRef, navigatePhoto, lightboxIndex !== null && photoCount > 1);
 
   // Restore focus to overview tile after panel closes and React removes inert
   useEffect(() => {
