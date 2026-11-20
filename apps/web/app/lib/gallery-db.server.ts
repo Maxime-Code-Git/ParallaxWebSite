@@ -350,6 +350,30 @@ export function openGalleryDb(dbPath: string): DatabaseSync {
       db.prepare("INSERT INTO gallery_schema (version, name, applied_at) VALUES (5, 'parallax_gallery_v5', ?)").run(Date.now());
     }
 
+    const v6Row = db.prepare("SELECT version FROM gallery_schema WHERE version = 6").get();
+    if (!v6Row) {
+      db.exec(`
+        CREATE TABLE gallery_removed_photos (
+          gallery_id TEXT NOT NULL REFERENCES galleries(id) ON DELETE CASCADE,
+          content_hash TEXT NOT NULL,
+          original_filename TEXT NOT NULL,
+          media_id TEXT,
+          removed_at INTEGER NOT NULL,
+          purge_sources TEXT,
+          PRIMARY KEY (gallery_id, content_hash)
+        );
+        CREATE TABLE gallery_photo_sources (
+          gallery_id TEXT NOT NULL REFERENCES galleries(id) ON DELETE CASCADE,
+          import_folder TEXT NOT NULL,
+          filename TEXT NOT NULL,
+          version TEXT NOT NULL,
+          content_hash TEXT NOT NULL,
+          PRIMARY KEY (gallery_id, import_folder, filename)
+        );
+      `);
+      db.prepare("INSERT INTO gallery_schema (version, name, applied_at) VALUES (6, 'parallax_gallery_v6', ?)").run(Date.now());
+    }
+
     db.exec("COMMIT;");
   } catch (err) {
     try {

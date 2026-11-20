@@ -19,9 +19,11 @@ vi.mock("react-router", async (importOriginal) => {
     useNavigation: vi.fn(() => ({ state: "idle" })),
     useRevalidator: vi.fn(() => ({ revalidate: vi.fn(), state: "idle" })),
     useSubmit: vi.fn(() => vi.fn()),
-    Form: ({ children, ...props }: React.FormHTMLAttributes<HTMLFormElement>) => (
-      <form {...props}>{children}</form>
-    ),
+    Form: ({ children, ...props }: React.FormHTMLAttributes<HTMLFormElement> & { preventScrollReset?: boolean }) => {
+      const formProps = { ...props };
+      delete formProps.preventScrollReset;
+      return <form {...formProps}>{children}</form>;
+    },
     Link: ({ children, to, ...props }: { children: React.ReactNode; to: string; [key: string]: unknown }) => (
       <a href={to} {...props}>{children}</a>
     ),
@@ -537,6 +539,40 @@ describe("Admin Gallery Photo Management (Thumbnails, Deletion, Reordering, Conc
       fireEvent.click(screen.getByRole("button", { name: "Annuler" }));
       expect(screen.queryByRole("button", { name: "Confirmer le retrait" })).not.toBeInTheDocument();
       expect(getGalleryMediaList(gallery.id, "video")).toHaveLength(1);
+    });
+  });
+
+  describe("Permanent photo deletion from the admin", () => {
+    it("requires confirmation data and CSRF, renders the disk status, and removes the actual file", async () => {
+      const { gallery } = createGallery({ title: "Photos", clientName: "Client", projectDate: "2026-11-20" });
+      const folder = ensureGalleryImportFolder(gallery.id);
+      fs.writeFileSync(path.join(folder.photosPath, "test-photo.jpg"), "photo source fixture");
+      const request = new Request(`http://127.0.0.1:3000/admin/galleries/${gallery.id}`, { headers: { Cookie: adminCookie } });
+      const data = await (await editLoader(createRouteArgs(request, { id: gallery.id }))).json();
+      const file = data.photoFiles[0];
+      expect(file.status).toBe("unimported");
+      vi.mocked(useLoaderData).mockReturnValue(data);
+      vi.mocked(useActionData).mockReturnValue(undefined);
+      const view = render(<AdminGalleryEditPage />);
+      expect(screen.getByText("Non affichée", { selector: "td" })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Supprimer définitivement test-photo.jpg" }));
+      expect(screen.getByText(/Il faudra réimporter la photo pour la récupérer/)).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Confirmer la suppression définitive" })).toBeInTheDocument();
+      fireEvent.change(screen.getByRole("searchbox", { name: "Rechercher une photo" }), { target: { value: "absente" } });
+      expect(screen.getByText("Aucune photo ne correspond à la recherche.")).toBeInTheDocument();
+      view.unmount();
+
+      const remove = (csrf: string) => editAction(createRouteArgs(new Request(request.url, {
+        method: "POST", headers: { Cookie: adminCookie, Origin: "http://127.0.0.1:3000" },
+        body: new URLSearchParams({ csrfToken: csrf, intent: "delete_photo_permanently", photoHash: file.hash,
+          fileVersion: file.version, revision: String(gallery.revision) }),
+      }), { id: gallery.id }));
+      expect((await remove("wrong-token")).status).toBe(403);
+      expect(fs.existsSync(path.join(folder.photosPath, "test-photo.jpg"))).toBe(true);
+      const deleted = await remove(csrfToken);
+      expect(deleted.status).toBe(200);
+      expect((await deleted.json()).success).toContain("supprimés du Mac mini");
+      expect(fs.existsSync(path.join(folder.photosPath, "test-photo.jpg"))).toBe(false);
     });
   });
 

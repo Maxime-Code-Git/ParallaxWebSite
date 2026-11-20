@@ -751,6 +751,59 @@
   overflow-wrap: anywhere;
 }
 
+.photoFileFilters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.photoFileFilters label {
+  display: grid;
+  gap: 0.4rem;
+  flex: 1 1 12rem;
+}
+
+.photoFileFilters input,
+.photoFileFilters select {
+  min-width: 0;
+  padding: 0.6rem;
+  font: inherit;
+  color: inherit;
+  background: var(--px-ink, #0c0f17);
+  border: 1px solid var(--px-line, #1b2230);
+  border-radius: 6px;
+}
+
+.photoFileTableScroll {
+  max-height: 32rem;
+  overflow: auto;
+}
+
+.photoFileTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.photoFileTable th,
+.photoFileTable td {
+  padding: 0.8rem;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--px-line, #1b2230);
+}
+
+.photoFileTable td:first-child {
+  min-width: 12rem;
+  overflow-wrap: anywhere;
+}
+
+.photoFileTable small {
+  display: block;
+  margin-top: 0.4rem;
+}
+
 .fileInputHidden {
   display: none;
 }
