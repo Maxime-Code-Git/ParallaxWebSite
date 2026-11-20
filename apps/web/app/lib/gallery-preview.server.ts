@@ -10,6 +10,10 @@ export type AllowedWidth = (typeof ALLOWED_WIDTHS)[number];
 
 const pendingGenerations = new Map<string, Promise<{ path: string; width: number; height: number }>>();
 
+export function isGalleryPhotoPreviewProcessing(galleryId: string, mediaId: string): boolean {
+  return [...pendingGenerations.keys()].some((key) => key.startsWith(`${galleryId}:${mediaId}:`));
+}
+
 export function isAllowedWidth(width: number): width is AllowedWidth {
   return (ALLOWED_WIDTHS as readonly number[]).includes(width);
 }
@@ -208,6 +212,28 @@ export function removePreviews(galleryId: string, mediaId: string): void {
     } catch {
       // Ignored
     }
+  }
+}
+
+/** Permanent photo deletion must report disk errors so the administrator can retry. */
+export function deleteStoredGalleryPhotoFiles(galleryId: string, mediaId: string): void {
+  if (!/^[a-zA-Z0-9_-]+$/.test(galleryId) || !/^[a-zA-Z0-9_-]+$/.test(mediaId)) {
+    throw new Error("Identifiant de photo invalide.");
+  }
+  const base = path.resolve(ENV.GALLERY_MEDIA_PATH);
+  verifySecurePathChain(base, [], "directory");
+  const targets = [[galleryId, ".previews", mediaId], [galleryId, mediaId]];
+  for (const parts of targets) {
+    // Check each existing ancestor before treating a missing target as already deleted.
+    for (let index = 1; index < parts.length; index++) {
+      if (!fs.lstatSync(path.join(base, ...parts.slice(0, index)), { throwIfNoEntry: false })) break;
+      verifySecurePathChain(base, parts.slice(0, index), "directory");
+    }
+    const target = path.join(base, ...parts);
+    const stat = fs.lstatSync(target, { throwIfNoEntry: false });
+    if (!stat) continue;
+    if (stat.isDirectory() && !stat.isSymbolicLink()) fs.rmSync(target, { recursive: true });
+    else fs.unlinkSync(target);
   }
 }
 

@@ -7,7 +7,7 @@ import {
   decryptGalleryCode,
   GalleryCodeDecryptionError,
 } from "./gallery-auth.server";
-import { deleteStoredGalleryMediaFiles } from "./gallery-preview.server";
+import { deleteStoredGalleryMediaFiles, isGalleryPhotoPreviewProcessing } from "./gallery-preview.server";
 import { isGalleryVideoPreviewProcessing } from "./gallery-video-preview.server";
 import { computeGalleryFolderName, createGalleryFolderOnDisk } from "./gallery-folder.server";
 
@@ -763,16 +763,19 @@ function deleteGalleryMedia(
 
   // 3. Verify the media belongs to this gallery and matches the action type.
   const mediaItem = db.prepare(`
-    SELECT id, gallery_id, media_type, original_filename
+    SELECT id, gallery_id, media_type, original_filename, content_hash
     FROM gallery_media
     WHERE id = ? AND gallery_id = ?
-  `).get(mediaId, galleryId) as { id: string; gallery_id: string; media_type: string; original_filename: string } | undefined;
+  `).get(mediaId, galleryId) as { id: string; gallery_id: string; media_type: string; original_filename: string; content_hash: string } | undefined;
 
   if (!mediaItem || mediaItem.media_type !== mediaType) {
     throw new GalleryValidationError(`La ${mediaLabel} est introuvable dans cette galerie.`);
   }
   if (mediaType === "video" && isGalleryVideoPreviewProcessing(galleryId, mediaId)) {
     throw new GalleryConflictError("L'aperçu de cette vidéo est en cours de génération. Réessayez une fois le traitement terminé.");
+  }
+  if (mediaType === "photo" && isGalleryPhotoPreviewProcessing(galleryId, mediaId)) {
+    throw new GalleryConflictError("Un aperçu de cette photo est en cours de génération. Réessayez une fois le traitement terminé.");
   }
 
   // 4. Verify gallery and revision
@@ -823,6 +826,12 @@ function deleteGalleryMedia(
   // 7. Atomic DB deletion and gallery update
   db.exec("BEGIN EXCLUSIVE TRANSACTION;");
   try {
+    if (mediaType === "photo") {
+      db.prepare(`
+        INSERT INTO gallery_removed_photos (gallery_id, content_hash, original_filename, media_id, removed_at)
+        VALUES (?, ?, ?, ?, ?) ON CONFLICT (gallery_id, content_hash) DO NOTHING
+      `).run(galleryId, mediaItem.content_hash, mediaItem.original_filename, mediaId, now);
+    }
     const delRes = db.prepare("DELETE FROM gallery_media WHERE id = ? AND gallery_id = ?").run(mediaId, galleryId);
     if (delRes.changes === 0) {
       throw new GalleryValidationError("Échec de la suppression en base de données.");

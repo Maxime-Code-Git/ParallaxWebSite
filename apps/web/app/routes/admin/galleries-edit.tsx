@@ -60,6 +60,7 @@ import {
 } from "../../lib/gallery-video-preview.server";
 import { GalleryBrowserUpload } from "../../components/admin/GalleryBrowserUpload";
 import { ENV } from "../../lib/env.server";
+import { listGalleryPhotoFiles, permanentlyDeleteGalleryPhoto, type GalleryPhotoFile } from "../../lib/gallery-photo-files.server";
 import styles from "./galleries.module.css";
 
 interface LoaderData {
@@ -72,6 +73,8 @@ interface LoaderData {
   folders: string[];
   importRootPath: string;
   galleryFolderName: string;
+  photoFiles?: GalleryPhotoFile[];
+  photoFilesError?: string;
   videoSources?: GalleryVideoSource[];
   videoSourcesError?: string;
   csrfToken: string;
@@ -114,6 +117,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const importRootPath = ENV.GALLERY_IMPORT_PATH;
   const importFolderInfo = ensureGalleryImportFolder(gallery.id);
   const galleryFolderName = importFolderInfo.folderName;
+  let photoFiles: GalleryPhotoFile[] = [];
+  let photoFilesError: string | undefined;
+  try {
+    photoFiles = await listGalleryPhotoFiles(gallery.id);
+  } catch {
+    photoFilesError = "Impossible de lire les photos sur le Mac mini. Actualisez la page pour réessayer.";
+  }
   let videoSources: GalleryVideoSource[] = [];
   let videoSourcesError: string | undefined;
   try {
@@ -143,6 +153,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       folders,
       importRootPath,
       galleryFolderName,
+      photoFiles,
+      photoFilesError,
       videoSources,
       videoSourcesError,
       csrfToken,
@@ -290,6 +302,16 @@ export async function action({ request, params }: ActionFunctionArgs) {
         ? "L'aperçu vidéo est déjà disponible."
         : "Génération de l'aperçu lancée. Le fichier original est conservé.";
       return Response.json({ success, intent }, { status: result === "ready" ? 200 : 202, headers: createAdminHeaders() });
+    }
+
+    if (intent === "delete_photo_permanently") {
+      const result = await permanentlyDeleteGalleryPhoto(
+        gallery.id, body.get("photoHash") || "", body.get("fileVersion") || "", Number(body.get("revision")),
+      );
+      return Response.json({
+        success: `La photo « ${result.name} », ses sources et ses aperçus ont été supprimés du Mac mini. Il faudra la réimporter pour la récupérer.${result.unpublishNotice ? " La galerie est vide et a été repassée en brouillon." : ""}`,
+        intent,
+      }, { headers: createAdminHeaders() });
     }
 
     if (intent === "delete_video_source") {
@@ -449,6 +471,8 @@ export default function AdminGalleryEditPage() {
     folders,
     importRootPath,
     galleryFolderName,
+    photoFiles = [],
+    photoFilesError,
     videoSources = [],
     videoSourcesError,
     csrfToken,
@@ -475,6 +499,20 @@ export default function AdminGalleryEditPage() {
   const [confirmDeletePhotoId, setConfirmDeletePhotoId] = useState<string | null>(null);
   const [confirmDeleteVideoId, setConfirmDeleteVideoId] = useState<string | null>(null);
   const [confirmDeleteVideoSource, setConfirmDeleteVideoSource] = useState<string | null>(null);
+  const [confirmPurgePhoto, setConfirmPurgePhoto] = useState<string | null>(null);
+  const [photoFileSearch, setPhotoFileSearch] = useState("");
+  const [photoFileStatus, setPhotoFileStatus] = useState("all");
+  const photoFileLabels = {
+    displayed: "Affichée",
+    removed: "Supprimée de la galerie",
+    unimported: "Non affichée",
+    deleting: "Suppression à terminer",
+  };
+  const filteredPhotoFiles = photoFiles.filter((file) =>
+    (photoFileStatus === "all" || file.status === photoFileStatus) &&
+    [file.name, ...file.sources.map((source) => source.name)].some((name) =>
+      name.toLocaleLowerCase("fr").includes(photoFileSearch.toLocaleLowerCase("fr"))),
+  );
 
   const handleDirectReorder = (newOrder: string[]) => {
     const formData = new FormData();
@@ -1105,6 +1143,88 @@ export default function AdminGalleryEditPage() {
             onUploadBatchComplete={handleUploadBatchComplete}
           />
 
+          <details className={styles.advancedImportDetails} open>
+            <summary className={styles.advancedImportSummary}>
+              Photos sur le Mac mini ({photoFiles.length})
+            </summary>
+            <div className={styles.sourceVideoPanel}>
+              <p className={styles.pathInstruction}>
+                Les photos supprimées de la galerie restent ici et sont ignorées lors des prochains imports.
+                La suppression définitive efface les sources et les aperçus de cette galerie sur le Mac mini.
+              </p>
+              {photoFilesError && <p role="alert">{photoFilesError}</p>}
+              {!photoFilesError && photoFiles.length === 0 && <p>Aucune photo stockée pour cette galerie.</p>}
+              {photoFiles.length > 0 && (
+                <>
+                  <div className={styles.photoFileFilters}>
+                    <label>
+                      Rechercher une photo
+                      <input type="search" value={photoFileSearch} onChange={(event) => setPhotoFileSearch(event.target.value)} />
+                    </label>
+                    <label>
+                      Statut des photos
+                      <select value={photoFileStatus} onChange={(event) => setPhotoFileStatus(event.target.value)}>
+                        <option value="all">Tous les statuts</option>
+                        {Object.entries(photoFileLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                      </select>
+                    </label>
+                  </div>
+                  <div className={styles.photoFileTableScroll} role="region" aria-label="Photos stockées sur le Mac mini" tabIndex={0}>
+                    <table className={styles.photoFileTable}>
+                      <thead><tr><th scope="col">Photo</th><th scope="col">Statut</th><th scope="col">Taille originale</th><th scope="col">Action</th></tr></thead>
+                      <tbody>
+                        {filteredPhotoFiles.map((file) => {
+                          const confirming = confirmPurgePhoto === file.version;
+                          const busy = isSubmitting || importStatus === "importing" || importStatus === "pending" || importStatus === "scanning";
+                          return (
+                            <tr key={file.hash}>
+                              <td>
+                                <strong>{file.name}</strong>
+                                {file.sources.map((source) => <small key={`${source.folder}/${source.name}`}>{source.folder}/photos/{source.name}</small>)}
+                              </td>
+                              <td>{photoFileLabels[file.status]}</td>
+                              <td>{(file.size / 1024 / 1024).toFixed(1)} Mio</td>
+                              <td>
+                                <button
+                                  type="button" disabled={busy} aria-expanded={confirming}
+                                  aria-label={`Supprimer définitivement ${file.name}`}
+                                  className={`${styles.btn} ${styles.btnDanger} ${styles.btnSmall}`}
+                                  onClick={() => setConfirmPurgePhoto(confirming ? null : file.version)}
+                                >
+                                  {file.status === "deleting" ? "Réessayer la suppression" : "Supprimer définitivement"}
+                                </button>
+                                {confirming && (
+                                  <div className={styles.photoDeleteConfirmBox} role="alert">
+                                    <p>Supprimer définitivement « {file.name} » du Mac mini et de cette galerie ?</p>
+                                    <p>Ses fichiers sources et ses aperçus seront effacés. Il faudra réimporter la photo pour la récupérer.</p>
+                                    <div className={styles.videoActions}>
+                                      <Form method="post" preventScrollReset>
+                                        <input type="hidden" name="csrfToken" value={csrfToken} />
+                                        <input type="hidden" name="intent" value="delete_photo_permanently" />
+                                        <input type="hidden" name="photoHash" value={file.hash} />
+                                        <input type="hidden" name="fileVersion" value={file.version} />
+                                        <input type="hidden" name="revision" value={gallery.revision} />
+                                        <button type="submit" disabled={busy} className={`${styles.btn} ${styles.btnDanger} ${styles.btnSmall}`}>
+                                          Confirmer la suppression définitive
+                                        </button>
+                                      </Form>
+                                      <button type="button" disabled={busy} className={`${styles.btn} ${styles.btnSecondary} ${styles.btnSmall}`} onClick={() => setConfirmPurgePhoto(null)}>Annuler</button>
+                                    </div>
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                    {filteredPhotoFiles.length === 0 && <p>Aucune photo ne correspond à la recherche.</p>}
+                  </div>
+                </>
+              )}
+            </div>
+          </details>
+
           <details className={styles.advancedImportDetails}>
             <summary className={styles.advancedImportSummary}>
               Fichiers vidéo sur le Mac mini ({videoSources.length})
@@ -1579,7 +1699,7 @@ export default function AdminGalleryEditPage() {
                               Supprimer <strong>« {p.original_filename} »</strong> de la galerie ?
                             </p>
                             <p className={styles.photoDeleteConfirmSubtext}>
-                              Cette action retire la copie importée de la galerie et révoque ses accès privés. Le fichier source déposé dans le dossier d'importation reste intact.
+                              Cette action retire la copie importée de la galerie et révoque ses accès privés. Le fichier source déposé dans le dossier d'importation reste intact. La photo sera ignorée lors des prochains imports. Vous pouvez l’effacer du Mac mini dans la liste « Photos sur le Mac mini ».
                             </p>
                             <div className={styles.rowGap10}>
                               <Form method="post">

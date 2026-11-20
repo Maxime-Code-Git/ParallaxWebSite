@@ -319,13 +319,16 @@ export function startImportJob(galleryId: string, folderName: string): string {
   const now = Date.now();
 
   try {
-    db.prepare(`
+    const inserted = db.prepare(`
       INSERT INTO gallery_import_jobs (
         id, gallery_id, import_folder, status,
         progress_total, progress_current,
         scanned_photos, scanned_videos, rejected_files, rejection_report,
         created_at, updated_at
-      ) VALUES (?, ?, ?, 'pending', ?, 0, ?, ?, ?, ?, ?, ?)
+      ) SELECT ?, ?, ?, 'pending', ?, 0, ?, ?, ?, ?, ?, ?
+      WHERE NOT EXISTS (
+        SELECT 1 FROM gallery_removed_photos WHERE gallery_id = ? AND purge_sources IS NOT NULL
+      )
     `).run(
       jobId,
       galleryId,
@@ -336,8 +339,12 @@ export function startImportJob(galleryId: string, folderName: string): string {
       analysis.rejectedFiles.length,
       JSON.stringify(analysis.rejectedFiles),
       now,
-      now
+      now,
+      galleryId
     );
+    if (inserted.changes === 0) {
+      throw new Error("Terminez la suppression définitive des photos avant de relancer un import.");
+    }
   } catch (err: unknown) {
     if (err instanceof Error && (err.message.includes("UNIQUE") || err.message.includes("constraint"))) {
       throw new Error("Un import est deja en cours pour cette galerie.", { cause: err });
@@ -596,14 +603,19 @@ export async function processImportJob(jobId: string, workerId = crypto.randomUU
       const existing = db.prepare(`
         SELECT id FROM gallery_media WHERE gallery_id = ? AND content_hash = ?
       `).get(galleryId, contentHash) as { id: string } | undefined;
+      const removedPhoto = candidate.mediaType === "photo" && db.prepare(`
+        SELECT 1 FROM gallery_removed_photos WHERE gallery_id = ? AND content_hash = ?
+      `).get(galleryId, contentHash);
 
-      if (existing) {
+      if (existing || removedPhoto) {
         try {
           fs.unlinkSync(stagedOriginal);
         } catch {
           // Ignored
         }
-        rejected.push({ file: candidate.relativeName, reason: "Fichier ignoré : contenu en double dans la galerie." });
+        rejected.push({ file: candidate.relativeName, reason: removedPhoto
+          ? "Photo retirée de la galerie : import automatique ignoré."
+          : "Fichier ignoré : contenu en double dans la galerie." });
         processedCount++;
         renewLease();
         db.prepare(`

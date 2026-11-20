@@ -20,12 +20,12 @@ export class GalleryImportFileError extends Error {
   }
 }
 
-function isSourceName(name: string) {
+export function isSourceName(name: string) {
   return name.length > 0 && Buffer.byteLength(name) <= 255 && !name.startsWith(".") &&
     !/[/\\\0\r\n]/.test(name) && !name.endsWith(".part") && !name.endsWith(".tmp");
 }
 
-function fileVersion(folderName: string, name: string, stat: fs.BigIntStats): string {
+export function fileVersion(folderName: string, name: string, stat: fs.BigIntStats): string {
   return createHash("sha256").update([
     folderName, name, stat.dev, stat.ino, stat.size, stat.mtimeNs, stat.ctimeNs,
   ].join("\0")).digest("hex");
