@@ -298,7 +298,7 @@ describe("Portfolio Lifecycle & Cross-Storage Segregation (Lot 3)", () => {
     expect(calculateEffectiveSide("auto", 2)).toBe("left");
   });
 
-  it("Step 4 & 5: tests direct section URL access, SSR consistency and FR/EN alternates with direction preservation", async () => {
+  it("Step 4 & 5: tests direct section URL access, SSR consistency and canonical FR/EN alternates and default direction", async () => {
     // Documentary section route
     const docReq = new Request("http://localhost:3000/fr/projets/documentaire");
     const docRes = await portfolioPublicLoader(makeLoaderArgs(docReq, { rubrique: "documentaire" }));
@@ -312,9 +312,9 @@ describe("Portfolio Lifecycle & Cross-Storage Segregation (Lot 3)", () => {
     expect(docData.panelState.isOpen).toBe(true);
     expect(docData.panelState.activeCategory).toBe("documentary");
     expect(docData.panelState.direction).toBe("right");
-    // Preserves ?dir=right in alternates
-    expect(docData.alternateUrls.fr).toBe("/fr/projets/documentaire?dir=right");
-    expect(docData.alternateUrls.en).toBe("/en/projects/documentary?dir=right");
+    // Canonical alternate URLs exclude animation state
+    expect(docData.alternateUrls.fr).toBe("/fr/projets/documentaire");
+    expect(docData.alternateUrls.en).toBe("/en/projects/documentary");
 
     // Advertising section route
     const pubReq = new Request("http://localhost:3000/en/projects/advertising");
@@ -329,8 +329,8 @@ describe("Portfolio Lifecycle & Cross-Storage Segregation (Lot 3)", () => {
     expect(pubData.panelState.isOpen).toBe(true);
     expect(pubData.panelState.activeCategory).toBe("advertising");
     expect(pubData.panelState.direction).toBe("left");
-    expect(pubData.alternateUrls.fr).toBe("/fr/projets/publicite?dir=left");
-    expect(pubData.alternateUrls.en).toBe("/en/projects/advertising?dir=left");
+    expect(pubData.alternateUrls.fr).toBe("/fr/projets/publicite");
+    expect(pubData.alternateUrls.en).toBe("/en/projects/advertising");
   });
 
   it("Step 6: handles 409 revision conflict gracefully without overwriting state", async () => {

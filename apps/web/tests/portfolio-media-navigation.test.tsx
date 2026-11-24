@@ -436,11 +436,11 @@ describe("Portfolio Media Navigation & Enhancements Suite", () => {
       const ctaLinks = screen.getAllByRole("link", { name: /Découvrir le projet/i });
       expect(ctaLinks.length).toBeGreaterThanOrEqual(2);
 
-      // Verify photo project link preserves dir parameter
-      expect(ctaLinks[0].getAttribute("href")).toBe("/fr/projets/documentaire/alpes-sauvages?dir=right");
+      // Verify photo project link uses a canonical URL
+      expect(ctaLinks[0].getAttribute("href")).toBe("/fr/projets/documentaire/alpes-sauvages");
 
-      // Verify video project link preserves dir parameter and is distinct from play button
-      expect(ctaLinks[1].getAttribute("href")).toBe("/fr/projets/documentaire/ocean-secret?dir=right");
+      // Verify video project link uses a canonical URL and is distinct from play button
+      expect(ctaLinks[1].getAttribute("href")).toBe("/fr/projets/documentaire/ocean-secret");
     });
 
     it("renders English CTA labels on /en/projects", () => {
@@ -463,7 +463,7 @@ describe("Portfolio Media Navigation & Enhancements Suite", () => {
 
       const ctaLinks = screen.getAllByRole("link", { name: /Discover the project/i });
       expect(ctaLinks.length).toBeGreaterThanOrEqual(2);
-      expect(ctaLinks[0].getAttribute("href")).toBe("/en/projects/documentary/wild-alps?dir=left");
+      expect(ctaLinks[0].getAttribute("href")).toBe("/en/projects/documentary/wild-alps");
     });
   });
 
@@ -629,7 +629,7 @@ describe("Portfolio Media Navigation & Enhancements Suite", () => {
       // And top-left returns to category
       const backLink = screen.getByRole("link", { name: /Retour à Documentaire/i });
       expect(backLink).toBeTruthy();
-      expect(backLink.getAttribute("href")).toBe("/fr/projets/documentaire?dir=right");
+      expect(backLink.getAttribute("href")).toBe("/fr/projets/documentaire");
     });
   });
 });

@@ -846,7 +846,7 @@ describe("Fix Admin Content & Public UI Suite", () => {
         el.getAttribute("href")?.includes("/fr/projets/documentaire")
       );
       expect(docLink).toBeTruthy();
-      expect(docLink?.getAttribute("href")).toMatch(/\/fr\/projets\/documentaire\?dir=(left|right)/);
+      expect(docLink?.getAttribute("href")).toBe("/fr/projets/documentaire");
       expect(docLink?.getAttribute("aria-label")).toBe("Voir les projets - Documentaire");
 
       const mobileLabel = docLink?.querySelector("[class*='btnLabelMobile']");
@@ -881,7 +881,7 @@ describe("Fix Admin Content & Public UI Suite", () => {
         el.getAttribute("href")?.includes("/en/projects/documentary")
       );
       expect(docLink).toBeTruthy();
-      expect(docLink?.getAttribute("href")).toMatch(/\/en\/projects\/documentary\?dir=(left|right)/);
+      expect(docLink?.getAttribute("href")).toBe("/en/projects/documentary");
       expect(docLink?.getAttribute("aria-label")).toBe("View projects - Documentary");
 
       const mobileLabel = docLink?.querySelector("[class*='btnLabelMobile']");
