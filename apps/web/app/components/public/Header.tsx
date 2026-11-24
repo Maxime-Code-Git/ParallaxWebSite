@@ -8,9 +8,10 @@ interface HeaderProps {
   lang: "fr" | "en";
   currentRoute: "home" | "studio" | "service" | "portfolio" | "contact" | "client-area" | "gallery" | "legal";
   alternateUrls?: { fr: string; en: string };
+  alternateState?: { portfolioDirection: "left" | "right" };
 }
 
-export function Header({ common, lang, currentRoute, alternateUrls }: HeaderProps) {
+export function Header({ common, lang, currentRoute, alternateUrls, alternateState }: HeaderProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const homeHref = `/${lang}`;
@@ -85,6 +86,7 @@ export function Header({ common, lang, currentRoute, alternateUrls }: HeaderProp
           <div className={styles.langSwitch}>
             <Link
               to={frSwitchHref}
+              state={alternateState}
               className={`${styles.langButton} ${lang === "fr" ? styles.langButtonActive : styles.langButtonInactive}`}
               aria-label="Version française"
               aria-current={lang === "fr" ? "true" : undefined}
@@ -94,6 +96,7 @@ export function Header({ common, lang, currentRoute, alternateUrls }: HeaderProp
             <span className={styles.langDivider}>/</span>
             <Link
               to={enSwitchHref}
+              state={alternateState}
               className={`${styles.langButton} ${lang === "en" ? styles.langButtonActive : styles.langButtonInactive}`}
               aria-label="English version"
               aria-current={lang === "en" ? "true" : undefined}
