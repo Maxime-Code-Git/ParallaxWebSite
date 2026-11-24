@@ -305,13 +305,18 @@ export default function PortfolioPage() {
     useLoaderData<LoaderData>();
   const navigate = useNavigate();
   const location = useLocation();
+  const navigationDirection = location.state?.portfolioDirection;
+  const direction = !new URLSearchParams(location.search).has("dir") &&
+    (navigationDirection === "left" || navigationDirection === "right")
+    ? navigationDirection
+    : panelState.direction;
 
   // Persistent panel lifecycle: "closed" | "opening" | "open" | "closing"
   type PanelPhase = "closed" | "opening" | "open" | "closing";
   const [phase, setPhase] = useState<PanelPhase>(
     panelState.isOpen ? "open" : "closed"
   );
-  const [panelDirection, setPanelDirection] = useState<"left" | "right">(panelState.direction);
+  const [panelDirection, setPanelDirection] = useState<"left" | "right">(direction);
   const [showGallery, setShowGallery] = useState(false);
   const [showVideos, setShowVideos] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
@@ -377,7 +382,7 @@ export default function PortfolioPage() {
     // Transition from CLOSED to OPEN: Real entrance animation
     if (!wasOpen && isOpenNow) {
       isClosingRef.current = false;
-      setPanelDirection(panelState.direction);
+      setPanelDirection(direction);
       setShowGallery(false);
       setShowVideos(false);
       setLightboxIndex(null);
@@ -407,7 +412,7 @@ export default function PortfolioPage() {
 
     // Already OPEN, navigating between category and project
     if (wasOpen && isOpenNow) {
-      setPanelDirection(panelState.direction);
+      setPanelDirection(direction);
       setShowGallery(false);
       setShowVideos(false);
       setLightboxIndex(null);
@@ -435,7 +440,7 @@ export default function PortfolioPage() {
         document.body.classList.remove(styles.bodyScrollLocked);
       }
     }
-  }, [panelState.isOpen, panelState.direction, location.pathname, isReducedMotion]);
+  }, [panelState.isOpen, direction, location.pathname, isReducedMotion]);
 
   function handleClosePanel() {
     if (isClosingRef.current) return;
@@ -736,7 +741,7 @@ export default function PortfolioPage() {
         data-state={phase}
       >
       <div inert={phase !== "closed" ? true : undefined}>
-        <Header common={common} lang={lang} currentRoute="portfolio" alternateUrls={alternateUrls} />
+        <Header common={common} lang={lang} currentRoute="portfolio" alternateUrls={alternateUrls} alternateState={panelState.isOpen ? { portfolioDirection: direction } : undefined} />
       </div>
 
       {/* Main Showcase Feed */}
@@ -931,6 +936,7 @@ export default function PortfolioPage() {
                     entryFocusRef.current = node;
                   }}
                   to={getPortfolioSectionUrl(effectiveProject.category, lang, content.categories)}
+                  state={{ portfolioDirection: direction }}
                   preventScrollReset
                   className={styles.backBtn}
                 >
@@ -1238,6 +1244,7 @@ export default function PortfolioPage() {
                           <div className={styles.videoProjectMeta}>
                             <Link
                               to={getPortfolioProjectUrl(p, lang, content.categories)}
+                              state={{ portfolioDirection: direction }}
                               preventScrollReset
                               className={styles.videoProjectTitleLink}
                             >
@@ -1246,6 +1253,7 @@ export default function PortfolioPage() {
                             <p className={styles.projectVideoDesc}>{p.summary[lang]}</p>
                             <Link
                               to={getPortfolioProjectUrl(p, lang, content.categories)}
+                              state={{ portfolioDirection: direction }}
                               preventScrollReset
                               className={`${styles.projectCtaBtn} ${styles.projectCtaBtnVideo}`}
                             >
@@ -1290,6 +1298,7 @@ export default function PortfolioPage() {
                         <div className={photoBoxClass}>
                           <Link
                             to={getPortfolioProjectUrl(p, lang, content.categories)}
+                            state={{ portfolioDirection: direction }}
                             preventScrollReset
                             className={styles.projectImageLink}
                             aria-label={`Voir le projet ${p.title[lang]}`}
@@ -1312,6 +1321,7 @@ export default function PortfolioPage() {
                         <div className={isLeft ? styles.projectTextEven : styles.projectTextOdd}>
                           <Link
                             to={getPortfolioProjectUrl(p, lang, content.categories)}
+                            state={{ portfolioDirection: direction }}
                             preventScrollReset
                             className={styles.projectTitleLink}
                           >
@@ -1326,6 +1336,7 @@ export default function PortfolioPage() {
                           </p>
                           <Link
                             to={getPortfolioProjectUrl(p, lang, content.categories)}
+                            state={{ portfolioDirection: direction }}
                             preventScrollReset
                             className={`${styles.projectCtaBtn} ${
                               isLeft ? styles.projectCtaBtnEven : styles.projectCtaBtnOdd
