@@ -272,7 +272,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // Build showcase projects (featured or top 3)
   const showcaseProjects = publicProjects.filter((p) => p.showcase);
 
-  const alternateUrls = getPortfolioAlternateUrls(activeProject, activeCategoryItem || activeCategory, direction, publicCategories);
+  const alternateUrls = getPortfolioAlternateUrls(activeProject, activeCategoryItem || activeCategory, null, publicCategories);
   const seoUrls = getPortfolioAlternateUrls(activeProject, activeCategoryItem || activeCategory, null, publicCategories);
 
   return Response.json(
@@ -647,7 +647,6 @@ export default function PortfolioPage() {
   const rowsToRender = categoriesList.map((sec, idx) => {
     const defaultSide = idx % 2 === 0 ? "left" : "right";
     const effectiveSide = sec.entrySide && sec.entrySide !== "auto" ? sec.entrySide : defaultSide;
-    const openDirection = effectiveSide === "left" ? ("right" as const) : ("left" as const);
     const imageId = sec.entryImageId || sec.coverImageId;
     const isEntrySlot = Boolean(sec.entryImageId);
     const alt = sec.entryAlt?.[lang] || sec.coverAlt?.[lang] || sec.title[lang];
@@ -661,8 +660,7 @@ export default function PortfolioPage() {
       isEntrySlot,
       alt,
       side: effectiveSide,
-      openDirection,
-      sectionUrl: `${getPortfolioSectionUrl(sec, lang, categoriesList)}?dir=${openDirection}`,
+      sectionUrl: getPortfolioSectionUrl(sec, lang, categoriesList),
     };
   });
 
@@ -728,7 +726,6 @@ export default function PortfolioPage() {
     }
   }
 
-  const dirParam = `?dir=${panelDirection}`;
 
   return (
     <div className={styles.pageRoot}>
@@ -933,7 +930,7 @@ export default function PortfolioPage() {
                   ref={(node) => {
                     entryFocusRef.current = node;
                   }}
-                  to={`${getPortfolioSectionUrl(effectiveProject.category, lang, content.categories)}${dirParam}`}
+                  to={getPortfolioSectionUrl(effectiveProject.category, lang, content.categories)}
                   preventScrollReset
                   className={styles.backBtn}
                 >
@@ -1240,7 +1237,7 @@ export default function PortfolioPage() {
 
                           <div className={styles.videoProjectMeta}>
                             <Link
-                              to={`${getPortfolioProjectUrl(p, lang, content.categories)}${dirParam}`}
+                              to={getPortfolioProjectUrl(p, lang, content.categories)}
                               preventScrollReset
                               className={styles.videoProjectTitleLink}
                             >
@@ -1248,7 +1245,7 @@ export default function PortfolioPage() {
                             </Link>
                             <p className={styles.projectVideoDesc}>{p.summary[lang]}</p>
                             <Link
-                              to={`${getPortfolioProjectUrl(p, lang, content.categories)}${dirParam}`}
+                              to={getPortfolioProjectUrl(p, lang, content.categories)}
                               preventScrollReset
                               className={`${styles.projectCtaBtn} ${styles.projectCtaBtnVideo}`}
                             >
@@ -1292,7 +1289,7 @@ export default function PortfolioPage() {
                       >
                         <div className={photoBoxClass}>
                           <Link
-                            to={`${getPortfolioProjectUrl(p, lang, content.categories)}${dirParam}`}
+                            to={getPortfolioProjectUrl(p, lang, content.categories)}
                             preventScrollReset
                             className={styles.projectImageLink}
                             aria-label={`Voir le projet ${p.title[lang]}`}
@@ -1314,7 +1311,7 @@ export default function PortfolioPage() {
 
                         <div className={isLeft ? styles.projectTextEven : styles.projectTextOdd}>
                           <Link
-                            to={`${getPortfolioProjectUrl(p, lang, content.categories)}${dirParam}`}
+                            to={getPortfolioProjectUrl(p, lang, content.categories)}
                             preventScrollReset
                             className={styles.projectTitleLink}
                           >
@@ -1328,7 +1325,7 @@ export default function PortfolioPage() {
                             {p.summary[lang]}
                           </p>
                           <Link
-                            to={`${getPortfolioProjectUrl(p, lang, content.categories)}${dirParam}`}
+                            to={getPortfolioProjectUrl(p, lang, content.categories)}
                             preventScrollReset
                             className={`${styles.projectCtaBtn} ${
                               isLeft ? styles.projectCtaBtnEven : styles.projectCtaBtnOdd
